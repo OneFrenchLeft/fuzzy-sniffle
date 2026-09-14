@@ -1,0 +1,8 @@
+flask
+flask_socketio
+gevent
+gevent-websocket
+discord.py
+requests
+python-dotenv
+scipy

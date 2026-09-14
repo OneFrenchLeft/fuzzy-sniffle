@@ -35,11 +35,6 @@ REMINDER_HOUR = int(os.environ.get('MADEC_REMINDER_HOUR', '21'))
 GUILD_ID = os.environ.get('MADEC_GUILD_ID')
 SITE_URL = os.environ.get('MADEC_SITE_URL', 'https://madec.moyart.net')
 DEFAULT_PARAMS = {'max_active_num': 36, 'daily_new_limit': 3, 'daily_review_limit': 3}
-JOKER_CAP = 2
-JOKER_EVERY = 8
-BOT_EXCLUDED_PRENOMS = frozenset({'admin'})
-
-
 
 INTERNAL_API_KEY = os.environ.get('MADEC_INTERNAL_API_KEY')
 QCM_INVITE_API_URL = os.environ.get(
@@ -400,7 +395,6 @@ async def notification(interaction: discord.Interaction, etat: str):
 
 @madec.command(name='streak', description='Ta streak')
 @channel_required()
-@app_commands.describe()
 async def streak(interaction: discord.Interaction):
     prenom = prenom_for_discord(interaction.user.id)
     if not prenom:
@@ -1096,9 +1090,17 @@ async def rotate_status():
 
 @tasks.loop(time=dtime(hour=23, minute=55, tzinfo=TZ_PARIS))
 async def nightly_streak_guard():
-    resp = requests.post(f"{SITE_URL}/api/internal/streak-guard",
-                         headers={"X-Madec-Internal-Key": INTERNAL_API_KEY},
-                         json={}, timeout=30).json()
+    # Si le site est down a 23h55, on log et on abandonne : sans cette garde la
+    # tache crashe et aucune notification de joker ne part.
+    try:
+        resp = await asyncio.to_thread(
+            requests.post, f"{SITE_URL}/api/internal/streak-guard",
+            headers={"X-Madec-Internal-Key": INTERNAL_API_KEY},
+            json={}, timeout=30)
+        resp = resp.json()
+    except Exception as e:
+        print('streak-guard:', e)
+        return
     bots = bot_db()
     links = {p: d for p, d in bots.execute("SELECT prenom, discord_id FROM links WHERE prenom != 'admin'").fetchall()}
     bots.close()
@@ -1121,7 +1123,7 @@ async def nightly_streak_guard():
 
 @tasks.loop(time=dtime(hour=22, minute=47, tzinfo=TZ_PARIS))
 async def weekly_recap():
-    """Recap du dimanche 20h : tirages, revisions, streak max, cartes les plus vues."""
+    """Recap du dimanche soir : tirages, revisions, streak max, cartes les plus vues."""
     if datetime.now(TZ_PARIS).weekday() != 6:
         return
     ch_id = get_setting('channel_id')

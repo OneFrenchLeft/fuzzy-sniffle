@@ -53,8 +53,8 @@ PROF_REVIEW_SLOPE = 0.05
 PROF_DIFFICULTY_PULL = 0.10
 
 
-# Bornes de l'optimiseur. w[8] doit rester >= 1.6474 (defaut) : une borne a 0.8
-# exclurait le point de depart et ferait echouer silencieusement l'entrainement.
+# Bornes de l'optimiseur : chaque borne doit contenir le poids par defaut,
+# sinon L-BFGS-B demarre hors domaine et l'entrainement echoue silencieusement.
 WEIGHT_BOUNDS = [
     (0.01, 15), (0.01, 15), (0.01, 30), (0.1, 40), (1, 10),
     (0.01, 5), (0.01, 5), (0, 0.8), (0.01, 2.5), (0.01, 0.5),
