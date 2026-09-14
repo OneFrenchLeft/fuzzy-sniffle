@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-send_message.py — envoie un message Discord via le bot madec, depuis le terminal.
+message.py — envoie un message Discord via le bot madec, depuis le terminal.
 
 Exemples :
-    venv/bin/python send_message.py "RDV à 14h dans le salon QCM"
+    venv/bin/python message.py "RDV à 14h dans le salon QCM"
         -> poste dans le salon configuré par /madec setchannel
 
-    venv/bin/python send_message.py --channel 123456789 "Message"
+    venv/bin/python message.py --channel 123456789 "Message"
         -> poste dans un salon précis (clic droit > Copier l'identifiant)
 
-    venv/bin/python send_message.py --prenom Lea "Ton lien QCM arrive"
+    venv/bin/python message.py --prenom Lea "Ton lien QCM arrive"
         -> DM au compte Discord lié à ce prénom (table links de bot.db)
 
-    echo "Message multiligne" | venv/bin/python send_message.py -
+    echo "Message multiligne" | venv/bin/python message.py -
         -> lit le texte depuis stdin (pratique pour les pipes)
 
 N'interfère pas avec madecbot : la connexion est ouverte, le message envoyé,
