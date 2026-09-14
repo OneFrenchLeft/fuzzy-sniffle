@@ -154,6 +154,7 @@ function closeMobileNav() {
 }
 
 function loadCompteDashboard() {
+  loadSrQcmErrors();
   if (PAGE !== 'compte' || !currentSrUser) return;
   fetchJson('/api/sr/dashboard').then(function (d) {
     if (!d || !d.ok) return;
@@ -2128,4 +2129,32 @@ function retentionChartSvg(points) {
   svg += '<text x="' + padL + '" y="' + (H - 5) + '" font-size="9" fill="var(--muted)">' + points[0].d + '</text>' +
     '<text x="' + (W - padR) + '" y="' + (H - 5) + '" font-size="9" fill="var(--muted)" text-anchor="end">' + points[n - 1].d + '</text>';
   return svg + '</svg>';
+}
+
+
+/* --- SR : dernieres erreurs QCM avec explication --- */
+function loadSrQcmErrors() {
+  var box = document.getElementById('compte-qcm-errors');
+  if (!box) return;
+  fetchJson('/api/sr/qcm/errors', { cache: 'no-store' }).then(function (d) {
+    if (!d || d.ok === false || !d.rows || !d.rows.length) {
+      box.innerHTML = '<p class="hint">Aucune erreur QCM enregistree pour l\'instant.</p>';
+      return;
+    }
+    var html = '';
+    d.rows.forEach(function (r) {
+      var when = fmtDateTimeFR(r.created_at);
+      var theme = r.theme ? esc(r.theme) + (r.chapitre ? ' · ' + esc(r.chapitre) : '') : '';
+      html += '<div class="note-item">' +
+        '<div class="note-meta">' + esc(when) + (theme ? ' · ' + theme : '') + '</div>' +
+        '<div style="font-weight:600">' + esc(r.question || '') + '</div>' +
+        (r.bonne_reponse ? '<div class="meta" style="margin-top:.3rem">Bonne reponse : <strong>' + esc(r.bonne_reponse) + '</strong></div>' : '') +
+        (r.explication ? '<div class="meta" style="margin-top:.3rem;white-space:pre-wrap">' + esc(r.explication) + '</div>' : '') +
+        '</div>';
+    });
+    box.innerHTML = html;
+    if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([box]).catch(function () {});
+  }).catch(function () {
+    box.innerHTML = '<p class="hint">Impossible de charger les erreurs QCM.</p>';
+  });
 }

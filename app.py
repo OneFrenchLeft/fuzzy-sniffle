@@ -1412,6 +1412,48 @@ def sr_dashboard():
     return jsonify({'ok': True, 'prenom': prenom, 'streak': streak, 'record': record,
                     'jokers': jokers, 'semaine': semaine, 'total': total})
 
+@app.route('/api/sr/qcm/errors', methods=['GET'])
+@require_sr_user
+def sr_qcm_errors():
+    # Les 10 dernieres erreurs QCM de l'eleve connecte, avec explication
+    # et bonne reponse si elles existent dans le fichier QCM.
+    ensure_db()
+    prenom = session['sr_user']
+    conn = db()
+    rows = conn.execute(
+        'SELECT qid, theme, chapitre, question, ok, elapsed, created_at '
+        'FROM qcm_answers WHERE prenom = ? ORDER BY id DESC LIMIT 10',
+        (prenom,)
+    ).fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        item = {
+            'qid': r['qid'], 'theme': r['theme'], 'chapitre': r['chapitre'],
+            'question': r['question'], 'ok': bool(r['ok']),
+            'elapsed': r['elapsed'], 'created_at': r['created_at'],
+        }
+        path = QCM_FILES.get(r['theme'])
+        if path and path.exists():
+            for q in qcm_engine.read_qcm_questions(path, theme=r['theme']):
+                if q.get('qid') == r['qid']:
+                    if q.get('explication'):
+                        item['explication'] = q['explication']
+                    try:
+                        idx = q.get('answer')
+                        choix = q.get('choices') or []
+                        if idx is not None and 0 <= idx < len(choix):
+                            bonne = choix[idx]
+                            if isinstance(bonne, dict):
+                                item['bonne_reponse'] = bonne.get('texte') or bonne.get('text') or ''
+                            else:
+                                item['bonne_reponse'] = str(bonne)
+                    except Exception:
+                        pass
+                    break
+        out.append(item)
+    return jsonify({'ok': True, 'rows': out})
+
 @app.route('/api/sr/qcm/weak', methods=['GET'])
 @require_sr_user
 def sr_qcm_weak():
@@ -2221,13 +2263,6 @@ def sr_today():
         'nb_review': nb_review_tomorrow,
     }
     auto_validated_streak = len(due) == 0 and len(all_cards) > 0
-    if auto_validated_streak:
-        conn = db()
-        conn.execute(
-            'INSERT OR IGNORE INTO sr_daily_streak (prenom, day, validated) VALUES (?,?,1)',
-            (prenom, today))
-        conn.commit()
-        conn.close()
     conn = db()
     jrow = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
     conn.close()
