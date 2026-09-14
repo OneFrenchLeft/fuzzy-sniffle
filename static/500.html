@@ -1,6 +1,4 @@
 <!DOCTYPE html>
-<!-- Page 500 — autonome (aucun asset externe) : fonctionne aussi servie
-     en fichier statique par nginx quand l'app est complètement à l'arrêt. -->
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -13,7 +11,6 @@
 html[data-theme=dark]{--bg:#14181a;--surface:#1d2225;--border:rgba(255,255,255,.10);--text:#eceff1;--muted:#9aa5aa;--faint:#5c6569;--primary:#2dd4bf;--primary-hover:#5eead4;--shadow:0 4px 20px rgba(0,0,0,.4)}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:2rem 1rem;transition:background .2s,color .2s}
-/* Illustration de fond (comme les autres pages) */
 body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:url('/static/img/illustration.jpg') center/cover no-repeat;
   opacity:.2;filter:brightness(1.05);}
@@ -60,6 +57,8 @@ html[data-theme=dark] .btn{color:#06201f}
   <div class="footer">Forgecards · erreur 500 · le serveur sera de retour d'ici peu</div>
 </div>
 <script>
+
+     
 (function(){
 'use strict';
 var RETRY_EVERY_S = 5;
@@ -70,7 +69,6 @@ var countdown = RETRY_EVERY_S;
 var status = document.getElementById('status');
 var help = document.getElementById('help');
 var btn = document.getElementById('retry');
-
 function tick(){
   if (help.classList.contains('show')) return;
   countdown -= 1;
@@ -78,7 +76,6 @@ function tick(){
   status.innerHTML = 'Renflouement automatique dans ' + countdown + ' s…';
 }
 setInterval(tick, 1000);
-
 function tryAgain(){
   attempts += 1;
   countdown = RETRY_EVERY_S;
@@ -90,17 +87,15 @@ function tryAgain(){
     })
     .catch(pump);
 }
-
 function pump(){
   var elapsed = (Date.now() - started) / 1000;
   if (elapsed >= GIVE_UP_AFTER_S) {
     status.textContent = '';
     help.classList.add('show');
-    return; // on arrête la pompe automatique : humain à la barre
+    return;
   }
   status.textContent = 'Renflouement automatique dans ' + countdown + ' s…';
 }
-
 btn.onclick = tryAgain;
 })();
 </script>
