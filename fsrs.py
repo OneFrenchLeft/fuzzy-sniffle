@@ -73,8 +73,6 @@ def clamp(value, lo, hi):
 def retrievability(t_days, stability):
     if stability is None:
         return 0.0
-    # Defensif : une stabilite corrompue (<= 0) est ramenee au plancher
-    # au lieu de produire R = 0 sur toutes les transitions suivantes.
     stability = max(stability, MIN_STABILITY)
     if t_days <= 0:
         return 1.0

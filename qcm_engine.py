@@ -58,7 +58,6 @@ _record_game = None
 
 
 def normalize_choice(choice):
-
     if isinstance(choice, dict):
         return {
             'text': str(choice.get('texte', choice.get('text', ''))).strip(),
@@ -68,7 +67,6 @@ def normalize_choice(choice):
 
 
 def read_qcm_questions(path, theme=None):
-
     try:
         mtime = path.stat().st_mtime
     except OSError:
@@ -114,8 +112,6 @@ def read_qcm_questions(path, theme=None):
 
 
 def available_chapters(themes):
-
-
     if not themes:
         themes = list(QCM_FILES)
     elif isinstance(themes, str):
@@ -133,8 +129,6 @@ def available_chapters(themes):
 
 
 def pick_questions(themes=None, n=QCM_QUESTIONS_PER_MATCH, chapitres=None):
-
-
     if not themes:
         themes = list(QCM_FILES)
     pool = []
@@ -155,13 +149,11 @@ def pick_questions(themes=None, n=QCM_QUESTIONS_PER_MATCH, chapitres=None):
 
 
 def kahoot_points(elapsed_s, timer_s):
-
     ratio = max(0.0, min(1.0, elapsed_s / timer_s))
     return round(QCM_MAX_POINTS - (QCM_MAX_POINTS - QCM_MIN_POINTS) * ratio)
 
 
 def media_refs(question):
-
     refs = []
     main = str(question.get('image') or '').strip()
     if main:
@@ -175,7 +167,6 @@ def media_refs(question):
 
 
 def questions_media(questions):
-
     refs, seen = [], set()
     for question in questions:
         for ref in media_refs(question):
@@ -220,8 +211,6 @@ def cancel_offline_timer(prenom):
 
 
 class Lobby:
-
-
     def __init__(self, leader, theme=QCM_DEFAULT_THEME):
         self.lid = f'lobby_{next(LOBBY_COUNTER)}'
         self.nom = f'Lobby de {leader}'
@@ -248,7 +237,6 @@ class Lobby:
         self.players.remove(prenom)
         self.ready.pop(prenom, None)
         if self.leader == prenom and self.players:
-
             self.leader = self.players[0]
             self.ready[self.leader] = False
             self.nom = f'Lobby de {self.leader}'
@@ -265,7 +253,6 @@ class Lobby:
 
 
 def remove_player_from_lobby(prenom):
-
     lid = LOBBY_BY_PLAYER.pop(prenom, None)
     if not lid:
         return
@@ -273,7 +260,6 @@ def remove_player_from_lobby(prenom):
     if lobby is None:
         return
     if lobby.etat == 'partie' and lobby.game is not None:
-
         game = lobby.game
         game.remove_player(prenom)
         GAME_BY_PLAYER.pop(prenom, None)
@@ -287,8 +273,6 @@ def remove_player_from_lobby(prenom):
 
 
 class Game:
-
-
     def __init__(self, gid, lobby, questions):
         self.gid = gid
         self.lobby = lobby
@@ -326,7 +310,6 @@ class Game:
         }
 
     def run(self):
-
         try:
             io.sleep(1)
             self.send_all('qcm_debut', {
@@ -343,7 +326,6 @@ class Game:
                 self.answer_event = Event()
                 self.opened = False
 
-
                 self.open_end = time.time() + QCM_READ_TIME_S + question['time']
 
                 self.send_all('qcm_question', {**self.current_payload(), 'phase': 'lecture'})
@@ -359,13 +341,11 @@ class Game:
                 self.send_all('qcm_question', {**self.current_payload(), 'phase': 'ouverture'})
                 print(f'[qcm-web] {self.gid} q{self.qindex + 1} ouverture ({question["time"]} s)')
 
-
                 remaining = self.open_end - time.time()
                 if remaining > 0:
                     self.answer_event.wait(timeout=remaining)
                 if not self.alive or not self.joueurs:
                     break
-
 
                 cloturee_tot = (len(self.answers) >= len(self.joueurs)
                                 and time.time() < self.open_end - 0.5)
@@ -442,7 +422,6 @@ class Game:
 
 
 def try_start_lobby(lobby):
-
     if lobby.etat != 'attente' or not lobby.everyone_ready():
         return
     if not PRESENT.get(lobby.leader, {}).get('connected'):
@@ -474,7 +453,6 @@ def try_start_lobby(lobby):
 
 
 def register(socketio, data_dir, on_answer=None, on_game_end=None):
-
     global io, QCM_FILES, _record_answer, _record_game
     io = socketio
     QCM_FILES = {name: Path(data_dir) / f'qcm_{name}.json' for name in QCM_THEMES}
@@ -483,7 +461,6 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None):
 
     @io.on('qcm_ping')
     def on_ping(data):
-
         return {'now': time.time()}
 
     @io.on('qcm_join_page')
@@ -633,7 +610,6 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None):
 
     @io.on('qcm_lobby_theme')
     def on_lobby_theme(data):
-
         prenom = session.get('sr_user')
         data = data or {}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
@@ -661,7 +637,6 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None):
 
     @io.on('qcm_lobby_chapitre')
     def on_lobby_chapitre(data):
-
         prenom = session.get('sr_user')
         data = data or {}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
@@ -698,7 +673,6 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None):
 
     @io.on('qcm_lobby_length')
     def on_lobby_length(data):
-
         prenom = session.get('sr_user')
         data = data or {}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
@@ -775,7 +749,6 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None):
 
     @io.on('qcm_quit')
     def on_quit(data):
-
         prenom = session.get('sr_user')
         if not prenom:
             return
