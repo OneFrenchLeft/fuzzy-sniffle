@@ -1019,12 +1019,8 @@ function cardTitleHtml(c) {
     '<span class="chip-chapitre">' + esc(c.chapitre || 'Autre') + '</span>' +
     (c.hors_serie ? '<span class="chip-chapitre" style="background:rgba(230,126,34,.12);color:#e67e22">Hors-série</span>' : '') + '</div>';
 }
-
 var allAdminCards = [];
 var currentFicheNumero = null;
-
-/* Selecteur de fiches : defaut = derniere importee (numero le plus grand).
-   ←/→ et les boutons naviguent dans la liste triee par numero. */
 function loadAdminList() {
   fetchJson('/api/forgecards').then(function (cards) {
     allAdminCards = cards.slice().sort(function (a, b) { return ((a.hors_serie ? 1 : 0) - (b.hors_serie ? 1 : 0)) || (a.numero - b.numero); });
@@ -1276,7 +1272,6 @@ function fmtDuree(sec) {
   return m ? (m + ' min ' + String(s2).padStart(2, '0')) : (s2 + ' s');
 }
 
-/* Bandeau : eleves sans revision depuis 2 jours ou plus (calcul 100 % client) */
 function renderInactiveAlert(stats) {
   var box = document.getElementById('inactive-alert');
   if (!box) return;
@@ -1288,7 +1283,9 @@ function renderInactiveAlert(stats) {
   box.innerHTML = '<div class="inactive-banner">🔴 Inactifs depuis 2 jours ou plus : ' + parts.join(', ') + '</div>';
 }
 
-/* Une ligne compacte par eleve, depliable : stats detaillees + actions + deck inline */
+
+
+
 function loadStats() {
   fetchJson('/api/users/stats').then(function (stats) {
     var list = document.getElementById('stats-list');
@@ -1415,8 +1412,6 @@ function renderFailureNotes() {
 function renderFicheNotes() {
   var box = document.getElementById('fiche-notes');
   if (!box) return;
-  /* Toutes les notes de la fiche sont visibles ici, masquees ou non —
-     c'est la vue de revue. Action unique : suppression definitive. */
   var notes = allFailureNotes.filter(function (r) { return r.numero === currentFicheNumero; });
   box.innerHTML = '';
   if (!notes.length) box.innerHTML = '<p class="hint">Aucune note sur cette fiche.</p>';
@@ -1854,10 +1849,6 @@ function openAgainModal(numero) {
   againNoteWire();
   setTimeout(function () { document.getElementById('again-note-input').focus(); }, 50);
 }
-
-/* Note obligatoire si echec : 10 caracteres min, bouton desactive sinon.
-   Le backend refuse aussi (sr_review) : pas de contournement par devtools.
-   Tout est cable ici en JS pur : pas besoin de toucher au template. */
 function againNoteWire() {
   var overlay = document.getElementById('again-overlay');
   var input = document.getElementById('again-note-input');
@@ -2078,7 +2069,6 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 })();
 
-/* --- Mode hors-serie : interrupteur iOS au-dessus de la carte de tirage --- */
 function toggleHorsSerie() {
   horsSerieMode = !horsSerieMode;
   var sw = document.querySelector('.hs-switch');
@@ -2097,7 +2087,6 @@ function toggleHsNumero(on) {
   if (on) n.value = '';
 }
 
-/* Le toggle n'apparait que s'il existe au moins une fiche hors-serie tirable. */
 function initHorsSerieToggle() {
   var t = document.getElementById('hs-toggle');
   if (!t) return;
@@ -2107,7 +2096,6 @@ function initHorsSerieToggle() {
 }
 document.addEventListener('DOMContentLoaded', initHorsSerieToggle);
 
-/* --- Graphe SVG de la retention quotidienne (stats admin) --- */
 function retentionChartSvg(points) {
   var W = 600, H = 140, padL = 34, padB = 20, padT = 8, padR = 8;
   var n = points.length;
