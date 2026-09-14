@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Espace compte{% endblock %}
+{% block content %}
+  <section class="view active" id="view-compte">
+    <div class="panel">
+      <div class="section-title">Espace compte</div>
+      <div id="compte-logged-out">
+        <p class="home-subtitle" style="text-align:left;margin-bottom:1rem">Connecte-toi une seule fois pour débloquer la répétition espacée et les QCM en direct.</p>
+        <button class="btn-primary" onclick="openLoginGate()">Se connecter</button>
+      </div>
+      <div id="compte-logged-in" style="display:none">
+        <p class="home-subtitle" style="text-align:left;margin-bottom:1rem">Connecté en tant que <strong id="compte-prenom"></strong>.</p>
+        <div class="fields-grid" id="compte-dash" style="margin-bottom:1rem">
+          <div class="field" style="text-align:center"><div id="dash-streak" style="font-size:1.6rem;font-weight:700">-</div><label style="text-transform:none">Série en cours</label></div>
+          <div class="field" style="text-align:center"><div id="dash-record" style="font-size:1.6rem;font-weight:700">-</div><label style="text-transform:none">Record</label></div>
+          <div class="field" style="text-align:center"><div id="dash-jokers" style="font-size:1.6rem;font-weight:700">-</div><label style="text-transform:none">Jokers en stock</label></div>
+          <div class="field" style="text-align:center"><div id="dash-semaine" style="font-size:1.6rem;font-weight:700">-</div><label style="text-transform:none">Cartes cette semaine</label></div>
+          <div class="field" style="text-align:center"><div id="dash-total" style="font-size:1.6rem;font-weight:700">-</div><label style="text-transform:none">Cartes au total</label></div>
+        </div>
+        <div style="margin-top:.75rem;display:flex;gap:.5rem;flex-wrap:wrap">
+          <button class="btn-danger btn-small" onclick="logoutSr()">Se déconnecter</button>
+        </div>
+      </div>
+    </div>
+  </section>
+{% endblock %}
+{% block modals %}
+<div class="modal-overlay" id="name-gate-overlay">
+  <div class="modal-box name-gate">
+    <div id="name-step">
+      <h2>Qui es tu ?</h2>
+      <p class="home-subtitle" style="margin-bottom:0">Login</p>
+      <div id="gate-last-user" class="name-chip-list" style="margin-top:.75rem"></div>
+      <div class="search-wrap" style="margin-top:.5rem">
+        <span class="search-icon" aria-hidden="true">🔍</span>
+        <input type="search" id="gate-search" class="search-box" autocomplete="off" placeholder="Ton prénom ou nom…" aria-label="Rechercher ton prénom" autofocus>
+      </div>
+      <div class="name-chip-list" id="name-chip-list" aria-live="polite"></div>
+    </div>
+
+    <div id="pw-step" style="display:none">
+      <h2 id="pw-step-title">Mot de passe</h2>
+      <p class="home-subtitle" style="margin-bottom:0">Quel est ton mot de passe...</p>
+      <div class="psswrd-dots" id="psswrd-pw-dots" aria-live="polite">
+        <span class="psswrd-dot" data-i="0"></span>
+        <span class="psswrd-dot" data-i="1"></span>
+        <span class="psswrd-dot" data-i="2"></span>
+        <span class="psswrd-dot" data-i="3"></span>
+      </div>
+      <div class="psswrd-keypad" id="psswrd-keypad"></div>
+      <span class="pw-error" id="gate-pw-error">Expelliarmus</span>
+      <button class="btn-ghost btn-small" onclick="resetEmojiPw()">Effacer</button>
+      <span id="gate-spinner" class="spinner" style="display:none"></span>
+    </div>
+
+    <button class="btn-ghost gate-cancel" style="margin-top:1rem" onclick="cancelGate()">Annuler</button>
+  </div>
+</div>
+{% endblock %}

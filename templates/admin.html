@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+{% block title %}Admin{% endblock %}
+{% block content %}
+  <section class="view active" id="view-admin">
+    <div class="panel">
+      <div id="pw-gate">
+        <h2>Contrôle de la polarité de l'onde incidente</h2>
+        <div class="field">
+          <label for="pw-input">Super méga Password</label>
+          <input type="password" id="pw-input" placeholder="motdepasse (essayez pas de bruteforce)" onkeydown="if(event.key==='Enter') checkPw()">
+          <span class="pw-error" id="pw-error">Aie, c'est un conducteur parfait... l'onde est réfléchie</span>
+        </div>
+        <button class="btn-save" onclick="checkPw()">Entrer <span id="login-spinner" class="spinner" style="display:none"></span></button>
+      </div>
+      <div id="admin-form" style="display:none">
+        <h2>Parametres de l'opération MADec</h2>
+        <div class="fields-grid">
+          <div class="field"><label for="f-max-active">Numero max tirable</label><input type="number" id="f-max-active" min="1"></div>
+          <div class="field"><label for="f-max-hs">Hors-série max tirable</label><input type="number" id="f-max-hs" min="0"></div>
+          <div class="field"><label for="f-fsrs-retention">Retention cible FSRS (%)</label><input type="number" id="f-fsrs-retention" step="1" min="70" max="97"></div>
+          <div class="field"><label for="f-daily-new">Nouvelles fiches / jour</label><input type="number" id="f-daily-new" step="1" min="0" max="50"></div>
+          <div class="field"><label for="f-daily-review">Revisions dues / jour</label><input type="number" id="f-daily-review" step="1" min="0" max="50"></div>
+        </div>
+        <button class="btn-save" onclick="saveParams()">Enregistrer</button>
+        <div class="saved-msg" id="saved-msg">Parametres enregistrés</div>
+
+        <div class="import-box" style="margin-top:1.5rem">
+          <h3>Importer une fiche</h3>
+          <div class="fields-grid">
+            <div class="field"><label for="up-numero">Numero</label><input type="number" id="up-numero" min="1"></div>
+            <div class="field"><label for="up-chapitre">Chapitre</label><select id="up-chapitre"></select></div>
+            <div class="field"><label for="up-difficulty">Difficulté professeur</label><input type="number" id="up-difficulty" min="1" max="5" step="1" placeholder="Ex : 4"></div>
+            <div class="field"><label style="display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text);margin-top:1.4rem"><input type="checkbox" id="up-hors-serie" style="width:auto" onchange="toggleHsNumero(this.checked)"> Hors-série (libre-service, hors répétition espacée et tirage)</label></div>
+          </div>
+          <div class="field"><label for="up-titre">Titre (optionnel)</label><input type="text" id="up-titre" placeholder="Ex: Etude de la chute d'un vélo"></div>
+          <div class="field"><label for="up-indices">Indices (si sympa)</label><textarea id="up-indices" placeholder="Ex: Pense au theoreme de l energie cinetique..."></textarea></div>
+          <div class="field"><label for="up-fiche">Fiche PDF (énonce pas optionnel)</label><input type="file" id="up-fiche" accept=".pdf"></div>
+          <div class="field"><label for="up-correction">Correction PDF (corrigé)</label><input type="file" id="up-correction" accept=".pdf"></div>
+          <div class="field"><label for="up-bareme">Bareme PDF (optionnel)</label><input type="file" id="up-bareme" accept=".pdf"></div>
+          <button class="btn-save" onclick="uploadFiche()">Importer <span id="upload-spinner" class="spinner" style="display:none"></span></button>
+          <div id="upload-status" style="margin-top:.5rem;font-size:.85rem"></div>
+        </div>
+
+        <div class="import-box">
+          <h3>Fiches importées</h3>
+          <div class="fiche-picker">
+            <button class="picker-nav" id="fiche-prev" title="Fiche précédente" aria-label="Fiche précédente">←</button>
+            <select id="fiche-picker" aria-label="Choisir une fiche"></select>
+            <button class="picker-nav" id="fiche-next" title="Fiche suivante" aria-label="Fiche suivante">→</button>
+          </div>
+          <div id="admin-list"></div>
+        </div>
+
+        <details class="import-box fold" id="eleves-box">
+          <summary><h3>Élèves et suivi</h3></summary>
+          <div class="fields-grid">
+            <div class="field" style="grid-column:1/-1"><label for="new-prenom">Ajouter un élève</label><input type="text" id="new-prenom" placeholder="Ex: Lea"></div>
+          </div>
+          <button class="btn-save" onclick="addPrenom()">Ajouter</button>
+          <div id="inactive-alert" style="margin-top:1rem"></div>
+          <div class="admin-list" id="stats-list"></div>
+        </details>
+
+        
+        <div class="import-box">
+          <h3>Notes de blocage des eleves</h3>
+          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">Commentaires laisses par les eleves quand ils cliquent "Pas reussi", les plus recents en premier.</p>
+          <div id="failure-notes-list"></div>
+          <button type="button" class="toggle-btn" id="notes-masked-toggle" style="display:none;margin-top:.5rem"></button>
+          <div id="failure-notes-masked"></div>
+        </div>
+
+        <div class="import-box" id="qcm-editor-box">
+          <div class="modal-topbar">
+            <div>
+              <h3>Éditeur QCM web</h3>
+              <p class="home-subtitle" style="text-align:left;margin:.35rem 0 0;font-size:.8rem">
+                Le LaTeX s'écrit directement dans les textes entre <code>$...$</code> ;
+                en JSON, chaque antislash est doublé (<code>\\frac{1}{2}</code>).
+                Les images utilisent le champ <code>image</code> (URL https publique). Le champ optionnel <code>explication</code> s'affiche à tous à la révélation de la réponse et dans le récap des erreurs. Si question, contacter Eliot, ou sinon regarder la cheatfiche.<br>
+                Point d'attention sur la suppression d'un thème, enregistrer une thème vide avec [] pour le supprimer.
+              </p>
+            </div>
+          </div>
+
+          <div class="fields-grid">
+            <div class="field">
+              <label for="qcm-subject-select">Matière</label>
+              <select id="qcm-subject-select">
+                <option value="physique">Physique</option>
+                <option value="chimie">Chimie</option>
+                <option value="maths">Maths</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="qcm-theme-select">Thème</label>
+              <select id="qcm-theme-select"><option value="">Tous les thèmes</option></select>
+            </div>
+          </div>
+          <div class="admin-row-actions" id="qcm-new-theme-row" style="display:none;margin-bottom:1rem">
+            <input type="text" id="qcm-new-theme-input" placeholder="Nom du nouveau thème (ex : SN1 et SN2)" style="flex:1;min-width:200px">
+            <button type="button" class="btn-save btn-small" onclick="createQcmTheme()">Créer le thème</button>
+          </div>
+
+          <div class="admin-row-actions" style="margin-bottom:1rem">
+            <button type="button" class="btn-ghost btn-small" onclick="loadQcmEditor()">⟳ Recharger</button>
+            <button type="button" class="btn-ghost btn-small" onclick="formatQcmEditor()">✨ Formater le JSON</button>
+            <button type="button" class="btn-save btn-small" onclick="saveQcmEditor()">💾 Enregistrer <span id="qcm-save-spinner" class="spinner" style="display:none"></span></button>
+          </div>
+
+          <div class="field">
+            <label for="qcm-json-editor">Questions JSON</label>
+            <textarea id="qcm-json-editor" spellcheck="false"
+                      style="min-height:520px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem"
+                      placeholder='[
+  {
+    "question": "Calculer $\\int_0^1 x^2\\,\\mathrm{d}x$.",
+    "image": "https://exemple.org/schema.jpg",
+    "choix": [
+      "$\\frac{1}{3}$",
+      {"text": "$\\frac{1}{2}$"},
+      {"image": "https://exemple.org/reponse.png"},
+      "Aucune des réponses"
+    ],
+    "reponse": 1,
+    "temps": 30
+  }
+]'></textarea>
+            <span class="hint">
+              Les images doivent être sur une URL publique (ex : <a href="https://imgur.com/" target="_blank" rel="noopener">imgur</a>).
+            </span>
+          </div>
+
+          <div id="qcm-editor-status" class="saved-msg" role="status" aria-live="polite"></div>
+        </div>
+
+    <div class="import-box" id="qcm-preview-box">
+      <div class="modal-topbar">
+        <div>
+          <h3>Tester une question QCM</h3>
+          <p class="home-subtitle" style="text-align:left;margin:.35rem 0 0;font-size:.8rem">
+            Colle un JSON de test, puis vérifie exactement son rendu avant de l’ajouter aux questions réelles. Ce test ne modifie rien.
+          </p>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="qcm-preview-json">JSON à tester</label>
+        <textarea id="qcm-preview-json" spellcheck="false"
+                  style="min-height:280px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem"
+                  placeholder='[
+  {
+    "question": "Calculer : $$\\int_0^1 x^2\\,\\mathrm{d}x$$",
+    "choix": [
+      "$\\frac{1}{3}$",
+      "$\\frac{1}{2}$",
+      "$1$",
+      "$2$"
+    ],
+    "reponse": 1
+  }
+]'></textarea>
+        <span class="hint">
+          Cet espace ne sauvegarde rien. Utilise uniquement <code>image</code> pour une image.
+          Les commandes LaTeX ont deux antislashs dans le JSON : <code>\\frac</code>, <code>\\sqrt</code>, <code>\\int</code>.
+        </span>
+      </div>
+
+      <div class="admin-row-actions" style="margin-bottom:1rem">
+        <button type="button" class="btn-save btn-small" onclick="previewQcmJson()">Tester le rendu</button>
+        <button type="button" class="btn-ghost btn-small" onclick="loadQcmPreviewExample()">Charger un exemple</button>
+        <button type="button" class="btn-ghost btn-small" onclick="clearQcmPreview()">Effacer</button>
+      </div>
+
+      <div id="qcm-preview-status" class="saved-msg" role="status" aria-live="polite"></div>
+
+      <div id="qcm-preview-render" class="qcm-preview-render" style="display:none">
+        <div class="qcm-preview-top">
+          <span id="qcm-preview-number" class="sr-meta"></span>
+          <div class="admin-row-actions">
+            <button id="qcm-preview-prev" class="btn-ghost btn-small" type="button" onclick="previousQcmPreview()">← Précédente</button>
+            <button id="qcm-preview-next" class="btn-ghost btn-small" type="button" onclick="nextQcmPreview()">Suivante →</button>
+          </div>
+        </div>
+
+        <div class="qcm-preview-card">
+          <div id="qcm-preview-question" class="qcm-preview-question"></div>
+          <div id="qcm-preview-image" class="qcm-preview-image"></div>
+          <div id="qcm-preview-choices" class="qcm-preview-choices"></div>
+          <p class="hint" style="margin-top:.8rem">
+            Bordure verte : bonne réponse configurée.
+            Ce rendu est une prévisualisation : il n’y a pas de chrono ni de score.
+          </p>
+        </div>
+      </div>
+    </div>
+
+        <details class="import-box fold" id="qcm-weak-box">
+          <summary><h3>Questions QCM les plus ratées</h3></summary>
+          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">
+            Statistiques cumulées de toutes les QCM (tous élèves confondus).
+            Le taux d'échec compte les réponses fausses ET les absences de réponse (temps écoulé).
+            Triées par taux d'échec décroissant ; les questions retirées du fichier restent, avec la mention « retirée ».
+          </p>
+          <div class="fields-grid">
+            <div class="field">
+              <label for="qcm-weak-subject">Matière</label>
+              <select id="qcm-weak-subject">
+                <option value="">Toutes</option>
+                <option value="physique">Physique</option>
+                <option value="chimie">Chimie</option>
+                <option value="maths">Maths</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="qcm-weak-chapter">Chapitre</label>
+              <select id="qcm-weak-chapter"><option value="">Tous les chapitres</option></select>
+            </div>
+          </div>
+          <button type="button" class="btn-ghost btn-small" onclick="loadWeakQcm()">⟳ Recharger</button>
+          <div id="qcm-weak-table" style="margin-top:.75rem"></div>
+        </details>
+
+        <details class="import-box fold" id="qcm-games-box">
+          <summary><h3>Dernières parties QCM</h3></summary>
+          <div id="qcm-games-table" style="margin-top:.5rem"></div>
+        </details>
+
+        <details class="import-box fold" id="stats-overview-box">
+          <summary><h3>Statistiques de la classe</h3></summary>
+          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">
+            Calculées à la demande à partir du journal brut (rien n'est pré-agrégé, tout est recalculé).
+          </p>
+          <button type="button" class="btn-ghost btn-small" onclick="loadStatsOverview()">⟳ Calculer / Rafraîchir</button>
+          <div id="stats-overview" style="margin-top:.75rem"></div>
+        </details>
+
+        <div class="import-box">
+          <h3>Export</h3>
+          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">Exports pour regarder en fin d'année.</p>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem">
+            <button class="btn-ghost btn-small" onclick="exportCsv('activite-quotidienne')">Activité quotidienne (élève × jour)</button>
+            <button class="btn-ghost btn-small" onclick="exportCsv('qcm-par-mois')">QCM par mois</button>
+            <button class="btn-ghost btn-small" onclick="exportCsv('synthese-eleves')">Synthèse par élève</button>
+            <button class="btn-ghost btn-small" onclick="exportCsv('etude-revisions')">Étude révisions (R avant, stabilité, espacement)</button>
+          </div>
+          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">Export des statistiques FSRS (toutes les infos d'états du FSRS, tous les eleves confondus).</p>
+          <button class="btn-ghost" onclick="exportCSV()">Exporter data FSRS (CSV)</button>
+          <p class="home-subtitle" style="text-align:left;margin:.75rem 0;font-size:.8rem">Export par fiche : une ligne par fiche avec les stats moyennes de tous les eleves pour chaque fiche.</p>
+          <button class="btn-ghost" onclick="exportStatsByCard()">Exporter stats des fiche (CSV)</button>
+        </div>
+
+      </div>
+    </div>
+  </section>
+{% endblock %}
+{% block modals %}
+<div class="modal-overlay critical" id="confirm-overlay">
+  <div class="modal-box">
+    <div class="modal-topbar">
+      <h3>Confirmation</h3>
+      <button class="btn-ghost btn-small" onclick="closeConfirm()">Fermer</button>
+    </div>
+    <h3 id="confirm-text">Confirmer la suppression ?</h3>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeConfirm()">Annuler</button>
+      <button class="btn-danger" id="confirm-ok-btn">Supprimer</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="edit-overlay">
+  <div class="modal-box narrow">
+    <div class="modal-topbar">
+      <h3>Modifier la fiche <span id="edit-numero"></span></h3>
+      <button class="btn-ghost btn-small" onclick="closeEditModal()">Fermer</button>
+    </div>
+    <div class="field" style="margin-top:1rem">
+      <label for="edit-titre">Titre</label>
+      <input type="text" id="edit-titre" placeholder="Ex: Etude de la chute d'un vélo">
+    </div>
+    <div class="field">
+      <label for="edit-chapitre">Chapitre</label>
+      <select id="edit-chapitre"></select>
+    </div>
+    <div class="field">
+      <label for="edit-difficulty">Difficulté professeur</label>
+      <input type="number" id="edit-difficulty" min="1" max="5" step="1" placeholder="Ex : 4">
+    </div>
+    <div class="field">
+      <label for="edit-indices">Indices</label>
+      <textarea id="edit-indices" placeholder="Ex: Pense au theoreme de l energie cinetique..."></textarea>
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text)">
+        <input type="checkbox" id="edit-hors-serie" style="width:auto"> Hors-série (libre-service, hors répétition espacée et tirage)
+      </label>
+    </div>
+    <div class="field">
+      <label for="edit-fiche">Remplacer la fiche PDF (enonce)</label>
+      <input type="file" id="edit-fiche" accept=".pdf">
+      <span class="hint">Laisse vide pour garder le PDF actuel.</span>
+    </div>
+    <div class="field">
+      <label for="edit-correction">Remplacer le corrige PDF</label>
+      <input type="file" id="edit-correction" accept=".pdf">
+      <span class="hint" id="edit-correction-hint">Laisse vide pour garder le PDF actuel.</span>
+      <label style="display:flex;align-items:center;gap:.5rem;margin-top:.4rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text)">
+        <input type="checkbox" id="edit-remove-correction" style="width:auto"> Retirer la correction (sans la remplacer)
+      </label>
+    </div>
+    <div class="field">
+      <label for="edit-bareme">Bareme PDF</label>
+      <input type="file" id="edit-bareme" accept=".pdf">
+      <span class="hint" id="edit-bareme-hint">Laisse vide pour garder le bareme actuel.</span>
+      <label style="display:flex;align-items:center;gap:.5rem;margin-top:.4rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text)">
+        <input type="checkbox" id="edit-remove-bareme" style="width:auto"> Retirer le bareme (sans le remplacer)
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeEditModal()">Annuler</button>
+      <button class="btn-save" onclick="saveEditFiche()">Enregistrer <span id="edit-spinner" class="spinner" style="display:none"></span></button>
+    </div>
+  </div>
+</div>
+{% endblock %}

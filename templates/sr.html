@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Répétition espacée{% endblock %}
+{% block content %}
+  <section class="view active" id="view-sr">
+    <div class="panel">
+      <div class="sr-view-header">
+        <div class="section-title">Répétition espacée</div>
+        <div class="sr-view-actions">
+          <button class="info-btn" type="button" onclick="openSrInfoModal()" aria-label="Aide Forgecards">i</button>
+        </div>
+      </div>
+
+      <p class="home-subtitle" style="text-align:left;margin-bottom:1rem">C'est parti, en route vers les écoles d'ingé</p>
+
+      <div id="sr-daily-status" class="import-box" style="display:none">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:.75rem;align-items:center">
+          <div id="sr-streak-badge" style="font-weight:700"></div>
+          <div id="sr-quota-badge" style="font-size:.85rem;color:var(--muted)"></div>
+        </div>
+        <div class="forecast-badge" id="sr-forecast-badge"></div>
+      </div>
+
+      <div id="sr-export-wrap" style="margin-bottom:1rem;display:none">
+        <button class="btn-ghost btn-small" id="sr-export-btn">Exporter mon deck</button>
+      </div>
+
+      <div class="sr-progress" id="sr-progress" role="status" aria-live="polite" style="display:none"></div>
+      <div class="sr-list" id="sr-list" aria-live="polite"><p>Connexion…</p></div>
+    </div>
+  </section>
+{% endblock %}
+{% block modals %}
+<div class="modal-overlay" id="name-gate-overlay">
+  <div class="modal-box name-gate">
+    <div id="name-step">
+      <h2>Qui es tu ?</h2>
+      <p class="home-subtitle" style="margin-bottom:0">Login</p>
+      <div id="gate-last-user" class="name-chip-list" style="margin-top:.75rem"></div>
+      <div class="search-wrap" style="margin-top:.5rem">
+        <span class="search-icon" aria-hidden="true">🔍</span>
+        <input type="search" id="gate-search" class="search-box" autocomplete="off" placeholder="Ton prénom ou nom…" aria-label="Rechercher ton prénom" autofocus>
+      </div>
+      <div class="name-chip-list" id="name-chip-list" aria-live="polite"></div>
+    </div>
+
+    <div id="pw-step" style="display:none">
+      <h2 id="pw-step-title">Mot de passe</h2>
+      <p class="home-subtitle" style="margin-bottom:0">Quel est ton mot de passe...</p>
+      <div class="psswrd-dots" id="psswrd-pw-dots" aria-live="polite">
+        <span class="psswrd-dot" data-i="0"></span>
+        <span class="psswrd-dot" data-i="1"></span>
+        <span class="psswrd-dot" data-i="2"></span>
+        <span class="psswrd-dot" data-i="3"></span>
+      </div>
+      <div class="psswrd-keypad" id="psswrd-keypad"></div>
+      <span class="pw-error" id="gate-pw-error">Expelliarmus</span>
+      <button class="btn-ghost btn-small" onclick="resetEmojiPw()">Effacer</button>
+      <span id="gate-spinner" class="spinner" style="display:none"></span>
+    </div>
+
+    <button class="btn-ghost gate-cancel" style="margin-top:1rem" onclick="cancelGate()">Annuler</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="again-overlay">
+  <div class="modal-box narrow">
+    <div class="modal-topbar">
+      <h3>Qu’est-ce qui t’a bloqué ?</h3>
+      <button class="btn-ghost btn-small" onclick="closeAgainModal()">Fermer</button>
+    </div>
+    <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.85rem">Cette note aidera à identifier les difficultés de la classe.</p>
+    <div class="field">
+      <label for="again-note-input">Note personnelle</label>
+      <textarea id="again-note-input" placeholder="Ex: j'ai oublie le théoreme de l énergie cinétique..."></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="skipAgainNote()">Passer</button>
+      <button class="btn-save" onclick="submitAgainNote()">Valider</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="sr-info-overlay">
+  <div class="modal-box">
+    <div class="modal-topbar">
+      <h3>Comment utiliser les Forgecards ?</h3>
+      <button class="btn-ghost btn-small" onclick="closeSrInfoModal()">Fermer</button>
+    </div>
+
+    <p style="margin-bottom:1rem;line-height:1.55">
+      <strong>En deux mots :</strong> fais l'exercice, vérifie le corrigé, puis évalue honnêtement ta réussite pour que la fiche revienne au bon moment.
+    </p>
+
+    <p style="margin-bottom:1rem;line-height:1.55">
+      Les Forgecards ne sont pas de simples flashcards de mémorisation. Il s'agit de démonstrations de cours ou d'exercices très typiques, mobilisant des notions incontournables pour les concours.
+      L'objectif n'est pas de retenir une information isolée, mais de <strong>maîtriser</strong> un raisonnement ou une méthode qui doit devenir un réflexe.
+      Ce système repose sur la répétition espacée. Après avoir fait l'exercice et vérifié le corrigé, il est essentiel de choisir <strong>honnêtement</strong> le bouton correspondant réellement au niveau de réussite.
+    </p>
+
+    <div class="sr-help-grid">
+      <div class="sr-help-item bad">
+        <div class="sr-help-title">🔴 Pas réussi</div>
+        <div>La démonstration n'a pas été réussie, ou le corrigé a été nécessaire pour faire la démonstration. La méthode n'est pas encore acquise et doit être retravaillée rapidement.</div>
+      </div>
+      <div class="sr-help-item hard">
+        <div class="sr-help-title">🟠 Difficile</div>
+        <div>L'exercice a été réussi, mais avec beaucoup d'<strong>hésitations</strong>, en s'appuyant sur les indices ou en ayant regardé le corrigé pour un point de blocage singulier. La méthode commence à être comprise mais reste fragile.</div>
+      </div>
+      <div class="sr-help-item good">
+        <div class="sr-help-title">🔵 Réussi</div>
+        <div>L'exercice a été réussi seul sans le corrigé mais avec faible utilisation d'indices. La méthode est globalement comprise mais doit être consolidée pour être considérée comme acquise.</div>
+      </div>
+      <div class="sr-help-item easy">
+        <div class="sr-help-title">🟢 Automatique</div>
+        <div>L'exercice a été réussi rapidement et sans effort particulier, comme un <strong>automatisme</strong>. La méthode est maîtrisée, il n'est pas utile de la revoir trop souvent.</div>
+      </div>
+    </div>
+
+    <p style="margin-top:1rem;line-height:1.55">
+      <strong>Attention</strong> : se surestimer en cliquant sur un bouton trop favorable alors que la réussite a été difficile est <strong>contre-productif</strong>. La Forgecard reviendra trop tard, avec un risque d'oubli de la méthode d'ici là. En mode normal, il est préférable d'utiliser majoritairement les boutons "Difficile" et "Réussi" pour que la rétention soit optimale. Le bouton "Automatique" est à réserver aux exercices vraiment maîtrisés.
+    </p>
+  </div>
+</div>
+{% endblock %}

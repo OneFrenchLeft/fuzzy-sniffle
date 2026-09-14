@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rejoindre le QCM — Forgecards</title>
+  <script>
+    document.documentElement.setAttribute(
+      'data-theme',
+      localStorage.getItem('mdc-theme') || 'light'
+    );
+  </script>
+  <style>
+    :root{
+      --bg:#f7f6f2; --surface:#fff; --border:rgba(0,0,0,.10);
+      --text:#1a1a1a; --muted:#6b6b6b; --primary:#01696f;
+      --radius:.75rem; --radius-lg:1.25rem;
+      --shadow:0 4px 20px rgba(0,0,0,.08);
+      --font:'Satoshi',sans-serif;
+    }
+    html[data-theme=dark]{
+      --bg:#14181a; --surface:#1d2225; --border:rgba(255,255,255,.10);
+      --text:#eceff1; --muted:#9aa5aa; --primary:#2dd4bf;
+      --shadow:0 4px 20px rgba(0,0,0,.4);
+    }
+    *{box-sizing:border-box}
+    body{
+      min-height:100dvh; margin:0; padding:1rem;
+      display:grid; place-items:center;
+      background:var(--bg); color:var(--text); font-family:var(--font);
+    }
+    .panel{
+      width:min(460px,100%); padding:2rem; text-align:center;
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:var(--radius-lg); box-shadow:var(--shadow);
+    }
+    h1{margin:0 0 .75rem;font-size:1.35rem;color:var(--primary)}
+    p{margin:.5rem 0;color:var(--muted);line-height:1.5}
+    strong{color:var(--text)}
+    button{
+      width:100%; margin-top:1.25rem; min-height:52px; border:0;
+      border-radius:var(--radius); background:var(--primary); color:#fff;
+      font:700 1rem var(--font); cursor:pointer;
+    }
+    html[data-theme=dark] button{color:#06201f}
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <h1>QCM</h1>
+    <p>Tu vas rejoindre la partie sous le prénom :</p>
+    <p><strong>{{ prenom }}</strong></p>
+    <form method="post" action="{{ url_for('consume_qcm_invite', token=token) }}">
+      <button type="submit">Rejoindre le QCM</button>
+    </form>
+  </main>
+</body>
+</html>

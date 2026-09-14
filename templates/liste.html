@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Forgecards{% endblock %}
+{% block content %}
+<section class="view active" id="view-liste">
+    <div class="panel">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;margin-bottom:.6rem">
+            <div class="section-title" style="margin-bottom:0">Toutes les forgecards</div>
+          <button class="info-btn" onclick="openTirageInfoModal()" aria-label="Aide Forgecards">i</button>
+        </div>
+      <div class="search-wrap">
+        <span class="search-icon" aria-hidden="true">🔍</span>
+        <input type="search" id="liste-search" class="search-box" autocomplete="off" placeholder="Rechercher une fiche (titre, chapitre, numéro)" aria-label="Rechercher une fiche">
+        <button type="button" id="liste-search-clear" class="search-clear" style="display:none" onclick="clearListeSearch()" aria-label="Effacer la recherche">✕</button>
+      </div>
+      <div id="liste-search-status" role="status" aria-live="polite" style="font-size:.8rem;color:var(--muted);margin:0 0 var(--space-4) .25rem"></div>
+      <div class="admin-list" id="public-list" aria-live="polite"></div>
+      <details class="import-box fold" id="hors-serie-box" style="display:none;margin-top:1rem">
+        <summary class="section-title" style="margin-bottom:0">Hors-série</summary>
+        <p class="home-subtitle" style="text-align:left;margin:.5rem 0 .75rem;font-size:.8rem">En libre-service : pas de répétition espacée, pas de quota. Pour aller plus loin.</p>
+        <div class="admin-list" id="hors-serie-list"></div>
+      </details>
+    </div>
+  </section>
+{% endblock %}
+{% block modals %}
+<div class="modal-overlay" id="tirage-info-overlay">
+  <div class="modal-box">
+    <div class="modal-topbar">
+      <h3>Comment ça marche ?</h3>
+      <button class="btn-ghost btn-small" onclick="closeTirageInfoModal()">Fermer</button>
+    </div>
+    <p style="margin-bottom:1rem;line-height:1.55">
+      <strong>En deux mots :</strong> tu tires 1 à 3 fiches au hasard, quelqu'un résout la carte au tableau, et les autres l'aident et corrigent à l'aide du barème et/ou du corrigé.
+    </p>
+    <p style="margin-bottom:1rem;line-height:1.55">
+      Les forgecards reprennent les démonstrations clés et les exercices-types des concours. Elles sont à revoir uniquement lorsque le cours est maîtrisé. Elles permettent d'entretenir les chapitres vus tout au long de l'année (voir onglet Répétition espacée) sans avoir à tout réapprendre à la veille des concours
+    </p>
+  </div>
+</div>
+{% endblock %}

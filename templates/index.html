@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="view active" id="view-tirage">
+  <h1 class="home-title">Simulation de khôlle</h1>
+  <p class="home-subtitle2 opacity-100">Tire 1 à 3 fiches pour simuler une khôlle.</p>
+  <div class="panel draw-box">
+    <div class="hs-toggle" id="hs-toggle" style="display:none">
+      <span class="hs-toggle-label">Hors-série</span>
+      <button type="button" class="hs-switch" role="switch" aria-checked="false" aria-label="Activer le mode hors-série" onclick="toggleHorsSerie()"></button>
+    </div>
+    <label>Nombre de fiches</label>
+    <div class="draw-count-row" role="group" aria-label="Nombre de fiches">
+      <button class="draw-count-btn active" data-count="1" aria-pressed="true" onclick="selectDrawCount(1)">1</button>
+      <button class="draw-count-btn" data-count="2" aria-pressed="false" onclick="selectDrawCount(2)">2</button>
+      <button class="draw-count-btn" data-count="3" aria-pressed="false" onclick="selectDrawCount(3)">3</button>
+    </div>
+    <button class="btn-primary" id="draw-btn" onclick="lancerTirage()">Tirer les fiches <span id="draw-spinner" class="spinner" style="display:none"></span></button>
+  </div>
+  <div class="panel" id="results-section" style="display:none;margin-top:var(--space-8)">
+    <div class="section-title">Abracadabra, bonne chance !</div>
+    <div class="cards-grid" id="cards-grid"></div>
+  </div>
+  <p class="tirage-help"><button class="toggle-btn" onclick="openTirageInfoModal()">Comment ça marche ?</button></p>
+</section>
+{% endblock %}
+{% block modals %}
+<div class="modal-overlay" id="tirage-info-overlay">
+  <div class="modal-box">
+    <div class="modal-topbar">
+      <h3>Comment ça marche ?</h3>
+      <button class="btn-ghost btn-small" onclick="closeTirageInfoModal()">Fermer</button>
+    </div>
+    <p style="margin-bottom:1rem;line-height:1.55">
+      <strong>En deux mots :</strong> tu tires 1 à 3 fiches au hasard, quelqu'un résout la carte au tableau, et les autres l'aident et corrigent à l'aide du barème et/ou du corrigé.
+    </p>
+    <p style="margin-bottom:1rem;line-height:1.55">
+      Les forgecards reprennent les démonstrations clés et les exercices-types des concours. Elles sont à revoir uniquement lorsque le cours est maîtrisé. Elles permettent d'entretenir les chapitres vus tout au long de l'année (voir onglet Répétition espacée) sans avoir à tout réapprendre à la veille des concours
+    </p>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<!-- Page 500 — autonome (aucun asset externe) : fonctionne aussi servie
+     en fichier statique par nginx quand l'app est complètement à l'arrêt. -->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Le serveur coule — Forgecards</title>
+<link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+<script>document.documentElement.setAttribute('data-theme', localStorage.getItem('mdc-theme') || 'light');</script>
+<style>
+:root{--bg:#f7f6f2;--surface:#fff;--border:rgba(0,0,0,.10);--text:#1a1a1a;--muted:#6b6b6b;--faint:#aaa;--primary:#01696f;--primary-hover:#0c4e54;--radius-lg:1.25rem;--shadow:0 4px 20px rgba(0,0,0,.08);--font:'Satoshi',sans-serif;--good:#27ae60;--bad:#c0392b;--warn:#e67e22}
+html[data-theme=dark]{--bg:#14181a;--surface:#1d2225;--border:rgba(255,255,255,.10);--text:#eceff1;--muted:#9aa5aa;--faint:#5c6569;--primary:#2dd4bf;--primary-hover:#5eead4;--shadow:0 4px 20px rgba(0,0,0,.4)}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:2rem 1rem;transition:background .2s,color .2s}
+/* Illustration de fond (comme les autres pages) */
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:url('/static/img/illustration.jpg') center/cover no-repeat;
+  opacity:.2;filter:brightness(1.05);}
+html[data-theme=dark] body::before{opacity:.12;filter:brightness(.8)}
+.card{background:color-mix(in srgb, var(--surface) 94%, transparent);border:1px solid var(--border);box-shadow:var(--shadow);border-radius:var(--radius-lg);padding:2.5rem;max-width:520px;width:100%;text-align:center}
+.scene{font-size:3.2rem;line-height:1;margin-bottom:.5rem;position:relative;display:inline-block}
+.wave{display:inline-block;animation:wave 2.6s ease-in-out infinite}
+.wave.w2{animation-delay:.4s}
+@keyframes bob{0%,100%{transform:translateY(0) rotate(-4deg)}50%{transform:translateY(.35rem) rotate(5deg)}}
+@keyframes wave{0%,100%{transform:translateY(0);opacity:.8}50%{transform:translateY(.25rem);opacity:1}}
+h1{font-size:1.5rem;font-weight:800;letter-spacing:-.01em;margin-bottom:.75rem}
+.sub{color:var(--muted);line-height:1.55;margin-bottom:1.25rem}
+.sub strong{color:var(--text)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:48px;padding:.8rem 1.6rem;border:none;border-radius:999px;font:inherit;font-weight:800;cursor:pointer;background:linear-gradient(135deg,var(--primary),var(--primary-hover));color:#fff;box-shadow:0 6px 18px rgba(1,105,111,.25);transition:transform .15s,box-shadow .15s}
+html[data-theme=dark] .btn{color:#06201f}
+.btn:hover{transform:translateY(-1px)}
+.btn:active{transform:scale(.98)}
+.status{margin-top:1rem;font-size:.85rem;color:var(--muted);min-height:1.4em;font-weight:600}
+.status .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(0,0,0,.15);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px;margin-right:.35rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+.help{display:none;margin-top:1.25rem;padding:.9rem 1rem;border-radius:.75rem;border:1px solid color-mix(in srgb, var(--bad) 40%, var(--border));background:color-mix(in srgb, var(--bad) 8%, transparent);color:var(--text);font-size:.88rem;line-height:1.5;text-align:left}
+.help.show{display:block;animation:rise .3s ease}
+.help b{color:var(--bad)}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.footer{margin-top:1.5rem;font-size:.7rem;color:var(--faint)}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="scene" aria-hidden="true"><span class="wave">🌊</span><span class="wave">🌊</span><span class="wave w2">🌊</span></div>
+  <h1>Le serveur coule</h1>
+  <p class="sub">
+    <strong>Erreur 500</strong><br>
+    La poussée d'Archimède n'a pas suffi cette fois, mais l'équipage pompe :<br>
+    <strong>il sera de retour d'ici peu.</strong>
+  </p>
+  <button class="btn" id="retry" type="button">🔄 Réessayer</button>
+  <div class="status" id="status" role="status" aria-live="polite">Renflouement automatique dans 5 s…</div>
+  <div class="help" id="help">
+    <b>Toujours par le fond ?</b><br>
+    Le serveur n'est pas revenu après 30 secondes de pompage.
+    Préviens le <b>support technique sur Discord</b>, et dis lui ce que tu faisais quand l'erreur est survenue.
+  </div>
+  <div class="footer">Forgecards · erreur 500 · le serveur sera de retour d'ici peu</div>
+</div>
+<script>
+(function(){
+'use strict';
+var RETRY_EVERY_S = 5;
+var GIVE_UP_AFTER_S = 30;
+var started = Date.now();
+var attempts = 0;
+var countdown = RETRY_EVERY_S;
+var status = document.getElementById('status');
+var help = document.getElementById('help');
+var btn = document.getElementById('retry');
+
+function tick(){
+  if (help.classList.contains('show')) return;
+  countdown -= 1;
+  if (countdown <= 0) { tryAgain(); return; }
+  status.innerHTML = 'Renflouement automatique dans ' + countdown + ' s…';
+}
+setInterval(tick, 1000);
+
+function tryAgain(){
+  attempts += 1;
+  countdown = RETRY_EVERY_S;
+  status.innerHTML = '<span class="spinner"></span>Ça pompe… (essai ' + attempts + ')';
+  fetch('/', { cache: 'no-store' })
+    .then(function(r){
+      if (r.ok) { status.textContent = '✅ Renfloué ! Retour à bord…'; setTimeout(function(){ location.href = '/'; }, 600); }
+      else { pump(); }
+    })
+    .catch(pump);
+}
+
+function pump(){
+  var elapsed = (Date.now() - started) / 1000;
+  if (elapsed >= GIVE_UP_AFTER_S) {
+    status.textContent = '';
+    help.classList.add('show');
+    return; // on arrête la pompe automatique : humain à la barre
+  }
+  status.textContent = 'Renflouement automatique dans ' + countdown + ' s…';
+}
+
+btn.onclick = tryAgain;
+})();
+</script>
+</body>
+</html>

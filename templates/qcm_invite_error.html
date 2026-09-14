@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Invitation QCM</title>
+  <script>
+    document.documentElement.setAttribute(
+      'data-theme',
+      localStorage.getItem('mdc-theme') || 'light'
+    );
+  </script>
+  <style>
+    :root{
+      --bg:#f7f6f2; --surface:#fff; --border:rgba(0,0,0,.10);
+      --text:#1a1a1a; --muted:#6b6b6b; --primary:#01696f;
+      --radius-lg:1.25rem; --shadow:0 4px 20px rgba(0,0,0,.08);
+      --font:'Satoshi',sans-serif;
+    }
+    html[data-theme=dark]{
+      --bg:#14181a; --surface:#1d2225; --border:rgba(255,255,255,.10);
+      --text:#eceff1; --muted:#9aa5aa; --primary:#2dd4bf;
+      --shadow:0 4px 20px rgba(0,0,0,.4);
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; min-height:100dvh; display:grid; place-items:center;
+      padding:1rem; background:var(--bg); color:var(--text);
+      font-family:var(--font);
+    }
+    .panel{
+      width:min(460px,100%); padding:2rem; text-align:center;
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:var(--radius-lg); box-shadow:var(--shadow);
+    }
+    h1{font-size:1.25rem;margin:0 0 1rem;color:var(--primary)}
+    p{line-height:1.5;color:var(--muted);margin:0}
+    a{display:inline-block;margin-top:1.25rem;color:var(--primary);font-weight:700}
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <h1>Invitation QCM</h1>
+    <p>{{ message }}</p>
+    <a href="/">Retour à Forgecards</a>
+  </main>
+</body>
+</html>

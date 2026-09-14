@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>404 - T'es perdu?</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='favicon-16x16.png') }}">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32x32.png') }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+  <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='android-chrome-192x192.png') }}">
+  <link rel="icon" type="image/png" sizes="512x512" href="{{ url_for('static', filename='android-chrome-512x512.png') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='site.webmanifest') }}">
+  <link rel="preload" as="image" href="{{ url_for('static', filename='img/404.png') }}">
+<style>
+  :root{--bg:#f7f6f2;--surface:#fff;--border:rgba(0,0,0,.10);--text:#1a1a1a;--muted:#6b6b6b;--primary:#01696f;--primary-hover:#0c4e54;--radius:.75rem;--radius-lg:1.25rem;--shadow:0 4px 20px rgba(0,0,0,.08);--font:'Satoshi',sans-serif}
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden}
+  body{
+    font-family:var(--font);
+    background:var(--bg);
+    color:var(--text);
+    min-height:100dvh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:2rem;
+    position:relative
+  }
+  body::before{
+    content:'';
+    position:fixed;
+    top:0;left:0;right:0;bottom:0;
+    z-index:0;
+    background-image:url('{{ url_for("static", filename="img/404.png") }}');
+    background-repeat:no-repeat;
+    background-position:center center;
+    background-size:cover;
+    filter:blur(6px) brightness(.55);
+    transform:scale(1.05);
+  }
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:2rem 1.5rem;text-align:center;max-width:420px;position:relative;z-index:1}
+  .code-404{font-size:1rem;font-weight:700;letter-spacing:.2em;color:var(--muted);text-transform:uppercase;margin-bottom:1rem}
+  .ds-link{display:inline-block;font-size:1rem;font-weight:700;color:var(--primary);text-decoration:none;border:2px solid var(--primary);border-radius:var(--radius);padding:0.8rem 1rem;margin-top:.2rem;transition:background .2s,color .2s}
+  .ds-link:hover{background:var(--primary);color:#fff}
+  .hint{margin-top:1.5rem;font-size:.65rem;color:var(--muted)}
+
+  /* --- Music button --- */
+  .music-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:.5rem;
+    width:100%;
+    margin-top:1rem;
+    padding:.7rem 1rem;
+    font-family:var(--font);
+    font-size:.85rem;
+    font-weight:700;
+    color:#fff;
+    background:linear-gradient(135deg,var(--primary),#02949c);
+    border:none;
+    border-radius:var(--radius);
+    cursor:pointer;
+    box-shadow:0 4px 14px rgba(1,105,111,.35);
+    transition:transform .15s ease, box-shadow .15s ease, background .2s ease;
+  }
+  .music-btn:hover{
+    transform:translateY(-2px);
+    box-shadow:0 6px 18px rgba(1,105,111,.45);
+    background:linear-gradient(135deg,var(--primary-hover),#01696f);
+  }
+  .music-btn:active{transform:translateY(0);box-shadow:0 3px 10px rgba(1,105,111,.3)}
+  .music-btn.playing{background:linear-gradient(135deg,#0c4e54,#01696f)}
+
+  .music-icon{
+    width:1.1rem;
+    height:1.1rem;
+    flex-shrink:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .music-icon svg{width:100%;height:100%;fill:currentColor}
+
+  /* animated equalizer bars shown while playing */
+  .eq{display:none;align-items:flex-end;gap:2px;height:1.1rem}
+  .music-btn.playing .eq{display:flex}
+  .music-btn.playing .music-icon{display:none}
+  .eq span{
+    width:3px;
+    background:#fff;
+    border-radius:2px;
+    animation:eq 0.9s ease-in-out infinite;
+  }
+  .eq span:nth-child(1){animation-delay:0s}
+  .eq span:nth-child(2){animation-delay:.2s}
+  .eq span:nth-child(3){animation-delay:.4s}
+  .eq span:nth-child(4){animation-delay:.1s}
+  @keyframes eq{
+    0%,100%{height:20%}
+    50%{height:100%}
+  }
+</style>
+</head>
+<body>
+  <div class="panel">
+    <div class="code-404">404</div>
+    <a class="ds-link" href="https://madec.moyart.net">Clique pour récupérer les DM numéro 6 à 9 jamais rendus par Madec</a>
+
+    <button type="button" class="music-btn" id="musicBtn" aria-pressed="false">
+      <span class="music-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/>
+        </svg>
+      </span>
+      <span class="eq" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+      <span id="musicLabel">Quel est ce bouton ?</span>
+    </button>
+    <audio id="lostSong" src="{{ url_for('static', filename='song.mp3') }}" preload="none" loop></audio>
+
+    <div class="hint">Ah oups ils ont été foutus dans la cheminée ^^</div>
+  </div>
+
+<script>
+  (function(){
+    const btn = document.getElementById('musicBtn');
+    const label = document.getElementById('musicLabel');
+    const audio = document.getElementById('lostSong');
+    let isPlaying = false;
+
+    btn.addEventListener('click', function(){
+      if (!isPlaying){
+        audio.play().catch(function(err){
+          console.warn('Lecture impossible :', err);
+        });
+      } else {
+        audio.pause();
+      }
+    });
+
+    audio.addEventListener('play', function(){
+      isPlaying = true;
+      btn.classList.add('playing');
+      btn.setAttribute('aria-pressed', 'true');
+      label.textContent = 'Lecture...';
+    });
+
+    audio.addEventListener('pause', function(){
+      isPlaying = false;
+      btn.classList.remove('playing');
+      btn.setAttribute('aria-pressed', 'false');
+      label.textContent = 'Reprendre';
+    });
+  })();
+</script>
+</body>
+</html>
