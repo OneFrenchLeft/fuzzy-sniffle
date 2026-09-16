@@ -196,6 +196,8 @@ function refreshAuthUI() {
   var on = document.getElementById('compte-logged-in');
   if (off) off.style.display = user ? 'none' : '';
   if (on) on.style.display = user ? '' : 'none';
+  var lb = document.getElementById('compte-logout-btn');
+  if (lb) lb.style.display = user ? '' : 'none';
   var nameEl = document.getElementById('compte-prenom');
   if (nameEl && user) nameEl.textContent = user;
 }
