@@ -13,3 +13,12 @@ venv/
 # Sauvegardes locales
 *.bak
 *.bak-*
+
+# Local au serveur — ne jamais committer
+fix_*.py
+nohup.out
+tmp/
+uploads/
+venv-bot/
+static/videos/
+static/song.mp3

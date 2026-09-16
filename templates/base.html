@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Forgecard{% endblock %}</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css', v=19) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css', v=20) }}">
   <script>
   window.MathJax = {
     tex: {
@@ -16,7 +16,7 @@
   };
   </script>
   <script src="/static/mathjax/tex-svg.js"></script>
-  <script src="{{ url_for('static', filename='js/app.js', v=19) }}" defer></script>
+  <script src="{{ url_for('static', filename='js/app.js', v=20) }}" defer></script>
 </head>
 <body data-page="{{ active }}">
 <canvas id="confetti-canvas"></canvas>

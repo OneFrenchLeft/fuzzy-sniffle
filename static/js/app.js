@@ -164,24 +164,26 @@ function loadCompteDashboard() {
     set('dash-jokers', d.jokers + ' / 2');
     set('dash-semaine', d.semaine);
     set('dash-total', d.total);
-  }).catch(function () {});
-  fetchJson('/api/sr/qcm/weak').then(function (d) {
-    var box = document.getElementById('compte-qcm-weak');
-    if (!box || !d || !d.ok) return;
-    if (!d.rows.length) { box.innerHTML = ''; return; }
-    var html = '<div class="section-title" style="margin:.5rem 0">Questions QCM à retravailler</div>' +
-      '<p class="home-subtitle" style="text-align:left;font-size:.8rem;margin-bottom:.5rem">Tes questions les plus ratées, toutes parties confondues.</p>';
-    d.rows.forEach(function (r) {
-      var label = r.question.length > 110 ? r.question.slice(0, 110) + '…' : r.question;
-      var color = r.taux_echec >= 40 ? '#c0392b' : (r.taux_echec >= 20 ? '#e67e22' : '#27ae60');
-      html += '<div class="admin-row"><div>' +
-        '<div style="font-size:.88rem">' + esc(label) + '</div>' +
-        '<div class="meta">' + esc(r.theme) + (r.chapitre ? ' · ' + esc(r.chapitre) : '') + '</div></div>' +
-        '<div class="meta" style="white-space:nowrap"><span class="weak-badge" style="background:' + color + '">' +
-        r.taux_echec + ' %</span><br>' + r.echecs + '/' + r.sorties + ' ratées</div></div>';
-    });
-    box.innerHTML = html;
-  }).catch(function () {});
+  }).catch(function (e) { console.error(e); });
+  fetchJson('/api/sr/qcm/weak').then(renderQcmWeak).catch(function (e) { console.error('qcm weak', e); });
+}
+
+function renderQcmWeak(d) {
+  var box = document.getElementById('compte-qcm-weak');
+  if (!box || !d || !d.ok) return;
+  if (!d.rows.length) { box.innerHTML = ''; return; }
+  var html = '<div class="section-title" style="margin:.5rem 0">Questions QCM à retravailler</div>' +
+    '<p class="home-subtitle" style="text-align:left;font-size:.8rem;margin-bottom:.5rem">Tes questions les plus ratées, toutes parties confondues.</p>';
+  d.rows.forEach(function (r) {
+    var label = r.question.length > 110 ? r.question.slice(0, 110) + '…' : r.question;
+    var color = r.taux_echec >= 40 ? '#c0392b' : (r.taux_echec >= 20 ? '#e67e22' : '#27ae60');
+    html += '<div class="admin-row"><div>' +
+      '<div style="font-size:.88rem">' + esc(label) + '</div>' +
+      '<div class="meta">' + esc(r.theme) + (r.chapitre ? ' · ' + esc(r.chapitre) : '') + '</div></div>' +
+      '<div class="meta" style="white-space:nowrap"><span class="weak-badge" style="background:' + color + '">' +
+      r.taux_echec + ' %</span><br>' + r.echecs + '/' + r.sorties + ' ratées</div></div>';
+  });
+  box.innerHTML = html;
 }
 
 function refreshAuthUI() {
@@ -200,7 +202,7 @@ function refreshAuthUI() {
 function openLoginGate() { openNameGate(); }
 
 function logoutSr() {
-  fetch('/api/sr/logout', { method: 'POST' }).catch(function () {});
+  fetch('/api/sr/logout', { method: 'POST' }).catch(function (e) { console.error(e); });
   currentSrUser = null;
   setupExportButton();
   refreshAuthUI();
@@ -676,7 +678,7 @@ function loadParams() {
     if (newEl) newEl.value = p.daily_new_limit != null ? p.daily_new_limit : 3;
     var revEl = document.getElementById('f-daily-review');
     if (revEl) revEl.value = p.daily_review_limit != null ? p.daily_review_limit : 3;
-  }).catch(function () {});
+  }).catch(function (e) { console.error(e); });
 }
 function saveParams() {
   var retentionEl = document.getElementById('f-fsrs-retention');
@@ -1331,7 +1333,7 @@ function loadStats() {
       };
       list.appendChild(det);
     });
-  }).catch(function () {});
+  }).catch(function (e) { console.error(e); });
 }
 function loadDeck(prenom, slot, btn) {
   var box = slot || document.getElementById('deck-view');
@@ -1355,7 +1357,7 @@ function loadWeakCards() {
   fetchJson('/api/dashboard/weak-cards').then(function (rows) {
     allWeakCards = rows;
     renderAdminDetail();
-  }).catch(function () {});
+  }).catch(function (e) { console.error(e); });
 }
 
 var allFailureNotes = [];
@@ -1391,7 +1393,7 @@ function loadFailureNotes() {
     allFailureNotes = rows;
     renderFailureNotes();
     renderFicheNotes();
-  }).catch(function () {});
+  }).catch(function (e) { console.error(e); });
 }
 
 function renderFailureNotes() {
@@ -1683,7 +1685,7 @@ function renderDailyStatus(data) {
 function updateDailyStatusOnly() {
   fetchJson('/api/sr/today').then(function (data) {
     if (data) renderDailyStatus(data);
-  }).catch(function () {});
+  }).catch(function (e) { console.error(e); });
 }
 function checkSrListEmpty() {
   var list = document.getElementById('sr-list');
@@ -1840,7 +1842,7 @@ function loadPreview(numero) {
       var el = document.getElementById('prev-' + numero + '-' + map[key]);
       if (el) el.textContent = data.preview[key].label;
     });
-  }).catch(function () {});
+  }).catch(function (e) { console.error(e); });
 }
 
 function openAgainModal(numero) {
@@ -2093,7 +2095,7 @@ function initHorsSerieToggle() {
   if (!t) return;
   fetchJson('/api/forgecards/public').then(function (cards) {
     if ((cards || []).some(function (c) { return c.hors_serie; })) t.style.display = 'flex';
-  }).catch(function () {});
+  }).catch(function (e) { console.error(e); });
 }
 document.addEventListener('DOMContentLoaded', initHorsSerieToggle);
 
@@ -2141,7 +2143,7 @@ function loadSrQcmErrors() {
         '</div>';
     });
     box.innerHTML = html;
-    if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([box]).catch(function () {});
+    if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([box]).catch(function (e) { console.error(e); });
   }).catch(function () {
     box.innerHTML = '<p class="hint">Impossible de charger les erreurs QCM.</p>';
   });
