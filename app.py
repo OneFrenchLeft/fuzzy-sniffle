@@ -140,6 +140,11 @@ qcm_engine.register(socketio, DATA,
 
 _login_attempts = {}
 RATE_LIMIT_WINDOW = 300
+
+# --- Constantes metier (regroupees, point 11 revue de code) ---
+JOKER_CAP = 2          # stock max de jokers par eleve
+JOKER_EVERY = 8        # un joker gagne tous les 8 jours de serie
+QCM_WEAK_LIMIT = 10    # questions remontees dans les blocs QCM (faibles / erreurs)
 RATE_LIMIT_MAX = 8
 
 @app.route('/qcm')
@@ -1459,7 +1464,7 @@ def sr_qcm_weak():
     rows = conn.execute(
         "SELECT question, theme, chapitre, COUNT(*) AS n, SUM(ok) AS bonnes "
         "FROM qcm_answers WHERE prenom=? GROUP BY qid "
-        "HAVING n > bonnes ORDER BY (n - bonnes) * 1.0 / n DESC, n DESC LIMIT 10",
+        "HAVING n > bonnes ORDER BY (n - bonnes) * 1.0 / n DESC, n DESC LIMIT %d" % QCM_WEAK_LIMIT,
         (prenom,)).fetchall()
     conn.close()
     out = []
@@ -2202,13 +2207,13 @@ def reconcile_streak(conn, prenom):
     while cursor.isoformat() in days:
         streak += 1
         cursor -= timedelta(days=1)
-    if streak >= 8:
-        milestone = streak // 8
+    if streak >= JOKER_EVERY:
+        milestone = streak // JOKER_EVERY
         jrow = conn.execute('SELECT count, last_milestone FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
         current = jrow['count'] if jrow else 0
         last_ms = jrow['last_milestone'] if jrow else 0
         if milestone > last_ms:
-            gained = max(0, min(milestone - last_ms, 2 - current))
+            gained = max(0, min(milestone - last_ms, JOKER_CAP - current))
             conn.execute(
                 "INSERT INTO user_jokers (prenom, count, last_milestone) VALUES (?,?,?) "
                 "ON CONFLICT(prenom) DO UPDATE SET count=count+?, last_milestone=?",
