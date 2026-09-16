@@ -7,13 +7,28 @@
 <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
 <script>
 document.documentElement.setAttribute('data-theme', localStorage.getItem('mdc-theme') || 'light');
-window.MathJax = {
-  tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
-  svg: { fontCache: 'global' }
-};
+window.katexDelimiters = [
+  { left: '$$', right: '$$', display: true },
+  { left: '\\[', right: '\\]', display: true },
+  { left: '$', right: '$', display: false },
+  { left: '\\(', right: '\\)', display: false }
+];
 </script>
 <script src="{{ url_for('static', filename='socket.io.min.js') }}"></script>
-<script src="{{ url_for('static', filename='mathjax/tex-svg.js') }}"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='katex/katex.min.css') }}">
+<script defer src="{{ url_for('static', filename='katex/katex.min.js') }}"></script>
+<script defer src="{{ url_for('static', filename='katex/contrib/auto-render.min.js') }}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  if (window.renderMathInElement) {
+    renderMathInElement(document.body, {
+      delimiters: window.katexDelimiters,
+      throwOnError: false,
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+    });
+  }
+});
+</script>
 <style>
 :root{
   --bg:#f7f6f2;--surface:#fff;--border:rgba(0,0,0,.10);--text:#1a1a1a;--muted:#6b6b6b;--faint:#aaa;
@@ -304,7 +319,7 @@ function toast(msg){var t=$('toast');t.textContent=msg;t.classList.add('show');i
 var typesetTimer=null;
 
 
-function typeset(el){if(typeof MathJax==='undefined'||!MathJax.typesetPromise)return;clearTimeout(typesetTimer);typesetTimer=setTimeout(function(){MathJax.typesetPromise([el]).catch(function(e){console.warn('mathjax',e);});},120);}
+function typeset(el){if(typeof renderMathInElement==='undefined'||!window.katexDelimiters)return;clearTimeout(typesetTimer);typesetTimer=setTimeout(function(){try{renderMathInElement(el,{delimiters:window.katexDelimiters,throwOnError:false});}catch(e){console.warn('katex',e);}},120);}
 function normChoice(c){return(c&&typeof c==='object')?c:{text:String(c==null?'':c),image:''};}
 function imageUrl(ref){ref=String(ref||'').trim();if(!ref)return '';if(/^https:\/\//i.test(ref))return ref;return '/qcm-images/'+ref;}
 function preloadImages(refs){var seen={};(refs||[]).forEach(function(ref){var url=imageUrl(ref);if(!url||seen[url])return;seen[url]=true;var image=new Image();image.decoding='async';image.src=url;});}

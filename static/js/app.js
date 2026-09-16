@@ -623,10 +623,12 @@ function renderQcmPreview() {
   document.getElementById('qcm-preview-prev').disabled = qcmPreviewIndex === 0;
   document.getElementById('qcm-preview-next').disabled = qcmPreviewIndex === qcmPreviewQuestions.length - 1;
 
-  if (window.MathJax && MathJax.typesetPromise) {
-    MathJax.typesetPromise([render]).catch(function (error) {
-      console.warn('MathJax aperçu QCM :', error);
-    });
+  if (window.renderMathInElement) {
+    try {
+      renderMathInElement(render, { delimiters: window.katexDelimiters, throwOnError: false });
+    } catch (error) {
+      console.warn('KaTeX aperçu QCM :', error);
+    }
   }
 }
 
