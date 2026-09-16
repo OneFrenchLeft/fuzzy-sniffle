@@ -224,9 +224,11 @@ def csv_response(output, filename):
     return resp
 
 def db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=5)
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA foreign_keys = ON')
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA busy_timeout=5000')
     return conn
 
 def init_db():
@@ -428,6 +430,9 @@ def init_db():
     if 'note_masquee' not in rev_cols:
         conn.execute("ALTER TABLE reviews ADD COLUMN note_masquee INTEGER DEFAULT 0")
 
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_reviews_prenom_date ON reviews(prenom, created_at)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_qcm_prenom_ok ON qcm_answers(prenom, ok)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_streak_prenom_day ON sr_daily_streak(prenom, day)')
     conn.commit()
     conn.close()
 
@@ -445,8 +450,8 @@ def ensure_db():
         conn.execute('DELETE FROM events WHERE created_at < ?', (cutoff,))
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f'[db] purge events impossible: {exc!r}')
     _db_ready = True
 
 def log_event(conn, prenom, etype, payload=''):
@@ -1196,7 +1201,8 @@ def internal_weekly_stats():
     for p in users:
         try:
             classement.append({'prenom': p, 'streak': compute_streak(conn, p)})
-        except Exception:
+        except Exception as exc:
+            print(f'[classement] calcul streak {p}: {exc!r}')
             continue
     classement.sort(key=lambda x: -x['streak'])
     top_draw = conn.execute(
@@ -1319,7 +1325,7 @@ def streak_guard_user(conn, prenom, params):
                     log_event(conn, prenom, 'joker_spent')
     jk_before = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
     before = jk_before['count'] if jk_before else 0
-    streak = compute_streak(conn, prenom)
+    streak = reconcile_streak(conn, prenom)
     jk_after = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
     after = jk_after['count'] if jk_after else 0
     if after > before:
@@ -1342,7 +1348,8 @@ def internal_streak_guard():
         try:
             streak, events, jokers = streak_guard_user(conn, prenom, params)
             results[prenom] = {'streak': streak, 'events': events, 'jokers': jokers}
-        except Exception:
+        except Exception as exc:
+            print(f'[streak-guard] {prenom}: {exc!r}')
             continue
     conn.commit()
     conn.close()
@@ -1395,19 +1402,8 @@ def sr_dashboard():
     semaine = conn.execute(
         'SELECT COUNT(*) AS c FROM reviews WHERE prenom=? AND substr(created_at,1,10)>=?',
         (prenom, week_ago)).fetchone()['c']
-    days = {r[0] for r in conn.execute(
-        'SELECT DISTINCT substr(created_at,1,10) FROM reviews WHERE prenom=?', (prenom,)).fetchall()}
-    days |= {r[0] for r in conn.execute(
-        'SELECT day FROM sr_daily_streak WHERE prenom=? AND validated=1', (prenom,)).fetchall()}
-    record, run, prev = 0, 0, None
-    for d in sorted(days):
-        cur = datetime.strptime(d, '%Y-%m-%d').date()
-        if prev and (cur - prev).days == 1:
-            run += 1
-        else:
-            run = 1
-        record = max(record, run)
-        prev = cur
+    days = activity_days(conn, prenom)
+    record = compute_record(days)
     conn.close()
     return jsonify({'ok': True, 'prenom': prenom, 'streak': streak, 'record': record,
                     'jokers': jokers, 'semaine': semaine, 'total': total})
@@ -2144,23 +2140,53 @@ def edit_forgecard(numero):
     return jsonify({'ok': True, 'numero': numero, 'code': code, 'label': card_label(code, hors_serie_edit)})
 
 
+def activity_days(conn, prenom):
+    # Jours avec au moins une revision OU un jour valide (auto/joker).
+    days = {r[0] for r in conn.execute(
+        'SELECT DISTINCT substr(created_at,1,10) FROM reviews WHERE prenom=?', (prenom,)).fetchall()}
+    days |= {r[0] for r in conn.execute(
+        'SELECT day FROM sr_daily_streak WHERE prenom=? AND validated=1', (prenom,)).fetchall()}
+    return days
+
+
+def compute_record(days):
+    # Plus longue serie consecutive dans un ensemble de jours (YYYY-MM-DD).
+    record, run, prev = 0, 0, None
+    for d in sorted(days):
+        cur = datetime.strptime(d, '%Y-%m-%d').date()
+        run = run + 1 if prev and (cur - prev).days == 1 else 1
+        record = max(record, run)
+        prev = cur
+    return record
+
+
 def compute_streak(conn, prenom):
-    rows = conn.execute(
-        'SELECT DISTINCT substr(created_at,1,10) FROM reviews WHERE prenom=?', (prenom,)
-    ).fetchall()
-    days = {r[0] for r in rows}
-    rows = conn.execute(
-        'SELECT day FROM sr_daily_streak WHERE prenom=? AND validated=1', (prenom,)
-    ).fetchall()
-    days |= {r[0] for r in rows}
+    # Lecture pure : aucune ecriture en base. Utilise reconcile_streak()
+    # pour les contextes qui peuvent depenser un joker ou attribuer un palier.
+    days = activity_days(conn, prenom)
+    if not days:
+        return 0
+    cursor = now_paris().date()
+    if cursor.isoformat() not in days:
+        cursor -= timedelta(days=1)
+    streak = 0
+    while cursor.isoformat() in days:
+        streak += 1
+        cursor -= timedelta(days=1)
+    return streak
+
+
+def reconcile_streak(conn, prenom):
+    # compute_streak + effets de bord : joker depense si trou hier,
+    # jokers de palier tous les 8 jours. A appeler apres une action reelle
+    # (revision, ouverture de /sr) ou depuis le cron, jamais en lecture seule.
+    days = activity_days(conn, prenom)
     if not days:
         return 0
     cursor = now_paris().date()
     if cursor.isoformat() not in days:
         cursor -= timedelta(days=1)
     if cursor.isoformat() not in days:
-
-
         jrow = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
         if jrow and jrow['count'] > 0:
             conn.execute('UPDATE user_jokers SET count = count - 1 WHERE prenom=?', (prenom,))
@@ -2169,7 +2195,6 @@ def compute_streak(conn, prenom):
             conn.commit()
             days.add(cursor.isoformat())
         else:
-
             conn.execute("UPDATE user_jokers SET last_milestone=0 WHERE prenom=?", (prenom,))
             conn.commit()
             return 0
@@ -2177,8 +2202,6 @@ def compute_streak(conn, prenom):
     while cursor.isoformat() in days:
         streak += 1
         cursor -= timedelta(days=1)
-
-
     if streak >= 8:
         milestone = streak // 8
         jrow = conn.execute('SELECT count, last_milestone FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
@@ -2355,7 +2378,7 @@ def sr_review(numero):
     )
     log_event(conn, prenom, 'review', f'{numero}:{result}')
     conn.commit()
-    streak = compute_streak(conn, prenom)
+    streak = reconcile_streak(conn, prenom)
     conn.close()
     return jsonify({'ok': True, 'numero': numero, **r, 'repetitions': reps, 'lapses': lapses, 'streak': streak})
 
@@ -2525,16 +2548,8 @@ def admin_stats_export(kind):
                          'Jokers gagnes', 'Jokers depenses', 'Relances recues',
                          'Parties QCM jouees', 'Reponses QCM', 'Taux reussite QCM (%)'])
         for p in users:
-            days = {r[0] for r in conn.execute(
-                'SELECT DISTINCT substr(created_at,1,10) FROM reviews WHERE prenom=?', (p,)).fetchall()}
-            days |= {r[0] for r in conn.execute(
-                'SELECT day FROM sr_daily_streak WHERE prenom=? AND validated=1', (p,)).fetchall()}
-            record, run, prev = 0, 0, None
-            for d in sorted(days):
-                cur = datetime.strptime(d, '%Y-%m-%d').date()
-                run = run + 1 if prev and (cur - prev).days == 1 else 1
-                record = max(record, run)
-                prev = cur
+            days = activity_days(conn, p)
+            record = compute_record(days)
             streak = compute_streak(conn, p)
             rv = conn.execute(
                 "SELECT COUNT(*) AS n, SUM(CASE WHEN result IN ('good','easy') THEN 1 ELSE 0 END) AS ok, "
