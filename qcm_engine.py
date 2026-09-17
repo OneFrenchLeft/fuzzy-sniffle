@@ -34,7 +34,6 @@ def qid_for(theme, chapitre, question):
     qh = hashlib.sha1(question.strip().encode('utf-8')).hexdigest()[:8]
     return f'{prefix}-{ch}-{qh}'
 
-
 QCM_THEMES = ('physique', 'chimie', 'maths')
 QCM_DEFAULT_THEME = QCM_THEMES[0]
 
@@ -57,7 +56,6 @@ _record_answer = None
 _record_game = None
 _review_query = None
 
-
 def normalize_choice(choice):
     if isinstance(choice, dict):
         return {
@@ -65,7 +63,6 @@ def normalize_choice(choice):
             'image': str(choice.get('image', '')).strip(),
         }
     return {'text': str(choice).strip(), 'image': ''}
-
 
 def read_qcm_questions(path, theme=None):
     try:
@@ -112,7 +109,6 @@ def read_qcm_questions(path, theme=None):
     _QUESTIONS_CACHE[cache_key] = (mtime, out)
     return out
 
-
 def available_chapters(themes):
     if not themes:
         themes = list(QCM_FILES)
@@ -129,7 +125,6 @@ def available_chapters(themes):
                 seen.append(pair)
     return sorted(seen, key=lambda p: (p[1] == 'Autre', p[0], p[1].lower()))
 
-
 def review_questions(prenom, themes, n, chapitres=None):
     # La connexion DB est fournie par app.py via le callback review_query.
     if _review_query is None:
@@ -145,14 +140,14 @@ def review_questions(prenom, themes, n, chapitres=None):
             continue
         for q in read_qcm_questions(QCM_FILES[name], theme=name):
             if q.get('qid') in wrong_qids:
-                q['time'] = 3600
+                q = dict(q)
+                q['time'] = 600
                 pool.append(q)
     if chapitres:
         wanted = set(chapitres)
         pool = [q for q in pool if (q.get('theme'), q.get('chapitre', 'Autre')) in wanted]
-    pool.sort(key=lambda q: last_wrong.get(q.get('qid'), ''))
+    pool.sort(key=lambda q: last_wrong.get(q.get('qid'), ''), reverse=True)
     return pool[:n]
-
 
 def pick_questions(themes=None, n=QCM_QUESTIONS_PER_MATCH, chapitres=None):
     if not themes:
@@ -173,11 +168,9 @@ def pick_questions(themes=None, n=QCM_QUESTIONS_PER_MATCH, chapitres=None):
     random.shuffle(questions)
     return questions[:n]
 
-
 def kahoot_points(elapsed_s, timer_s):
     ratio = max(0.0, min(1.0, elapsed_s / timer_s))
     return round(QCM_MAX_POINTS - (QCM_MAX_POINTS - QCM_MIN_POINTS) * ratio)
-
 
 def media_refs(question):
     refs = []
@@ -191,7 +184,6 @@ def media_refs(question):
                 refs.append(ref)
     return refs
 
-
 def questions_media(questions):
     refs, seen = [], set()
     for question in questions:
@@ -200,7 +192,6 @@ def questions_media(questions):
                 seen.add(ref)
                 refs.append(ref)
     return refs
-
 
 def lobby_payload(lobby):
     return {
@@ -221,13 +212,11 @@ def lobby_payload(lobby):
         ],
     }
 
-
 def push_lobbies():
     io.emit('qcm_lobbies', {
         'lobbies': [lobby_payload(l) for l in LOBBIES.values()],
         'max': QCM_MAX_LOBBIES,
     }, room='qcm_lobby')
-
 
 def cancel_offline_timer(prenom):
     timer = OFFLINE_TIMERS.pop(prenom, None)
@@ -236,7 +225,6 @@ def cancel_offline_timer(prenom):
             timer.kill()
         except Exception:
             pass
-
 
 class Lobby:
     def __init__(self, leader, theme=QCM_DEFAULT_THEME):
@@ -260,6 +248,7 @@ class Lobby:
         if prenom not in self.players:
             self.players.append(prenom)
             self.ready[prenom] = False
+            self.review_mode = False
 
     def remove_player(self, prenom):
         if prenom not in self.players:
@@ -281,7 +270,6 @@ class Lobby:
     def everyone_ready(self):
         return bool(self.players) and all(self.ready.get(p, False) for p in self.players)
 
-
 def remove_player_from_lobby(prenom):
     lid = LOBBY_BY_PLAYER.pop(prenom, None)
     if not lid:
@@ -293,6 +281,12 @@ def remove_player_from_lobby(prenom):
         game = lobby.game
         game.remove_player(prenom)
         GAME_BY_PLAYER.pop(prenom, None)
+        sid = PRESENT.get(prenom, {}).get('sid')
+        if sid:
+            try:
+                leave_room(game.gid, sid=sid)
+            except Exception:
+                pass
         if game.opened and len(game.answers) >= len(game.joueurs):
             game.answer_event.set()
         io.emit('qcm_error', {'message': f'{prenom} a quitté la partie.'}, room=game.gid)
@@ -300,7 +294,6 @@ def remove_player_from_lobby(prenom):
     if not lobby.players:
         del LOBBIES[lid]
         print(f'[qcm-web] {lid} supprimé (vide)')
-
 
 class Game:
     def __init__(self, gid, lobby, questions):
@@ -328,8 +321,8 @@ class Game:
     def remove_player(self, prenom):
         if prenom in self.joueurs:
             self.joueurs.remove(prenom)
-        self.answers.pop(prenom, None)
-        self.scores.pop(prenom, None)
+            self.answers.pop(prenom, None)
+            self.scores.pop(prenom, None)
 
     def current_payload(self):
         if not (0 <= self.qindex < len(self.questions)):
@@ -398,7 +391,7 @@ class Game:
                                 and self.qindex not in self.retry_queue):
                             self.retry_queue.append(self.qindex)
                         points = kahoot_points(elapsed, question['time']) if ok else 0
-                    self.scores[player] = self.scores.get(player, 0) + points
+                        self.scores[player] = self.scores.get(player, 0) + points
                     detail.append({'prenom': player, 'ok': ok, 'pts': points, 'elapsed': elapsed})
                     if _record_answer is not None:
                         try:
@@ -425,8 +418,8 @@ class Game:
                         'cloturee_tot': cloturee_tot,
                         'explication': question.get('explication', ''),
                     })
-                print(f'[qcm-web] {self.gid} q{self.qindex + 1} reveal '
-                      f'(anticipée={cloturee_tot}), scores={self.scores}')
+                    print(f'[qcm-web] {self.gid} q{self.qindex + 1} reveal '
+                          f'(anticipée={cloturee_tot}), scores={self.scores}')
                 self.qindex += 1
                 if self.review and self.qindex >= len(self.questions) and self.retry_queue:
                     # Micro-spacing : les questions ratees sont reposees une fois en fin de session.
@@ -475,7 +468,6 @@ class Game:
                 lobby.ready = {p: False for p in lobby.players}
             push_lobbies()
 
-
 def try_start_lobby(lobby):
     if lobby.etat != 'attente' or not lobby.everyone_ready():
         return
@@ -507,8 +499,16 @@ def try_start_lobby(lobby):
           f'(thèmes={lobby.themes or "tous"}, chapitres={lobby.chapitres or "tous"}, n={len(questions)})')
     push_lobbies()
     io.sleep(QCM_START_DELAY_S)
+    if lobby.etat != 'partie' or lobby.game is not game or not lobby.everyone_ready() or not game.joueurs:
+        GAMES.pop(gid, None)
+        for player in list(game.joueurs):
+            GAME_BY_PLAYER.pop(player, None)
+        lobby.game = None
+        if lobby.etat == 'partie':
+            lobby.etat = 'attente'
+        push_lobbies()
+        return
     io.start_background_task(game.run)
-
 
 def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=None):
     global io, QCM_FILES, _record_answer, _record_game, _review_query
@@ -677,7 +677,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
             return
         if prenom != lobby.leader:
             return {'ok': False, 'message': 'Seul le leader peut activer le mode revue'}
-        if len(lobby.players) > 1:
+        if len(lobby.players) != 1:
             return {'ok': False, 'message': 'Le mode revue est solo'}
         review = bool(data.get('review', False))
         if review:
@@ -816,6 +816,8 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
     @io.on('qcm_answer')
     def on_answer(data):
         prenom = session.get('sr_user')
+        if not isinstance(data, dict):
+            return {'ok': False, 'raison': 'choix invalide'}
         gid = GAME_BY_PLAYER.get(prenom or '')
         game = GAMES.get(gid) if gid else None
         if game is None or not game.alive:
