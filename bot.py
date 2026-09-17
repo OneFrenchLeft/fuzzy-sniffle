@@ -25,16 +25,20 @@ load_dotenv(BASE / '.env')
 
 DISCORD_TOKEN = os.environ.get('DISCORD_TOKEN')
 FORGECARDS_DB = Path(os.environ.get('FORGECARDS_DB', BASE / 'data' / 'forgecards.db'))
-print('bot DB:', FORGECARDS_DB)
 PARAMS_PATH = Path(os.environ.get('FORGECARDS_PARAMS', BASE / 'data' / 'params.json'))
 
 BOT_DB = BASE / 'data' / 'bot.db'
 TZ_PARIS = ZoneInfo('Europe/Paris')
 NOTIF_ROLE_NAME = os.environ.get('MADEC_NOTIF_ROLE', 'Notifications')
-REMINDER_HOUR = int(os.environ.get('MADEC_REMINDER_HOUR', '18'))
+REMINDER_HOUR = int(os.environ.get('MADEC_REMINDER_HOUR', '21'))
 GUILD_ID = os.environ.get('MADEC_GUILD_ID')
 SITE_URL = os.environ.get('MADEC_SITE_URL', 'https://madec.moyart.net')
 DEFAULT_PARAMS = {'max_active_num': 36, 'daily_new_limit': 3, 'daily_review_limit': 3}
+JOKER_CAP = 2
+JOKER_EVERY = 8
+BOT_EXCLUDED_PRENOMS = frozenset({'admin'})
+
+
 
 INTERNAL_API_KEY = os.environ.get('MADEC_INTERNAL_API_KEY')
 QCM_INVITE_API_URL = os.environ.get(
@@ -393,13 +397,15 @@ async def notification(interaction: discord.Interaction, etat: str):
 
 
 
-@madec.command(name='streak', description='Ta streak')
+@madec.command(name='streak', description='Ta streak, ou celle du membre mentionne')
 @channel_required()
-async def streak(interaction: discord.Interaction):
-    prenom = prenom_for_discord(interaction.user.id)
+@app_commands.describe(membre='Optionnel : membre Discord')
+async def streak(interaction: discord.Interaction, membre: discord.Member = None):
+    target = membre or interaction.user
+    prenom = prenom_for_discord(target.id)
     if not prenom:
         await interaction.response.send_message(
-            f"❌ {interaction.user.display_name} n'est pas link.", ephemeral=True)
+            f"❌ {target.display_name} n'est pas link.", ephemeral=True)
         return
     conn = fc_db()
     s = compute_streak(conn, prenom)
@@ -988,6 +994,16 @@ async def qcm(interaction: discord.Interaction):
 # ---------- Taches planifiees ----------
 
 @tasks.loop(time=dtime(hour=REMINDER_HOUR, minute=1, tzinfo=TZ_PARIS))
+async def _post(path, payload, timeout=10):
+    """POST interne non bloquant : requests est synchrone, on le pousse dans un thread."""
+    def _do():
+        r = requests.post(f"{SITE_URL}{path}",
+                          headers={"X-Madec-Internal-Key": INTERNAL_API_KEY},
+                          json=payload, timeout=timeout)
+        return r.json()
+    return await asyncio.to_thread(_do)
+
+
 async def daily_reminder():
     params = read_params()
     conn = fc_db()
@@ -1004,10 +1020,8 @@ async def daily_reminder():
         await dm_user(discord_id,
                       f"⏰ Il te reste **{plural(remaining, 'carte')}** Forgecards aujourd'hui.\n{SITE_URL}")
         try:
-            requests.post(f"{SITE_URL}/api/internal/log-event",
-                          headers={"X-Madec-Internal-Key": INTERNAL_API_KEY},
-                          json={'prenom': prenom, 'type': 'reminder', 'payload': 'daily'},
-                          timeout=10)
+            await _post('/api/internal/log-event',
+                        {'prenom': prenom, 'type': 'reminder', 'payload': 'daily'})
         except Exception:
             pass
     conn.close()
@@ -1090,17 +1104,7 @@ async def rotate_status():
 
 @tasks.loop(time=dtime(hour=23, minute=55, tzinfo=TZ_PARIS))
 async def nightly_streak_guard():
-    # Si le site est down a 23h55, on log et on abandonne : sans cette garde la
-    # tache crashe et aucune notification de joker ne part.
-    try:
-        resp = await asyncio.to_thread(
-            requests.post, f"{SITE_URL}/api/internal/streak-guard",
-            headers={"X-Madec-Internal-Key": INTERNAL_API_KEY},
-            json={}, timeout=30)
-        resp = resp.json()
-    except Exception as e:
-        print('streak-guard:', e)
-        return
+    resp = await _post('/api/internal/streak-guard', {}, timeout=30)
     bots = bot_db()
     links = {p: d for p, d in bots.execute("SELECT prenom, discord_id FROM links WHERE prenom != 'admin'").fetchall()}
     bots.close()
@@ -1110,10 +1114,8 @@ async def nightly_streak_guard():
                 await dm_user(links.get(prenom),
                               f"🃏 Joker utilisé ! Ta streak est sauvée. Il te reste {info['jokers']} joker(s).")
                 try:
-                    requests.post(f"{SITE_URL}/api/internal/log-event",
-                                  headers={"X-Madec-Internal-Key": INTERNAL_API_KEY},
-                                  json={'prenom': prenom, 'type': 'reminder', 'payload': 'joker'},
-                                  timeout=10)
+                    await _post('/api/internal/log-event',
+                                {'prenom': prenom, 'type': 'reminder', 'payload': 'joker'})
                 except Exception:
                     pass
             elif ev == 'joker_awarded':
@@ -1121,79 +1123,58 @@ async def nightly_streak_guard():
                               f"🃏 Streak de {info['streak']} jours ! Tu gagnes un joker (total {info['jokers']}). Il sauvera ta streak si tu oublies un jour.")
 
 
-@tasks.loop(time=dtime(hour=22, minute=47, tzinfo=TZ_PARIS))
+@tasks.loop(time=dtime(hour=20, minute=0, tzinfo=TZ_PARIS))
 async def weekly_recap():
-    """Recap du dimanche soir : tirages, revisions, streak max, cartes les plus vues."""
+    """Recap du dimanche 20h : reviews, tirages, streak max anonyme."""
     if datetime.now(TZ_PARIS).weekday() != 6:
         return
     ch_id = get_setting('channel_id')
     if not ch_id:
         return
     conn = fc_db()
-    today = datetime.now(TZ_PARIS).date()
-    week_ago = (today - timedelta(days=7)).isoformat()
-    rentree = f"{today.year if today.month >= 9 else today.year - 1}-09-01"
+    week_ago = (datetime.now(TZ_PARIS).date() - timedelta(days=7)).isoformat()
     reviews = conn.execute(
         "SELECT COUNT(*) FROM reviews WHERE substr(created_at,1,10) >= ? AND prenom != 'admin'",
         (week_ago,)).fetchone()[0]
-    reviews_annee = conn.execute(
-        "SELECT COUNT(*) FROM reviews WHERE substr(created_at,1,10) >= ? AND prenom != 'admin'",
-        (rentree,)).fetchone()[0]
     draws = conn.execute('SELECT COUNT(*) FROM draw_history WHERE substr(created_at,1,10) >= ?',
                          (week_ago,)).fetchone()[0]
-    max_streak, leaders = 0, []
-    for (p,) in conn.execute("SELECT prenom FROM users WHERE prenom != 'admin'").fetchall():
-        try:
-            s = compute_streak(conn, p)
-        except Exception:
-            continue
-        if s > max_streak:
-            max_streak, leaders = s, [p]
-        elif s == max_streak:
-            leaders.append(p)
     conn.close()
-    fiche_top, fiche_rev, podium_qcm, nb_parties = None, None, [], 0
+    classement, fiche_top, podium_qcm, nb_parties = [], None, [], 0
+    resp = None
     try:
-        resp = requests.post(f"{SITE_URL}/api/internal/weekly-stats",
-                             headers={"X-Madec-Internal-Key": INTERNAL_API_KEY},
-                             json={}, timeout=30).json()
-        if resp.get('ok'):
+        resp = await _post('/api/internal/weekly-stats', {}, timeout=30)
+        if resp and resp.get('ok'):
+            classement = resp.get('classement', [])
             fiche_top = resp.get('fiche_top')
-            fiche_rev = resp.get('fiche_rev')
             podium_qcm = resp.get('podium_qcm', [])
             nb_parties = resp.get('nb_parties_qcm', 0)
     except Exception as e:
         print('weekly-stats:', e)
-        try:
-            print('weekly-stats réponse:', resp.status_code, resp.text[:200])
-        except Exception:
-            pass
     channel = client.get_channel(int(ch_id))
     if channel is None:
         try:
             channel = await client.fetch_channel(int(ch_id))
         except Exception:
             return
-    lines = ["📊 **Recap de la semaine**", ""]
-    lines.append(f"🎲 Tirages de la semaine : **{draws}**")
-    lines.append(f"🔁 Révisions de la semaine : **{reviews}**")
-    lines.append(f"📚 Révisions depuis la rentrée : **{reviews_annee}**")
-    lines.append("")
-    if max_streak > 0:
-        lines.append(f"🔥 Streak la plus longue de la classe : **{plural(max_streak, 'jour')}** — {', '.join(leaders)}")
+    lines = [
+        "📊 **Recap de la semaine**",
+        f"🔁 {plural(reviews, 'revision')}",
+        f"🎲 {plural(draws, 'tirage')}",
+    ]
+    actifs = [c for c in classement if c['streak'] > 0]
+    if actifs:
+        medals = ['🥇', '🥈', '🥉']
+        lines.append("🔥 **Classement des streaks :**")
+        for rank, c in enumerate(actifs[:10]):
+            tag = medals[rank] if rank < 3 else f"{rank + 1}."
+            lines.append(f"{tag} {c['prenom']} — {plural(c['streak'], 'jour')}")
     else:
         lines.append("🔥 Aucune streak en cours. Le désert.")
     if fiche_top:
         titre = f"« {fiche_top['titre']} »" if fiche_top.get('titre') else ''
-        label = fiche_top.get('label') or fiche_top['numero']
-        lines.append(f"🃏 Carte la plus tirée de la semaine : **{label}** {titre} ({plural(fiche_top['c'], 'tirage')})")
-    if fiche_rev:
-        titre = f"« {fiche_rev['titre']} »" if fiche_rev.get('titre') else ''
-        label = fiche_rev.get('label') or fiche_rev['numero']
-        lines.append(f"📖 Carte la plus révisée de la semaine : **{label}** {titre} ({plural(fiche_rev['c'], 'revision')})")
+        lines.append(f"🃏 Fiche la plus tirée : **n°{fiche_top['numero']}** {titre} ({plural(fiche_top['c'], 'tirage')})")
     if podium_qcm:
         medals = ['🥇', '🥈', '🥉']
-        lines.append("")
         lines.append(f"🎯 **QCM de la semaine** ({plural(nb_parties, 'partie')}) :")
         for rank, c in enumerate(podium_qcm):
             tag = medals[rank] if rank < 3 else f"{rank + 1}."
