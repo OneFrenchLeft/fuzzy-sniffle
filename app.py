@@ -133,19 +133,32 @@ DATA.mkdir(parents=True, exist_ok=True)
 
 from flask_socketio import SocketIO
 socketio = SocketIO(app, async_mode='gevent')
+def _qcm_review_query(prenom):
+    ensure_db()
+    conn = db()
+    rows = conn.execute(
+        "SELECT a.qid, a.created_at FROM qcm_answers a "
+        "JOIN (SELECT qid, MAX(id) AS mid FROM qcm_answers WHERE prenom=? GROUP BY qid) m "
+        "ON a.id = m.mid WHERE a.ok = 0 ORDER BY a.created_at ASC",
+        (prenom,)
+    ).fetchall()
+    conn.close()
+    return rows
+
 import qcm_engine
 qcm_engine.register(socketio, DATA,
                     on_answer=lambda *a, **k: record_qcm_answer(*a, **k),
-                    on_game_end=lambda *a, **k: record_qcm_game(*a, **k))
+                    on_game_end=lambda *a, **k: record_qcm_game(*a, **k),
+                    review_query=_qcm_review_query)
 
 _login_attempts = {}
 RATE_LIMIT_WINDOW = 300
 
-# --- Constantes metier (regroupees, point 11 revue de code) ---
 JOKER_CAP = 2          # stock max de jokers par eleve
 JOKER_EVERY = 4        # un joker gagne tous les 4 jours de serie
 QCM_WEAK_LIMIT = 10    # questions remontees dans les blocs QCM (faibles / erreurs)
 RATE_LIMIT_MAX = 8
+
 
 @app.route('/qcm')
 def qcm_page():
@@ -181,6 +194,11 @@ def add_security_headers(resp):
     resp.headers['X-Content-Type-Options'] = 'nosniff'
     resp.headers['X-Frame-Options'] = 'DENY'
     resp.headers['Referrer-Policy'] = 'same-origin'
+    resp.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    if request.is_secure:
+        resp.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    if request.path.startswith('/api/'):
+        resp.headers['Cache-Control'] = 'no-store'
 
     resp.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
@@ -978,6 +996,16 @@ def page_not_found(e):
         return make_response('Page introuvable', 404)
 
 
+@app.errorhandler(500)
+def internal_error(e):
+    try:
+        resp = send_from_directory(STATIC, '500.html')
+        resp.status_code = 500
+        return resp
+    except Exception:
+        return make_response('Erreur interne du serveur', 500)
+
+
 @app.route('/')
 def home():
     return render_template('index.html', active='tirage')
@@ -1391,6 +1419,32 @@ def sr_login():
     conn.commit()
     conn.close()
     return jsonify({'ok': True, 'prenom': prenom})
+
+@app.route('/api/qcm/last-states', methods=['GET'])
+@require_sr_user
+def qcm_last_states():
+    ensure_db()
+    prenom = session['sr_user']
+    conn = db()
+    rows = conn.execute(
+        "SELECT a.qid, a.theme FROM qcm_answers a "
+        "JOIN (SELECT qid, MAX(id) AS mid FROM qcm_answers WHERE prenom=? GROUP BY qid) m "
+        "ON a.id = m.mid WHERE a.ok = 0",
+        (prenom,)
+    ).fetchall()
+    conn.close()
+    valid = set()
+    for theme, path in QCM_FILES.items():
+        if path.exists():
+            for q in qcm_engine.read_qcm_questions(path, theme=theme):
+                if q.get('qid'):
+                    valid.add(q['qid'])
+    counts = {}
+    for r in rows:
+        if r['qid'] in valid:
+            t = r['theme'] or 'autre'
+            counts[t] = counts.get(t, 0) + 1
+    return jsonify({'ok': True, 'wrongs': counts})
 
 @app.route('/api/sr/dashboard', methods=['GET'])
 @require_sr_user
@@ -2346,8 +2400,7 @@ def sr_review(numero):
     note = (data.get('note') or '').strip()[:MAX_NOTE_LENGTH]
     duration = parse_duration_seconds(data.get('duration_seconds'))
 
-    GRADE_MAP = {'again': 1, 'hard': 2, 'good': 3, 'easy': 4}
-    grade = GRADE_MAP.get(result)
+    grade = GRADE_MAP_FR.get(result)
     if grade is None:
         return jsonify({'ok': False, 'error': 'result invalide: again/hard/good/easy'}), 400
     if grade == 1 and len(note) < 10:
@@ -2793,11 +2846,10 @@ def api_draw():
 
     reordered = interleave_by_chapitre(chosen)
 
-    for c in reordered:
-        conn.execute(
-            "INSERT INTO draw_history(numero) VALUES(?)",
-            (c["numero"],),
-        )
+    conn.executemany(
+        "INSERT INTO draw_history(numero) VALUES(?)",
+        [(c["numero"],) for c in reordered],
+    )
 
 
     conn.execute(

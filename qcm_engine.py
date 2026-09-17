@@ -55,6 +55,7 @@ io = None
 
 _record_answer = None
 _record_game = None
+_review_query = None
 
 
 def normalize_choice(choice):
@@ -71,7 +72,8 @@ def read_qcm_questions(path, theme=None):
         mtime = path.stat().st_mtime
     except OSError:
         return []
-    cached = _QUESTIONS_CACHE.get(str(path))
+    cache_key = str(path) + '#' + (theme or '')
+    cached = _QUESTIONS_CACHE.get(cache_key)
     if cached and cached[0] == mtime:
         return cached[1]
     try:
@@ -107,7 +109,7 @@ def read_qcm_questions(path, theme=None):
                 out.append(entry)
         except Exception:
             continue
-    _QUESTIONS_CACHE[str(path)] = (mtime, out)
+    _QUESTIONS_CACHE[cache_key] = (mtime, out)
     return out
 
 
@@ -126,6 +128,30 @@ def available_chapters(themes):
             if pair not in seen:
                 seen.append(pair)
     return sorted(seen, key=lambda p: (p[1] == 'Autre', p[0], p[1].lower()))
+
+
+def review_questions(prenom, themes, n, chapitres=None):
+    # La connexion DB est fournie par app.py via le callback review_query.
+    if _review_query is None:
+        return []
+    rows = _review_query(prenom)
+    if not rows:
+        return []
+    wrong_qids = {r['qid'] for r in rows}
+    last_wrong = {r['qid']: r['created_at'] for r in rows}
+    pool = []
+    for name in (themes or QCM_FILES):
+        if name not in QCM_FILES:
+            continue
+        for q in read_qcm_questions(QCM_FILES[name], theme=name):
+            if q.get('qid') in wrong_qids:
+                q['time'] = 3600
+                pool.append(q)
+    if chapitres:
+        wanted = set(chapitres)
+        pool = [q for q in pool if (q.get('theme'), q.get('chapitre', 'Autre')) in wanted]
+    pool.sort(key=lambda q: last_wrong.get(q.get('qid'), ''))
+    return pool[:n]
 
 
 def pick_questions(themes=None, n=QCM_QUESTIONS_PER_MATCH, chapitres=None):
@@ -185,6 +211,8 @@ def lobby_payload(lobby):
         'chapitres_sel': list(lobby.chapitres),
         'chapitres': available_chapters(lobby.themes),
         'nb_questions': lobby.nb_questions,
+        'review_mode': lobby.review_mode,
+        'delayed_feedback': lobby.delayed_feedback,
         'etat': lobby.etat,
         'joueurs': [
             {'prenom': p, 'pret': lobby.ready.get(p, False),
@@ -219,6 +247,8 @@ class Lobby:
         self.ready = {leader: False}
         self.themes = [theme] if theme in QCM_FILES else []
         self.chapitres = []
+        self.review_mode = False
+        self.delayed_feedback = False
         self.nb_questions = QCM_QUESTIONS_PER_MATCH
         self.etat = 'attente'
         self.game = None
@@ -287,6 +317,10 @@ class Game:
         self.open_end = 0.0
         self.alive = True
         self.answer_event = Event()
+        self.review = getattr(lobby, 'review_mode', False)
+        self.delayed = getattr(lobby, 'delayed_feedback', False)
+        self.retry_queue = []
+        self.feedback_buffer = []
 
     def send_all(self, event, payload):
         io.emit(event, payload, room=self.gid)
@@ -315,6 +349,7 @@ class Game:
             self.send_all('qcm_debut', {
                 'gid': self.gid, 'joueurs': self.joueurs, 'scores': self.scores,
                 'total': len(self.questions), 'theme': self.theme,
+                'review': self.review,
                 'media': questions_media(self.questions),
             })
             print(f'[qcm-web] {self.gid} début: {len(self.questions)} questions, joueurs={self.joueurs}')
@@ -359,6 +394,9 @@ class Game:
                     else:
                         choice, elapsed = answer
                         ok = choice == correct
+                        if (self.review and not ok and not question.get('_reasked')
+                                and self.qindex not in self.retry_queue):
+                            self.retry_queue.append(self.qindex)
                         points = kahoot_points(elapsed, question['time']) if ok else 0
                     self.scores[player] = self.scores.get(player, 0) + points
                     detail.append({'prenom': player, 'ok': ok, 'pts': points, 'elapsed': elapsed})
@@ -374,17 +412,33 @@ class Game:
                         except Exception:
                             pass
 
-                self.send_all('qcm_reveal', {
-                    'gid': self.gid, 'q': self.qindex + 1, 'correct': correct,
-                    'bonne': question['choices'][correct], 'detail': detail,
-                    'scores': self.scores,
-                    'cloturee_tot': cloturee_tot,
-                    'explication': question.get('explication', ''),
-                })
+                if self.delayed and not self.review:
+                    self.feedback_buffer.append({
+                        'q': self.qindex + 1, 'correct': correct,
+                        'explication': question.get('explication', ''),
+                    })
+                else:
+                    self.send_all('qcm_reveal', {
+                        'gid': self.gid, 'q': self.qindex + 1, 'correct': correct,
+                        'bonne': question['choices'][correct], 'detail': detail,
+                        'scores': self.scores,
+                        'cloturee_tot': cloturee_tot,
+                        'explication': question.get('explication', ''),
+                    })
                 print(f'[qcm-web] {self.gid} q{self.qindex + 1} reveal '
                       f'(anticipée={cloturee_tot}), scores={self.scores}')
                 self.qindex += 1
-                io.sleep(QCM_REVEAL_TIME_S)
+                if self.review and self.qindex >= len(self.questions) and self.retry_queue:
+                    # Micro-spacing : les questions ratees sont reposees une fois en fin de session.
+                    retry = []
+                    for idx in self.retry_queue:
+                        qretry = dict(self.questions[idx])
+                        qretry['_reasked'] = True
+                        qretry['time'] = 3600
+                        retry.append(qretry)
+                    self.questions.extend(retry)
+                    self.retry_queue = []
+                io.sleep(0 if (self.delayed and not self.review) else QCM_REVEAL_TIME_S)
 
             classement = sorted(self.scores.items(), key=lambda item: -item[1])
             if _record_game is not None:
@@ -397,6 +451,7 @@ class Game:
             self.send_all('qcm_fin', {
                 'gid': self.gid,
                 'podium': [{'prenom': p, 'score': s} for p, s in classement],
+                'corrections': self.feedback_buffer,
             })
             print(f'[qcm-web] {self.gid} fin: {classement}')
         except Exception as exc:
@@ -426,7 +481,10 @@ def try_start_lobby(lobby):
         return
     if not PRESENT.get(lobby.leader, {}).get('connected'):
         return
-    questions = pick_questions(lobby.themes, lobby.nb_questions, lobby.chapitres)
+    if lobby.review_mode:
+        questions = review_questions(lobby.leader, lobby.themes, lobby.nb_questions, lobby.chapitres)
+    else:
+        questions = pick_questions(lobby.themes, lobby.nb_questions, lobby.chapitres)
     if not questions:
         cible = ' + '.join(lobby.themes) if lobby.themes else 'tous thèmes'
         if lobby.chapitres:
@@ -452,12 +510,13 @@ def try_start_lobby(lobby):
     io.start_background_task(game.run)
 
 
-def register(socketio, data_dir, on_answer=None, on_game_end=None):
-    global io, QCM_FILES, _record_answer, _record_game
+def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=None):
+    global io, QCM_FILES, _record_answer, _record_game, _review_query
     io = socketio
     QCM_FILES = {name: Path(data_dir) / f'qcm_{name}.json' for name in QCM_THEMES}
     _record_answer = on_answer
     _record_game = on_game_end
+    _review_query = review_query
 
     @io.on('qcm_ping')
     def on_ping(data):
@@ -607,6 +666,43 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None):
         print(f'[qcm-web] {lobby.lid} {prenom} prêt={pret}')
         push_lobbies()
         try_start_lobby(lobby)
+
+    @io.on('qcm_lobby_review')
+    def on_lobby_review(data):
+        prenom = session.get('sr_user')
+        data = data or {}
+        lid = LOBBY_BY_PLAYER.get(prenom or '')
+        lobby = LOBBIES.get(lid) if lid else None
+        if lobby is None or lobby.etat != 'attente':
+            return
+        if prenom != lobby.leader:
+            return {'ok': False, 'message': 'Seul le leader peut activer le mode revue'}
+        if len(lobby.players) > 1:
+            return {'ok': False, 'message': 'Le mode revue est solo'}
+        review = bool(data.get('review', False))
+        if review:
+            qs = review_questions(prenom, lobby.themes, lobby.nb_questions, lobby.chapitres)
+            if not qs:
+                return {'ok': False, 'message': 'Aucune erreur a revoir'}
+        lobby.review_mode = review
+        if review:
+            lobby.delayed_feedback = True
+        print(f'[qcm-web] {lobby.lid} mode revue={review}')
+        push_lobbies()
+
+    @io.on('qcm_lobby_feedback')
+    def on_lobby_feedback(data):
+        prenom = session.get('sr_user')
+        data = data or {}
+        lid = LOBBY_BY_PLAYER.get(prenom or '')
+        lobby = LOBBIES.get(lid) if lid else None
+        if lobby is None or lobby.etat != 'attente':
+            return
+        if prenom != lobby.leader:
+            return {'ok': False, 'message': 'Seul le leader peut changer cette option'}
+        lobby.delayed_feedback = bool(data.get('delayed', False))
+        print(f'[qcm-web] {lobby.lid} feedback retarde={lobby.delayed_feedback}')
+        push_lobbies()
 
     @io.on('qcm_lobby_theme')
     def on_lobby_theme(data):

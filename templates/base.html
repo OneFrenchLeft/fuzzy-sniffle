@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Forgecard{% endblock %}</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css', v=20) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css', v=18) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='katex/katex.min.css') }}">
+  <script defer src="{{ url_for('static', filename='katex/katex.min.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='katex/contrib/auto-render.min.js') }}"></script>
   <script>
   window.katexDelimiters = [
     { left: '$$', right: '$$', display: true },
@@ -14,21 +17,7 @@
     { left: '\\(', right: '\\)', display: false }
   ];
   </script>
-  <link rel="stylesheet" href="/static/katex/katex.min.css">
-  <script defer src="/static/katex/katex.min.js"></script>
-  <script defer src="/static/katex/contrib/auto-render.min.js"></script>
-  <script>
-  document.addEventListener('DOMContentLoaded', function () {
-    if (window.renderMathInElement) {
-      renderMathInElement(document.body, {
-        delimiters: window.katexDelimiters,
-        throwOnError: false,
-        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
-      });
-    }
-  });
-  </script>
-  <script src="{{ url_for('static', filename='js/app.js', v=20) }}" defer></script>
+  <script src="{{ url_for('static', filename='js/app.js', v=18) }}" defer></script>
 </head>
 <body data-page="{{ active }}">
 <canvas id="confetti-canvas"></canvas>

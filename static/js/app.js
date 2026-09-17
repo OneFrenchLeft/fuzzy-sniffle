@@ -110,8 +110,8 @@ function flashStatus(elId, message, isError, ms) {
   flashTimers[elId] = setTimeout(function () { el.classList.remove('show'); }, ms);
 }
 
-function om(id) { document.getElementById(id).classList.add('open'); }
-function cm(id) { document.getElementById(id).classList.remove('open'); }
+function om(id) { var el = document.getElementById(id); if (el) el.classList.add('open'); }
+function cm(id) { var el = document.getElementById(id); if (el) el.classList.remove('open'); }
 function openSrInfoModal() { om('sr-info-overlay'); }
 function closeSrInfoModal() { cm('sr-info-overlay'); }
 function openTirageInfoModal() { om('tirage-info-overlay'); }
@@ -161,29 +161,10 @@ function loadCompteDashboard() {
     var set = function (id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
     set('dash-streak', d.streak + ' j');
     set('dash-record', d.record + ' j');
-    set('dash-jokers', d.jokers + ' / 2');
+    set('dash-jokers', d.jokers + ' / 4');
     set('dash-semaine', d.semaine);
     set('dash-total', d.total);
   }).catch(function (e) { console.error(e); });
-  fetchJson('/api/sr/qcm/weak').then(renderQcmWeak).catch(function (e) { console.error('qcm weak', e); });
-}
-
-function renderQcmWeak(d) {
-  var box = document.getElementById('compte-qcm-weak');
-  if (!box || !d || !d.ok) return;
-  if (!d.rows.length) { box.innerHTML = ''; return; }
-  var html = '<div class="section-title" style="margin:.5rem 0">Questions QCM à retravailler</div>' +
-    '<p class="home-subtitle" style="text-align:left;font-size:.8rem;margin-bottom:.5rem">Tes questions les plus ratées, toutes parties confondues.</p>';
-  d.rows.forEach(function (r) {
-    var label = r.question.length > 110 ? r.question.slice(0, 110) + '…' : r.question;
-    var color = r.taux_echec >= 40 ? '#c0392b' : (r.taux_echec >= 20 ? '#e67e22' : '#27ae60');
-    html += '<div class="admin-row"><div>' +
-      '<div style="font-size:.88rem">' + esc(label) + '</div>' +
-      '<div class="meta">' + esc(r.theme) + (r.chapitre ? ' · ' + esc(r.chapitre) : '') + '</div></div>' +
-      '<div class="meta" style="white-space:nowrap"><span class="weak-badge" style="background:' + color + '">' +
-      r.taux_echec + ' %</span><br>' + r.echecs + '/' + r.sorties + ' ratées</div></div>';
-  });
-  box.innerHTML = html;
 }
 
 function refreshAuthUI() {
@@ -1999,6 +1980,7 @@ document.addEventListener('keydown', function (e) {
 
 document.addEventListener('DOMContentLoaded', function () {
   applyTheme(localStorage.getItem('mdc-theme') || 'light');
+  if (PAGE === 'compte') loadCompteDashboard();
 
   ['up-difficulty', 'edit-difficulty'].forEach(function (id) {
     var input = document.getElementById(id);
@@ -2024,16 +2006,20 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   var search = document.getElementById('liste-search');
+  var searchTimer = null;
   if (search) {
     search.addEventListener('input', function () {
       var q = search.value.trim().toLowerCase();
       var clearBtn = document.getElementById('liste-search-clear');
       if (clearBtn) clearBtn.style.display = q ? 'inline-block' : 'none';
-      if (!q) { renderPublicList(allPublicCards); return; }
-      var filtered = allPublicCards.filter(function (c) {
-        return (c.titre || '').toLowerCase().indexOf(q) !== -1 || String(c.numero).indexOf(q) !== -1 || (c.chapitre || '').toLowerCase().indexOf(q) !== -1;
-      });
-      renderPublicList(filtered);
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(function () {
+        if (!q) { renderPublicList(allPublicCards); return; }
+        var filtered = allPublicCards.filter(function (c) {
+          return (c.titre || '').toLowerCase().indexOf(q) !== -1 || String(c.numero).indexOf(q) !== -1 || (c.chapitre || '').toLowerCase().indexOf(q) !== -1;
+        });
+        renderPublicList(filtered);
+      }, 150);
     });
   }
 
@@ -2136,7 +2122,7 @@ function loadSrQcmErrors() {
       return;
     }
     var html = '';
-    d.rows.forEach(function (r) {
+    d.rows.slice(0, 10).forEach(function (r) {
       var when = fmtDateTimeFR(r.created_at);
       var theme = r.theme ? esc(r.theme) + (r.chapitre ? ' · ' + esc(r.chapitre) : '') : '';
       html += '<div class="note-item">' +
@@ -2147,7 +2133,11 @@ function loadSrQcmErrors() {
         '</div>';
     });
     box.innerHTML = html;
-    if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([box]).catch(function (e) { console.error(e); });
+    if (window.renderMathInElement && window.katexDelimiters) {
+      try { renderMathInElement(box, { delimiters: window.katexDelimiters, throwOnError: false }); } catch (e) { console.warn('KaTeX compte:', e); }
+    } else if (window.MathJax && MathJax.typesetPromise) {
+      MathJax.typesetPromise([box]).catch(function () {});
+    }
   }).catch(function () {
     box.innerHTML = '<p class="hint">Impossible de charger les erreurs QCM.</p>';
   });

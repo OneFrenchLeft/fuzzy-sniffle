@@ -84,11 +84,11 @@ html[data-theme=dark] .btn-primary{color:#06201f}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(0,0,0,.15);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-/* ---------- Pastille de thème (couleur par matière) ---------- */
+
 .theme-chip{display:inline-flex;align-items:center;color:#fff;font-size:.68rem;font-weight:800;border-radius:999px;padding:.22rem .65rem;text-transform:uppercase;letter-spacing:.05em;box-shadow:0 2px 6px rgba(0,0,0,.15)}
 .chapitre-chip{display:inline-flex;align-items:center;font-size:.68rem;font-weight:700;border-radius:999px;padding:.22rem .65rem;letter-spacing:.02em;border:1px solid var(--border);background:var(--surface);color:var(--muted)}
 
-/* ---------- Lobbies ---------- */
+
 .lobby-grid{display:flex;flex-direction:column;gap:var(--space-4)}
 .lobby-card{border:1px solid var(--border);border-left:4px solid var(--primary);border-radius:var(--radius-lg);background:var(--bg);padding:1.6rem 2rem;transition:transform .15s,box-shadow .15s,border-color .15s;animation:rise .25s ease;overflow:hidden}
 .lobby-card:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
@@ -124,13 +124,13 @@ html[data-theme=dark] .btn-primary{color:#06201f}
 .lobby-card.mini .dot{width:10px;height:10px;border-radius:50%;flex:none}
 .lobby-card.mini .nom{font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* ---------- Mon lobby ---------- */
+
 .mylobby-head{display:flex;align-items:center;justify-content:space-between;gap:.6rem;flex-wrap:wrap;margin-bottom:var(--space-3)}
 .mylobby-head .nom{font-size:1.15rem;font-weight:800;display:flex;align-items:center;gap:.45rem}
 .mylobby-head-right{display:flex;align-items:center;gap:.5rem}
 .btn-leave{width:1.9rem;height:1.9rem;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;font-size:.85rem;font-weight:700;line-height:1;transition:color .15s,border-color .15s,transform .2s;flex:none}
 .btn-leave:hover{color:var(--bad);border-color:var(--bad);transform:rotate(90deg)}
-/* Réglages du leader : longueur + thème + chapitre sur une grille */
+
 .settings-grid{display:grid;grid-template-columns:auto 1fr 1fr;gap:.6rem;align-items:end;margin:.4rem 0 .2rem}
 .settings-grid .field{display:flex;flex-direction:column;gap:.3rem}
 .settings-grid label{margin:0}
@@ -144,7 +144,7 @@ html[data-theme=dark] .btn-primary{color:#06201f}
 .ready-fill.complet{background:linear-gradient(90deg,#34a853,#7bd88a)}
 .mylobby-actions{margin-top:var(--space-6)}
 
-/* ---------- Partie ---------- */
+
 .qhead{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem;margin-bottom:var(--space-2);color:var(--muted);font-size:.88rem;font-weight:600}
 .timerbar{height:10px;border-radius:999px;background:var(--bg);border:1px solid var(--border);overflow:hidden;margin-bottom:var(--space-4)}
 .timerbar>div{height:100%;background:linear-gradient(90deg,var(--primary),var(--primary-hover));width:100%;transition:width .15s linear;border-radius:999px}
@@ -157,6 +157,7 @@ html[data-theme=dark] .btn-primary{color:#06201f}
 .choice .shape{font-size:1.3rem;flex:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.25))}
 .choice .ctext{line-height:1.25;font-weight:700;min-width:0;overflow-wrap:break-word}
 .choice .ctext img{max-width:110px;max-height:80px;border-radius:.5rem;background:#fff;padding:.15rem}
+.review-mode #qtimer,.review-mode #qbar{display:none!important}
 .choice:disabled{cursor:not-allowed}
 .choice.open{opacity:1}
 .choice.open:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.2)}
@@ -182,7 +183,7 @@ html[data-theme=dark] .btn-primary{color:#06201f}
 .errors li small{color:var(--muted);display:block;margin-top:4px;line-height:1.4}
 .gap-top{margin-top:var(--space-4)}
 
-/* ------------------------- Grand écran ------------------------- */
+
 @media (min-width:601px){
   .panel{padding:2.5rem}
   .lobby-grid{gap:1.25rem}
@@ -192,7 +193,7 @@ html[data-theme=dark] .btn-primary{color:#06201f}
   .ready-line{margin-top:var(--space-6)}
 }
 
-/* ------------------------- Mobile ------------------------- */
+
 @media (max-width:600px){
   body::after{opacity:.10}
   header{padding:var(--space-3) var(--space-4)}
@@ -219,7 +220,7 @@ html[data-theme=dark] .btn-primary{color:#06201f}
   .lobby-card-actions{justify-content:stretch}
   .lobby-card-actions .btn-primary{width:100%}
   .create-card{padding:var(--space-4)}
-  /* Réglages empilés proprement : nb seul, thème + chapitre dessous */
+
   .settings-grid{grid-template-columns:1fr;gap:.75rem}
   .settings-grid .field-nb input{max-width:none}
   .qtext{font-size:1.05rem}
@@ -237,13 +238,13 @@ html[data-theme=dark] .btn-primary{color:#06201f}
   .choice{min-height:56px}
 }
 
-/* Chips de sélection multi (lobby) */
+
 .chips-row{display:flex;gap:.5rem;flex-wrap:wrap}
 .chip-select{border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:999px;padding:.5rem .9rem;font:inherit;font-size:.85rem;font-weight:700;cursor:pointer;min-height:44px;transition:background .15s,border-color .15s,color .15s}
 .chip-select.active{background:var(--primary);color:#fff;border-color:var(--primary)}
 html[data-theme=dark] .chip-select.active{color:#06201f}
 .settings-grid .field-wide{grid-column:1/-1}
-/* Dropdown multi-chapitres */
+
 .chap-dropdown{position:relative;display:inline-block}
 .chap-drop-panel{display:none;position:absolute;top:calc(100% + .35rem);left:0;z-index:60;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:.35rem;min-width:min(280px,80vw);max-height:260px;overflow-y:auto}
 .chap-dropdown.open .chap-drop-panel{display:block}
@@ -253,7 +254,7 @@ html[data-theme=dark] .chip-select.active{color:#06201f}
 .chap-drop-all{font-weight:800;color:var(--primary);border-bottom:1px solid var(--border);border-radius:.5rem .5rem 0 0}
 .chap-origin{color:var(--muted);font-weight:700;font-size:.72rem;text-transform:uppercase;letter-spacing:.03em}
 
-/* Latin Modern : questions et reponses uniquement */
+
 @font-face{font-family:'LM Roman';src:url('/static/fonts/lmroman10-regular.otf') format('opentype');font-weight:400;font-style:normal}
 @font-face{font-family:'LM Roman';src:url('/static/fonts/lmroman10-bold.otf') format('opentype');font-weight:700;font-style:normal}
 @font-face{font-family:'LM Roman';src:url('/static/fonts/lmroman10-italic.otf') format('opentype');font-weight:400;font-style:italic}
@@ -268,7 +269,7 @@ html[data-theme=dark] .chip-select.active{color:#06201f}
   <a class="logo" href="/" title="Retour à l'accueil">Forgecards</a>
   <button class="hamburger-btn" id="hamburger-btn" type="button" aria-label="Ouvrir le menu" aria-expanded="false" aria-controls="qcm-nav"><span></span><span></span><span></span></button>
   <nav class="nav" id="qcm-nav">
-    <a class="nav-btn" href="/sr">← Répétition espacée</a>
+    <a class="nav-btn" href="/compte">← Compte</a>
     <span class="name-chip" id="conn">connexion…</span>
     <button class="theme-toggle" id="theme-toggle" type="button" title="Basculer thème clair/sombre"></button>
   </nav>
@@ -306,6 +307,7 @@ html[data-theme=dark] .chip-select.active{color:#06201f}
 'use strict';
 var $=function(id){return document.getElementById(id);};
 var PRENOM=$('qcm-meta').dataset.prenom||'',READ_S=4;
+var inGame=false,currentGid=null,quitGid=null;
 function applyTheme(theme){document.documentElement.setAttribute('data-theme',theme);var b=$('theme-toggle');b.textContent=theme==='dark'?'☀️ Jour':'🌙 Nuit';b.setAttribute('aria-label',theme==='dark'?'Passer en thème clair':'Passer en thème sombre');localStorage.setItem('mdc-theme',theme);}
 $('theme-toggle').onclick=function(){applyTheme((document.documentElement.getAttribute('data-theme')||'light')==='dark'?'light':'dark');};
 applyTheme(localStorage.getItem('mdc-theme')||'light');
@@ -342,7 +344,7 @@ function joueurLine(j,couronne,canKick){
   return line;
 }
 
-/* Thèmes : valeur, libellé, couleur de la pastille */
+
 var THEMES=[['physique','Physique','#01696f'],['chimie','Chimie','#8e44ad'],['maths','Maths','#2980b9']];
 function themeOptions(current){return THEMES.map(function(t){return '<option value="'+t[0]+'"'+(t[0]===current?' selected':'')+'>'+t[1]+'</option>';}).join('');}
 function themeLabel(key){var t=THEMES.find(function(x){return x[0]===key;});return t?t[1]:key;}
@@ -352,7 +354,7 @@ function chapitreChipEl(chapitres,nb){var list=Array.isArray(chapitres)?chapitre
 function countLabel(n){return n+' joueur'+(n>1?'s':'');}
 function chapitreOptions(list,current){return '<option value="">Tous les chapitres</option>'+(list||[]).map(function(c){return '<option value="'+c.replace(/"/g,'&quot;')+'"'+(c===current?' selected':'')+'>'+c+'</option>';}).join('');}
 
-/* Chips multi-sélection : sel=[] signifie "Tout/Tous" (tout cocher revient à Tout) */
+
 function chipRow(options,sel,allLabel,onChange){
   var box=document.createElement('div');box.className='chips-row';
   function draw(){
@@ -377,10 +379,7 @@ function chipRow(options,sel,allLabel,onChange){
   return box;
 }
 
-/* Dropdown multi-chapitres : paires [theme, chapitre], sel vide = Tous.
-   IMPORTANT : l'émission est différée à la fermeture du panneau. Chaque envoi
-   provoque un qcm_lobbies qui reconstruit tout le DOM — émettre à chaque clic
-   refermait le panneau sous le doigt de l'utilisateur. */
+
 document.addEventListener('click',function(e){
   document.querySelectorAll('.chap-dropdown.open').forEach(function(d){ if(!d.contains(e.target)) d._close(); });
 });
@@ -432,7 +431,7 @@ var currentLobbies=[];
 var scores={},questions=[],currentQ=0,answered=false,phase=null,endTs=0,qtime=30,tick=null;
 var soc=io({withCredentials:true});
 
-/* ---------- Synchronisation d'horloge (NTP simplifié) ---------- */
+
 var clockOffset=0,bestRtt=Infinity;
 function syncClock(){
   var t0=Date.now()/1000;
@@ -511,7 +510,7 @@ function renderMyLobby(container,lobby){
   var isLeader=lobby.leader===PRENOM;
   var prets=lobby.joueurs.filter(function(j){return j.pret;}).length;
 
-  /* En-tête : nom à gauche — compteur + porte de sortie à droite */
+
   var head=document.createElement('div');head.className='mylobby-head';
   var nom=document.createElement('div');nom.className='nom';nom.textContent=(isLeader?'👑 ':'')+lobby.nom;
   var right=document.createElement('div');right.className='mylobby-head-right';
@@ -523,14 +522,14 @@ function renderMyLobby(container,lobby){
   right.appendChild(quit);
   head.appendChild(nom);head.appendChild(right);container.appendChild(head);
 
-  /* Réglages : leader -> grille longueur/thème/chapitre ; autres -> pastilles */
+
   if(isLeader&&lobby.etat==='attente'){
     var grid=document.createElement('div');grid.className='settings-grid';
 
     var fNb=document.createElement('div');fNb.className='field field-nb';
     var lNb=document.createElement('label');lNb.textContent='Questions';
     var nb=document.createElement('input');nb.type='number';nb.min='1';nb.max='20';nb.step='1';nb.inputMode='numeric';nb.value=lobby.nb_questions||5;
-    // Borne immédiate à la frappe ; envoi au serveur uniquement sur change/Enter
+
     nb.addEventListener('input',function(){
       var v=parseInt(nb.value,10);
       if(!isNaN(v)){if(v<1)nb.value=1;if(v>20)nb.value=20;}
@@ -572,7 +571,7 @@ function renderMyLobby(container,lobby){
     container.appendChild(row);
   }
 
-  /* Progression des "prêts" */
+
   var line=document.createElement('div');line.className='ready-line';
   var lt=document.createElement('b');lt.textContent=prets+'/'+lobby.joueurs.length+' prêts';
   var lt2=document.createElement('span');lt2.textContent=prets===lobby.joueurs.length?'démarrage…':'la partie démarre quand tout le monde est prêt';
@@ -582,14 +581,13 @@ function renderMyLobby(container,lobby){
   fill.style.width=Math.round(100*prets/Math.max(1,lobby.joueurs.length))+'%';
   track.appendChild(fill);container.appendChild(track);
 
-  /* Joueurs */
+
   var list=document.createElement('div');list.className='lobby-card-joueurs gap-top';
   lobby.joueurs.forEach(function(j){
     list.appendChild(joueurLine(j,j.prenom===lobby.leader,isLeader&&j.prenom!==PRENOM&&lobby.etat==='attente'));
   });
   container.appendChild(list);
 
-  /* Bas de carte : uniquement l'action héros */
   var me=lobby.joueurs.find(function(j){return j.prenom===PRENOM;});
   var ready=me&&me.pret;
   var actions=document.createElement('div');actions.className='mylobby-actions';
@@ -598,6 +596,39 @@ function renderMyLobby(container,lobby){
   readyBtn.disabled=lobby.etat==='partie';
   if(ready)readyBtn.style.background='linear-gradient(135deg,#34a853,#27ae60)';
   readyBtn.onclick=function(){soc.emit('qcm_lobby_ready',{pret:!ready});};
+  var reviewToggle=document.createElement('div');reviewToggle.className='field';
+  reviewToggle.style.margin='.5rem 0';
+  var reviewLabel=document.createElement('label');
+  reviewLabel.style.cssText='display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text);cursor:pointer';
+  var reviewChk=document.createElement('input');reviewChk.type='checkbox';reviewChk.id='review-mode-chk';reviewChk.style.width='auto';
+  reviewChk.checked=!!lobby.review_mode;
+  if(lobby.joueurs.length!==1){reviewChk.disabled=true;reviewChk.title='Mode relecture réservé au solo';}
+  reviewLabel.appendChild(reviewChk);
+  reviewLabel.appendChild(document.createTextNode(' Mode relecture (solo, sans le timer)'));
+  reviewToggle.appendChild(reviewLabel);
+  reviewChk.onchange=function(){
+    soc.emit('qcm_lobby_review',{review:reviewChk.checked},function(r){
+      if(r&&!r.ok){toast(r.message||'Revue impossible');reviewChk.checked=false;}
+    });
+  };
+  actions.appendChild(reviewToggle);
+
+  var fbToggle=document.createElement('div');fbToggle.className='field';
+  fbToggle.style.margin='.5rem 0';
+  var fbLabel=document.createElement('label');
+  fbLabel.style.cssText='display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text);cursor:pointer';
+  var fbChk=document.createElement('input');fbChk.type='checkbox';fbChk.id='delayed-fb-chk';fbChk.style.width='auto';
+  fbChk.checked=!!lobby.delayed_feedback;
+  fbLabel.appendChild(fbChk);
+  fbLabel.appendChild(document.createTextNode(' Cacher les bonnes réponses pendant le QCM (mode réduit)'));
+  fbToggle.appendChild(fbLabel);
+  fbChk.onchange=function(){
+    soc.emit('qcm_lobby_feedback',{delayed:fbChk.checked},function(r){
+      if(r&&!r.ok){toast(r.message||'Option refusee');fbChk.checked=false;}
+    });
+  };
+  actions.appendChild(fbToggle);
+
   actions.appendChild(readyBtn);
   container.appendChild(actions);
 }
@@ -619,9 +650,10 @@ function renderOtherLobbies(container,mine){
 
 soc.on('qcm_lobbies',function(data){renderLobbies(data);});
 
-soc.on('qcm_debut',function(d){preloadImages(d.media);scores=d.scores||{};questions=[];currentQ=0;answered=false;phase=null;show('game');$('qtext').classList.remove('qm');$('qtext').textContent='La partie démarre…';$('qimg').innerHTML='';$('choices').innerHTML='';$('qstatus').textContent='Prépare-toi !';$('qnum').textContent='';$('qtimer').textContent='';$('qbar').style.width='100%';$('qscore').textContent='';});
+soc.on('qcm_debut',function(d){if(d.gid&&d.gid===quitGid)return;inGame=true;currentGid=d.gid||null;document.body.classList.toggle('review-mode',!!d.review);preloadImages(d.media);scores=d.scores||{};questions=[];currentQ=0;answered=false;phase=null;show('game');$('qtext').classList.remove('qm');$('qtext').textContent='La partie démarre…';$('qimg').innerHTML='';$('choices').innerHTML='';$('qstatus').textContent='Prépare-toi !';$('qnum').textContent='';$('qtimer').textContent='';$('qbar').style.width='100%';$('qscore').textContent='';});
 
 soc.on('qcm_question',function(d){
+  if(!inGame)return;
   var isNewQuestion=(d.q!==currentQ)||d.phase==='lecture';
   show('game');
   currentQ=d.q;
@@ -682,6 +714,7 @@ function answer(i,btn){
 }
 
 soc.on('qcm_reveal',function(d){
+  if(!inGame)return;
   if(tick)clearInterval(tick);phase=null;scores=d.scores||scores;
   $('qbar').style.width='0%';
   $('qtimer').textContent='';
@@ -693,7 +726,8 @@ soc.on('qcm_reveal',function(d){
 });
 
 soc.on('qcm_fin',function(d){
-  if(tick)clearInterval(tick);phase=null;
+  if(tick)clearInterval(tick);phase=null;inGame=false;currentGid=null;document.body.classList.remove('review-mode');
+  (d.corrections||[]).forEach(function(c){var q=questions[c.q-1];if(q){q.correct=c.correct;q.explication=c.explication||'';}});
   var ol=$('podium');ol.innerHTML='';var medals=['🥇','🥈','🥉'];
   (d.podium||[]).forEach(function(r,i){var li=document.createElement('li'),left=document.createElement('span'),right=document.createElement('span');left.textContent=(medals[i]||(i+1)+'.')+' '+r.prenom;right.textContent=r.score+' pts';li.appendChild(left);li.appendChild(right);ol.appendChild(li);});
   var ul=$('errors');ul.innerHTML='';var shapes=['▲','◆','●','■'],n=0;
@@ -713,7 +747,7 @@ soc.on('qcm_fin',function(d){
 });
 
 $('btn-lobby').onclick=function(){show('lobby');};
-$('btn-quit').onclick=function(){soc.emit('qcm_quit',{},function(){});if(tick)clearInterval(tick);phase=null;show('lobby');};
+$('btn-quit').onclick=function(){quitGid=currentGid;inGame=false;currentGid=null;soc.emit('qcm_quit',{},function(){});if(tick)clearInterval(tick);phase=null;show('lobby');};
 function updateScoreLine(){var parts=Object.keys(scores).sort(function(a,b){return scores[b]-scores[a];}).map(function(p,i){return(i+1)+'. '+p+' ('+scores[p]+')';});$('qscore').textContent=parts.length?'classement : '+parts.join(' · '):'';}
 })();
 </script>
