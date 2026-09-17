@@ -143,7 +143,7 @@ RATE_LIMIT_WINDOW = 300
 
 # --- Constantes metier (regroupees, point 11 revue de code) ---
 JOKER_CAP = 2          # stock max de jokers par eleve
-JOKER_EVERY = 8        # un joker gagne tous les 8 jours de serie
+JOKER_EVERY = 4        # un joker gagne tous les 4 jours de serie
 QCM_WEAK_LIMIT = 10    # questions remontees dans les blocs QCM (faibles / erreurs)
 RATE_LIMIT_MAX = 8
 
