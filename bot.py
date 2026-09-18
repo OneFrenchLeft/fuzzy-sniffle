@@ -998,7 +998,7 @@ async def _post(path, payload, timeout=10):
     """POST interne non bloquant : requests est synchrone, on le pousse dans un thread."""
     def _do():
         r = requests.post(f"{SITE_URL}{path}",
-                          headers={"X-Madec-Internal-Key": INTERNAL_API_KEY},
+                          headers={"X-Madec-Internal-Key": INTERNAL_KEY},
                           json=payload, timeout=timeout)
         return r.json()
     return await asyncio.to_thread(_do)

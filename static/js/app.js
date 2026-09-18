@@ -3,6 +3,7 @@
 var PAGE = document.body.dataset.page || '';
 var params = { max_active_num: 36, fsrs_retention: 0.80 };
 var horsSerieMode = false;
+var kholleMode = false;
 var pendingPrenom = null;
 var currentSrUser = null;
 var allPublicCards = [];
@@ -657,6 +658,8 @@ function loadParams() {
     document.getElementById('f-max-active').value = p.max_active_num;
     var hsMaxEl = document.getElementById('f-max-hs');
     if (hsMaxEl) hsMaxEl.value = p.max_hors_serie_num != null ? p.max_hors_serie_num : 0;
+    var khMaxEl = document.getElementById('f-max-kholle');
+    if (khMaxEl) khMaxEl.value = p.max_kholle_num != null ? p.max_kholle_num : 0;
     var fEl = document.getElementById('f-fsrs-retention');
     if (fEl) fEl.value = Math.round((p.fsrs_retention || 0.80) * 100);
     var newEl = document.getElementById('f-daily-new');
@@ -672,6 +675,7 @@ function saveParams() {
   var body = {
     max_active_num: document.getElementById('f-max-active').value,
     max_hors_serie_num: (document.getElementById('f-max-hs') || {}).value || 0,
+    max_kholle_num: (document.getElementById('f-max-kholle') || {}).value || 0,
     fsrs_retention: retentionEl ? parseFloat(retentionEl.value) / 100 : 0.80,
     daily_new_limit: newEl ? newEl.value : 3,
     daily_review_limit: reviewEl ? reviewEl.value : 3,
@@ -1533,7 +1537,7 @@ function lancerTirage() {
   button.disabled = true;
   button.setAttribute('aria-busy', 'true');
   toggleSpinner('draw-spinner', true);
-  fetchJson('/api/draw?count=' + selectedDrawCount + (horsSerieMode ? '&hors_serie=1' : '')).then(function (cards) {
+  fetchJson('/api/draw?count=' + selectedDrawCount + (horsSerieMode ? '&hors_serie=1' : '') + (kholleMode ? '&kholle=1' : '')).then(function (cards) {
     toggleSpinner('draw-spinner', false);
     button.disabled = false;
     button.removeAttribute('aria-busy');
@@ -2062,14 +2066,28 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 })();
 
-function toggleHorsSerie() {
-  horsSerieMode = !horsSerieMode;
-  var sw = document.querySelector('.hs-switch');
+function toggleHsSwitch(toggleId, mode, label) {
+  var wrap = document.getElementById(toggleId);
+  var sw = wrap ? wrap.querySelector('.hs-switch') : null;
+  var on = !mode.current;
+  mode.current = on;
   if (sw) {
-    sw.classList.toggle('on', horsSerieMode);
-    sw.setAttribute('aria-checked', String(horsSerieMode));
+    sw.classList.toggle('on', on);
+    sw.setAttribute('aria-checked', String(on));
   }
-  showToast(horsSerieMode ? 'MODE HORS-SÉRIE' : 'MODE HORS-SÉRIE DÉSACTIVÉ');
+  showToast(on ? label : label + ' DÉSACTIVÉ');
+}
+
+var hsState = { current: false };
+var kholleState = { current: false };
+
+function toggleHorsSerie() {
+  toggleHsSwitch('hs-toggle', hsState, 'MODE HORS-SÉRIE');
+  horsSerieMode = hsState.current;
+}
+function toggleKholle() {
+  toggleHsSwitch('kholle-toggle', kholleState, 'MODE KHÔLLE');
+  kholleMode = kholleState.current;
 }
 
 function toggleHsNumero(on) {
@@ -2088,6 +2106,15 @@ function initHorsSerieToggle() {
   }).catch(function (e) { console.error(e); });
 }
 document.addEventListener('DOMContentLoaded', initHorsSerieToggle);
+
+function initKholleToggle() {
+  var t = document.getElementById('kholle-toggle');
+  if (!t) return;
+  fetchJson('/api/params').then(function (p) {
+    if (p && (p.max_kholle_num || 0) > 0) t.style.display = 'flex';
+  }).catch(function (e) { console.error(e); });
+}
+document.addEventListener('DOMContentLoaded', initKholleToggle);
 
 function retentionChartSvg(points) {
   var W = 600, H = 140, padL = 34, padB = 20, padT = 8, padR = 8;
