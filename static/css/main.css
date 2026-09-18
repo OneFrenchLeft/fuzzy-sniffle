@@ -23,8 +23,17 @@ html[data-theme=dark]{
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100dvh;transition:background .2s,color .2s}
 html,body{height:auto;overflow-x:clip;overflow-y:auto;overscroll-behavior-y:auto}
-:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px;
+  -webkit-user-select:none;
+  -moz-user-select:none;
+  user-select:none;
+  -webkit-touch-callout:none;}
 body.modal-open{overflow:hidden}
+input,textarea,[contenteditable="true"]{
+  -webkit-user-select:text;
+  -moz-user-select:text;
+  user-select:text;
+}
 
 
 
@@ -165,6 +174,68 @@ textarea{font-weight:400;resize:vertical;min-height:80px}
 
 /* XiaoXin: confetti renders above modals on purpose */
 #confetti-canvas{position:fixed;inset:0;pointer-events:none;z-index:200}
+
+.draw-box { position: relative; }
+.hs-toggle {
+  position: absolute;
+  top: -12px;
+  right: calc(50% - 90px);
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  z-index: 2;
+}
+.hs-toggle-label {
+  font-size: .62rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.hs-switch {
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #d8dede);
+  background: #cfd8d8;
+  cursor: pointer;
+  position: relative;
+  padding: 0;
+  transition: background .2s ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,.08);
+}
+.hs-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  transition: left .2s ease;
+}
+.hs-switch.on {
+  background: #e67e22;
+  border-color: #e67e22;
+}
+.fiche-hs { outline: 2px solid #e67e22; outline-offset: 2px; }
+
+
+.hs-toggle {
+  position: static;
+  transform: none;
+  top: auto;
+  left: auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  width: 100%;
+  justify-content: space-between;
+  z-index: auto;
+}
+
 
 
 
@@ -478,7 +549,18 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
 
   .qcm-preview-choices{grid-template-columns:1fr}
   .qcm-preview-choice{min-height:68px}
+  .hs-switch{min-height:0;height:26px;flex:none}
+  .hs-toggle{min-height:44px}
+  
 }
+
+@media (max-width:600px){
+  header{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:var(--space-3)}
+  header .hamburger-btn{order:0;grid-column:1;grid-row:1;justify-self:start}
+  header .logo{display:flex;align-items:center;justify-content:center;min-height:44px;
+               grid-column:2;grid-row:1;justify-self:center;align-self:center;text-align:center}
+}
+
 
 
 /* desktop */
@@ -505,64 +587,3 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
 
 
 
-.draw-box { position: relative; }
-.hs-toggle {
-  position: absolute;
-  top: -12px;
-  right: calc(50% - 90px);
-  display: flex;
-  align-items: center;
-  gap: .45rem;
-  z-index: 2;
-}
-.hs-toggle-label {
-  font-size: .62rem;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--muted);
-  font-weight: 600;
-}
-.hs-switch {
-  width: 46px;
-  height: 26px;
-  border-radius: 999px;
-  border: 1px solid var(--border, #d8dede);
-  background: #cfd8d8;
-  cursor: pointer;
-  position: relative;
-  padding: 0;
-  transition: background .2s ease;
-  box-shadow: 0 1px 2px rgba(0,0,0,.08);
-}
-.hs-switch::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0,0,0,.25);
-  transition: left .2s ease;
-}
-.hs-switch.on {
-  background: #e67e22;
-  border-color: #e67e22;
-}
-.fiche-hs { outline: 2px solid #e67e22; outline-offset: 2px; }
-
-
-/* --- Toggle hors-serie : integre dans la carte, rangee normale en haut --- */
-.hs-toggle {
-  position: static;
-  transform: none;
-  top: auto;
-  left: auto;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  width: 100%;
-  justify-content: space-between;
-  z-index: auto;
-}

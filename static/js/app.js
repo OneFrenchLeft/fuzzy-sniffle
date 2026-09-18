@@ -2169,3 +2169,26 @@ function loadSrQcmErrors() {
     box.innerHTML = '<p class="hint">Impossible de charger les erreurs QCM.</p>';
   });
 }
+(function () {
+  'use strict';
+  function isEditable(el) {
+    if (!el) return false;
+    if (el.isContentEditable) return true;
+    var t = el.tagName;
+    return t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT';
+  }
+  function clearStray() {
+    var s = window.getSelection && window.getSelection();
+    if (s && s.rangeCount && !s.isCollapsed) s.removeAllRanges();
+    var a = document.activeElement;
+    if (a && !isEditable(a) && a.blur) a.blur();
+  }
+  ['touchstart', 'mousedown'].forEach(function (evt) {
+    document.addEventListener(evt, function (e) {
+      if (!isEditable(e.target)) clearStray();
+    }, { passive: true });
+  });
+  document.addEventListener('selectstart', function (e) {
+    if (!isEditable(e.target)) e.preventDefault();   // steam hammmmer
+  });
+})();

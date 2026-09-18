@@ -56,6 +56,7 @@ if not ADMIN_PASSWORD:
 DEFAULT_PARAMS = {
     'max_active_num': 36,
     'max_hors_serie_num': 6,
+    'max_kholle_num': 12,
     'fsrs_retention': 0.90,
     'daily_new_limit': 3,
     'daily_review_limit': 3,
@@ -498,7 +499,7 @@ def read_params():
     out = DEFAULT_PARAMS.copy()
     for k, default in DEFAULT_PARAMS.items():
         try:
-            if k in ('max_active_num', 'daily_new_limit', 'daily_review_limit', 'max_hors_serie_num'):
+            if k in ('max_active_num', 'daily_new_limit', 'daily_review_limit', 'max_hors_serie_num', 'max_kholle_num'):
                 out[k] = max(0, int(data.get(k, default)))
             elif k == 'fsrs_retention':
                 out[k] = min(max(float(data.get(k, default)), 0.80), 0.97)
@@ -664,6 +665,41 @@ def admin_get_qcm(theme):
         return jsonify({'ok': False, 'error': f'lecture impossible : {e}'}), 500
     return jsonify({'ok': True, 'theme': theme, 'raw': raw, 'mtime': mtime})
 
+def _purge_retired_qids(theme=None, chapitre=''):
+    """Supprime de qcm_answers les lignes dont la question n'existe plus dans les fichiers."""
+    ensure_db()
+    themes = [theme] if theme in QCM_FILES else list(QCM_FILES)
+    active_qids = set()
+    for t in themes:
+        path = QCM_FILES[t]
+        if not path.exists():
+            continue
+        for q in qcm_engine.read_qcm_questions(path, theme=t):
+            if chapitre and (q.get('chapitre') or 'Autre') != chapitre:
+                continue
+            if q.get('qid'):
+                active_qids.add(q['qid'])
+    clauses, args = [], []
+    if theme in QCM_FILES:
+        clauses.append('theme = ?')
+        args.append(theme)
+    if chapitre:
+        clauses.append('chapitre = ?')
+        args.append(chapitre)
+    where = (' AND '.join(clauses)) if clauses else '1=1'
+    conn = db()
+    rows = conn.execute(f'SELECT DISTINCT qid FROM qcm_answers WHERE {where}', args).fetchall()
+    qids = [r['qid'] for r in rows if r['qid'] not in active_qids]
+    deleted = 0
+    if qids:
+        marks = ','.join('?' * len(qids))
+        cur = conn.execute(f'DELETE FROM qcm_answers WHERE qid IN ({marks}) AND {where}', qids + args)
+        deleted = cur.rowcount
+        conn.commit()
+    conn.close()
+    return deleted, len(qids)
+
+
 @app.route('/api/admin/qcm/<theme>', methods=['PUT'])
 @require_admin
 def admin_save_qcm(theme):
@@ -691,6 +727,12 @@ def admin_save_qcm(theme):
         except OSError:
             pass
         return jsonify({'ok': False, 'error': f'impossible d’enregistrer : {e}'}), 500
+    try:
+        purged, _ = _purge_retired_qids(theme=theme)
+        if purged:
+            print(f'[qcm-admin] purge auto : {purged} reponses supprimees ({theme})')
+    except Exception as exc:
+        print(f'[qcm-admin] purge auto impossible: {exc!r}')
     return jsonify({'ok': True, 'theme': theme, 'count': len(questions)})
 
 
@@ -819,7 +861,7 @@ def admin_qcm_games():
     conn = db()
     rows = conn.execute(
         "SELECT gid, themes, nb_questions, nb_players, podium, created_at "
-        "FROM qcm_games ORDER BY id DESC LIMIT 20").fetchall()
+        "FROM qcm_games ORDER BY id DESC LIMIT 15").fetchall()
     conn.close()
     out = []
     for r in rows:
@@ -881,26 +923,14 @@ def admin_qcm_weak():
             'derniere': s['derniere'] if s else None,
             'absente': False,
         })
-    for qid, s in stats.items():
-        if qid in seen:
-            continue
-        n = s['n']
-        bonnes = s['bonnes'] or 0
-        out.append({
-            'qid': qid, 'theme': s['theme'] or '',
-            'chapitre': s['chapitre'] or 'Autre',
-            'question': s['question'] or '',
-            'sorties': n,
-            'taux_echec': round(100 * (n - bonnes) / n, 1) if n else 0,
-            'derniere': s['derniere'],
-            'absente': True,
-        })
+    retired_count = sum(1 for qid in stats if qid not in seen)
     out.sort(key=lambda r: (-r['taux_echec'], -r['sorties']))
     return jsonify({
         'ok': True,
         'theme': theme,
         'chapitres': sorted(chapitres_disponibles, key=str.lower),
         'rows': out,
+        'retired_count': retired_count,
     })
 
 
@@ -998,12 +1028,17 @@ def page_not_found(e):
 
 @app.errorhandler(500)
 def internal_error(e):
+    import traceback
+    print('=== ERREUR 500 sur', request.path, '===')
+    print(traceback.format_exc())
+    if request.path.startswith('/api/'):
+        return jsonify({'ok': False, 'error': 'internal_server_error', 'path': request.path}), 500
     try:
         resp = send_from_directory(STATIC, '500.html')
         resp.status_code = 500
         return resp
     except Exception:
-        return make_response('Erreur interne du serveur', 500)
+        return make_response('Erreur interne', 500)
 
 
 @app.route('/')
@@ -1476,8 +1511,11 @@ def sr_qcm_errors():
     prenom = session['sr_user']
     conn = db()
     rows = conn.execute(
-        'SELECT qid, theme, chapitre, question, ok, elapsed, created_at '
-        'FROM qcm_answers WHERE prenom = ? ORDER BY id DESC LIMIT 10',
+        'SELECT a.qid, a.theme, a.chapitre, a.question, a.ok, a.elapsed, a.created_at '
+        'FROM qcm_answers a '
+        'JOIN (SELECT qid, MAX(id) AS mid FROM qcm_answers '
+        'WHERE prenom = ? AND ok = 0 GROUP BY qid) m ON a.id = m.mid '
+        'ORDER BY a.created_at DESC LIMIT 10',
         (prenom,)
     ).fetchall()
     conn.close()
@@ -2768,14 +2806,17 @@ def api_draw():
     DIFF_HALF_RANGE = 2.5
 
     hs_mode = request.args.get("hors_serie") == "1"
+    kholle_mode = request.args.get("kholle") == "1"
     max_hs = int(params.get("max_hors_serie_num", 0))
+    max_kholle = int(params.get("max_kholle_num", 0))
 
     conn = db()
 
+    plafond = max_kholle if (kholle_mode and max_kholle > 0) else max_active
     rows = conn.execute(
         "SELECT numero, code, titre, chapitre, fiche_file, correction_file, bareme_file, indices, teacher_difficulty, hors_serie "
         "FROM forgecards WHERE numero <= ? AND hors_serie = 0 ORDER BY numero ASC",
-        (max_active,)
+        (plafond,)
     ).fetchall()
     if hs_mode and max_hs > 0:
         rows += conn.execute(
@@ -2873,3 +2914,4 @@ init_db()
 
 if __name__ == '__main__':
     app.run(debug=False)
+

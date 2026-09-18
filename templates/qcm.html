@@ -269,7 +269,7 @@ html[data-theme=dark] .chip-select.active{color:#06201f}
   <a class="logo" href="/" title="Retour à l'accueil">Forgecards</a>
   <button class="hamburger-btn" id="hamburger-btn" type="button" aria-label="Ouvrir le menu" aria-expanded="false" aria-controls="qcm-nav"><span></span><span></span><span></span></button>
   <nav class="nav" id="qcm-nav">
-    <a class="nav-btn" href="/compte">← Compte</a>
+    <a class="nav-btn" href="/compte">← Retour au compte</a>
     <span class="name-chip" id="conn">connexion…</span>
     <button class="theme-toggle" id="theme-toggle" type="button" title="Basculer thème clair/sombre"></button>
   </nav>
@@ -344,15 +344,12 @@ function joueurLine(j,couronne,canKick){
   return line;
 }
 
-
 var THEMES=[['physique','Physique','#01696f'],['chimie','Chimie','#8e44ad'],['maths','Maths','#2980b9']];
-function themeOptions(current){return THEMES.map(function(t){return '<option value="'+t[0]+'"'+(t[0]===current?' selected':'')+'>'+t[1]+'</option>';}).join('');}
 function themeLabel(key){var t=THEMES.find(function(x){return x[0]===key;});return t?t[1]:key;}
 function themeColor(key){var t=THEMES.find(function(x){return x[0]===key;});return t?t[2]:'#01696f';}
 function themeChipEl(keys){var list=Array.isArray(keys)?keys:(keys?[keys]:[]);var s=document.createElement('span');s.className='theme-chip';s.style.background=list.length===1?themeColor(list[0]):'#01696f';s.textContent=list.length?list.map(themeLabel).join(' + '):'Tout';return s;}
 function chapitreChipEl(chapitres,nb){var list=Array.isArray(chapitres)?chapitres:(chapitres?[chapitres]:[]);var s=document.createElement('span');s.className='chapitre-chip';s.textContent=list.length?list.map(function(p){return Array.isArray(p)?themeLabel(p[0])+' : '+p[1]:p;}).join(' + '):'Tous les chapitres';if(nb)s.textContent+=' · '+nb+' q';return s;}
 function countLabel(n){return n+' joueur'+(n>1?'s':'');}
-function chapitreOptions(list,current){return '<option value="">Tous les chapitres</option>'+(list||[]).map(function(c){return '<option value="'+c.replace(/"/g,'&quot;')+'"'+(c===current?' selected':'')+'>'+c+'</option>';}).join('');}
 
 
 function chipRow(options,sel,allLabel,onChange){
@@ -529,7 +526,7 @@ function renderMyLobby(container,lobby){
     var fNb=document.createElement('div');fNb.className='field field-nb';
     var lNb=document.createElement('label');lNb.textContent='Questions';
     var nb=document.createElement('input');nb.type='number';nb.min='1';nb.max='20';nb.step='1';nb.inputMode='numeric';nb.value=lobby.nb_questions||5;
-
+    // Borne immédiate à la frappe ; envoi au serveur uniquement sur change/Enter
     nb.addEventListener('input',function(){
       var v=parseInt(nb.value,10);
       if(!isNaN(v)){if(v<1)nb.value=1;if(v>20)nb.value=20;}
@@ -588,6 +585,7 @@ function renderMyLobby(container,lobby){
   });
   container.appendChild(list);
 
+
   var me=lobby.joueurs.find(function(j){return j.prenom===PRENOM;});
   var ready=me&&me.pret;
   var actions=document.createElement('div');actions.className='mylobby-actions';
@@ -602,9 +600,9 @@ function renderMyLobby(container,lobby){
   reviewLabel.style.cssText='display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text);cursor:pointer';
   var reviewChk=document.createElement('input');reviewChk.type='checkbox';reviewChk.id='review-mode-chk';reviewChk.style.width='auto';
   reviewChk.checked=!!lobby.review_mode;
-  if(lobby.joueurs.length!==1){reviewChk.disabled=true;reviewChk.title='Mode relecture réservé au solo';}
+  if(lobby.joueurs.length!==1){reviewChk.disabled=true;reviewChk.title='Mode revue reserve au solo';}
   reviewLabel.appendChild(reviewChk);
-  reviewLabel.appendChild(document.createTextNode(' Mode relecture (solo, sans le timer)'));
+  reviewLabel.appendChild(document.createTextNode(' Mode revue (mes erreurs, sans timer)'));
   reviewToggle.appendChild(reviewLabel);
   reviewChk.onchange=function(){
     soc.emit('qcm_lobby_review',{review:reviewChk.checked},function(r){
@@ -620,7 +618,7 @@ function renderMyLobby(container,lobby){
   var fbChk=document.createElement('input');fbChk.type='checkbox';fbChk.id='delayed-fb-chk';fbChk.style.width='auto';
   fbChk.checked=!!lobby.delayed_feedback;
   fbLabel.appendChild(fbChk);
-  fbLabel.appendChild(document.createTextNode(' Cacher les bonnes réponses pendant le QCM (mode réduit)'));
+  fbLabel.appendChild(document.createTextNode(' Corrections a la fin (pas de verdict immediat)'));
   fbToggle.appendChild(fbLabel);
   fbChk.onchange=function(){
     soc.emit('qcm_lobby_feedback',{delayed:fbChk.checked},function(r){
