@@ -35,7 +35,7 @@ GUILD_ID = os.environ.get('MADEC_GUILD_ID')
 SITE_URL = os.environ.get('MADEC_SITE_URL', 'https://madec.moyart.net')
 DEFAULT_PARAMS = {'max_active_num': 36, 'daily_new_limit': 3, 'daily_review_limit': 3}
 JOKER_CAP = 2
-JOKER_EVERY = 8
+JOKER_EVERY = 4
 BOT_EXCLUDED_PRENOMS = frozenset({'admin'})
 
 
