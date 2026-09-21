@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Fiches (forgecards) cote admin : upload, edition, stats, notes."""
+import io, csv
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
 from config import CHAPITRES, UPLOADS, now_paris, read_params
@@ -12,7 +13,6 @@ from auth import require_admin
 from db import csv_safe, csv_response
 from replay import replay_reviews
 from streak import activity_days, compute_record, compute_streak
-import io, csv
 
 bp = Blueprint('cards', __name__)
 

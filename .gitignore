@@ -22,3 +22,6 @@ uploads/
 venv-bot/
 static/videos/
 static/song.mp3
+
+# Testing
+test/test_routes.py

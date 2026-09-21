@@ -43,6 +43,16 @@ def init_db():
         count INTEGER NOT NULL DEFAULT 0,
         last_milestone INTEGER DEFAULT 0
     )''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS joker_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        prenom TEXT NOT NULL,
+        day TEXT NOT NULL,
+        delta INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        balance_after INTEGER NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )''')
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_joker_ledger_prenom ON joker_ledger(prenom, day)")
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sr_state_user ("
         "prenom TEXT NOT NULL,"
@@ -222,18 +232,12 @@ def init_db():
         conn.execute("ALTER TABLE reviews ADD COLUMN duration_seconds INTEGER")
     if 'was_new' not in rev_cols:
         conn.execute("ALTER TABLE reviews ADD COLUMN was_new INTEGER DEFAULT 0")
+
+    joker_cols = [r[1] for r in conn.execute("PRAGMA table_info(user_jokers)").fetchall()]
+    if 'last_milestone' not in joker_cols:
+        conn.execute("ALTER TABLE user_jokers ADD COLUMN last_milestone INTEGER DEFAULT 0")
     if 'note_masquee' not in rev_cols:
         conn.execute("ALTER TABLE reviews ADD COLUMN note_masquee INTEGER DEFAULT 0")
-
-    joker_cols = [
-        r[1] for r in conn.execute(
-            "PRAGMA table_info(user_jokers)"
-        ).fetchall()]
-    if 'last_milestone' not in joker_cols:
-        conn.execute(
-            "ALTER TABLE user_jokers "
-            "ADD COLUMN last_milestone INTEGER DEFAULT 0")
-
 
     conn.execute('CREATE INDEX IF NOT EXISTS idx_reviews_prenom_date ON reviews(prenom, created_at)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_qcm_prenom_ok ON qcm_answers(prenom, ok)')
@@ -292,3 +296,26 @@ if not ADMIN_PASSWORD:
 
 _db_ready = False
 
+
+
+def apply_joker_change(conn, prenom, delta, reason, day=None):
+    """Toute modification du stock de jokers passe par ici (append-only).
+
+    Met a jour user_jokers.count (borne [0, JOKER_CAP]) et ecrit la ligne
+    correspondante dans joker_ledger avec le solde apres operation — ce qui
+    rend le stock entierement auditable et reconstructible.
+    Doit etre appelee dans une transaction (BEGIN IMMEDIATE pour les depenses).
+    Retourne le solde apres operation.
+    """
+    from config import JOKER_CAP
+    conn.execute(
+        "INSERT INTO user_jokers (prenom, count) VALUES (?, max(0, min(?, ?))) "
+        "ON CONFLICT(prenom) DO UPDATE SET count = max(0, min(count + ?, ?))",
+        (prenom, delta, JOKER_CAP, delta, JOKER_CAP))
+    bal = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()['count']
+    conn.execute(
+        "INSERT INTO joker_ledger(prenom, day, delta, reason, balance_after, created_at) "
+        "VALUES(?,?,?,?,?,?)",
+        (prenom, day or now_paris().date().isoformat(), delta, reason, bal,
+         now_paris().isoformat()))
+    return bal

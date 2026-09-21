@@ -1,4 +1,5 @@
-# Xiao: One-time QCM invitations. Keep token handling boring and predictable.
+# -*- coding: utf-8 -*-
+"""Invitations QCM a usage unique."""
 from flask import Blueprint, render_template, request, session, redirect
 import secrets
 from datetime import datetime, timedelta
@@ -189,3 +190,4 @@ def consume_qcm_invite(token):
         pass
 
     return redirect('/qcm')
+

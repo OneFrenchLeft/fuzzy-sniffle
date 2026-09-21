@@ -7,7 +7,8 @@ from config import (GRADE_MAP_FR, MAX_NOTE_LENGTH, QCM_FILES, QCM_WEAK_LIMIT,
 from db import db, ensure_db, log_event, csv_safe, csv_response
 from helpers import card_label, card_exists, interleave_by_chapitre, parse_duration_seconds
 from replay import replay_reviews, get_user_weights
-from streak import compute_streak, activity_days, compute_record, reconcile_streak, streak_verdict
+from streak import (compute_streak, activity_days, compute_record,
+                     reconcile_streak, streak_verdict, close_day)
 from auth import require_admin, require_sr_user
 import qcm_engine
 import io, csv
@@ -51,6 +52,12 @@ def sr_today():
     for c in all_cards:
         ensure_sr_row(conn, prenom, c['numero'])
     conn.commit()
+
+    try:
+        close_day(conn, prenom, (now_paris().date() - timedelta(days=1)).isoformat(),
+                  params, reason='sr_open_spend')
+    except Exception:
+        pass
 
     done_today = conn.execute(
         "SELECT numero, was_new FROM reviews WHERE prenom=? AND substr(created_at,1,10)=?",
@@ -359,3 +366,4 @@ def qcm_last_states():
             t = r['theme'] or 'autre'
             counts[t] = counts.get(t, 0) + 1
     return jsonify({'ok': True, 'wrongs': counts})
+

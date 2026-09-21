@@ -59,3 +59,4 @@ def replay_reviews(conn, prenom, rows):
         snap['repetitions'], snap['lapses'] = cur[3], cur[4]
         out.append(snap)
     return out
+

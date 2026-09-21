@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify, request
 import os, hmac, json
 from config import now_paris, read_params, QCM_INVITE_TTL_MINUTES
 from db import db, ensure_db, log_event
-from streak import streak_guard_user, compute_streak
+from streak import close_day, reconcile_streak, compute_streak
 from qcm_invites import create_qcm_invite
 
 bp = Blueprint('internal', __name__)
@@ -127,15 +127,31 @@ def internal_streak_guard():
     params = read_params()
     conn = db()
     users = [r['prenom'] for r in conn.execute("SELECT prenom FROM users WHERE prenom != 'admin'").fetchall()]
+    # On cloture explicitement HIER : le guard peut tourner a n'importe quelle
+    # heure (23h55, 00h05, rattrapage manuel le lendemain) sans risque de
+    # traiter le mauvais jour. Idempotent : relancer le guard ne coute rien.
+    target = (now_paris().date() - timedelta(days=1)).isoformat()
     results = {}
     for prenom in users:
         try:
-            streak, events, jokers = streak_guard_user(conn, prenom, params)
-            results[prenom] = {'streak': streak, 'events': events, 'jokers': jokers}
+            events = []
+            outcome = close_day(conn, prenom, target, params, reason='guard_spend')
+            if outcome == 'joker_spent':
+                events.append('joker_spent')
+            jk_before = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
+            before = jk_before['count'] if jk_before else 0
+            streak = reconcile_streak(conn, prenom)
+            jk_after = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
+            after = jk_after['count'] if jk_after else 0
+            if after > before:
+                events.append('joker_awarded')
+                log_event(conn, prenom, 'joker_awarded', f'streak={streak}')
+            results[prenom] = {'streak': streak, 'events': events, 'jokers': after,
+                               'closed': outcome}
         except Exception as exc:
             print(f'[streak-guard] {prenom}: {exc!r}')
+            conn.rollback()
             continue
     conn.commit()
     conn.close()
     return jsonify({'ok': True, 'results': results})
-

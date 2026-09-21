@@ -162,7 +162,7 @@ function loadCompteDashboard() {
     var set = function (id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
     set('dash-streak', d.streak + ' j');
     set('dash-record', d.record + ' j');
-    set('dash-jokers', d.jokers + ' / 4');
+    set('dash-jokers', d.jokers + ' / 2');
     set('dash-semaine', d.semaine);
     set('dash-total', d.total);
   }).catch(function (e) { console.error(e); });
@@ -2169,26 +2169,3 @@ function loadSrQcmErrors() {
     box.innerHTML = '<p class="hint">Impossible de charger les erreurs QCM.</p>';
   });
 }
-(function () {
-  'use strict';
-  function isEditable(el) {
-    if (!el) return false;
-    if (el.isContentEditable) return true;
-    var t = el.tagName;
-    return t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT';
-  }
-  function clearStray() {
-    var s = window.getSelection && window.getSelection();
-    if (s && s.rangeCount && !s.isCollapsed) s.removeAllRanges();
-    var a = document.activeElement;
-    if (a && !isEditable(a) && a.blur) a.blur();
-  }
-  ['touchstart', 'mousedown'].forEach(function (evt) {
-    document.addEventListener(evt, function (e) {
-      if (!isEditable(e.target)) clearStray();
-    }, { passive: true });
-  });
-  document.addEventListener('selectstart', function (e) {
-    if (!isEditable(e.target)) e.preventDefault();   // steam hammmmer
-  });
-})();

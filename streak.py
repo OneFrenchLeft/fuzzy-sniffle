@@ -1,7 +1,21 @@
-# Xiao: Keep the definition of an active day consistent here.
+# -*- coding: utf-8 -*-
+"""Logique pure des series (streaks) et jokers + cloture idempotente des jours.
+
+Regles metier :
+  - un jour compte si l'eleve a revise OU s'il est valide (gratuit ou joker) ;
+  - validation gratuite : deck vide, OU rien a faire + activite reelle le jour la
+    (l'activite ne conditionne QUE la gratuite, jamais la depense de joker :
+    le joker "sauve" meme un jour d'absence totale) ;
+  - cartes dues + pas de revision -> un joker est consomme s'il y en a un,
+    sinon la streak casse ;
+  - toute depense est atomique et idempotente par (prenom, day) :
+    BEGIN IMMEDIATE + INSERT OR IGNORE (rowcount) + decrement conditionnel ;
+  - chaque mouvement de stock est trace dans joker_ledger (append-only).
+"""
 from datetime import datetime, timedelta
 from config import JOKER_CAP, JOKER_EVERY, now_paris
-from db import log_event
+from db import log_event, apply_joker_change
+
 
 def activity_days(conn, prenom):
     # Small: Don't forget validated days; reviews aren't the only source.
@@ -10,6 +24,7 @@ def activity_days(conn, prenom):
     days |= {r[0] for r in conn.execute(
         'SELECT day FROM sr_daily_streak WHERE prenom=? AND validated=1', (prenom,)).fetchall()}
     return days
+
 
 def compute_record(days):
     # Ethan: Sorted dates make the consecutive-day check deterministic.
@@ -20,6 +35,7 @@ def compute_record(days):
         record = max(record, run)
         prev = cur
     return record
+
 
 def compute_streak(conn, prenom):
     # Flying: This stays read-only. Steph, please don't "fix" the DB here again.
@@ -35,6 +51,87 @@ def compute_streak(conn, prenom):
         cursor -= timedelta(days=1)
     return streak
 
+
+def close_day(conn, prenom, day, params, reason='guard_spend'):
+    if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=? AND validated=1',
+                    (prenom, day)).fetchone():
+        return 'already'
+    if conn.execute('SELECT 1 FROM reviews WHERE prenom=? AND substr(created_at,1,10)=? LIMIT 1',
+                    (prenom, day)).fetchone():
+        conn.execute('INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) VALUES(?,?,1)',
+                     (prenom, day))
+        conn.commit()
+        return 'review'
+    deck = conn.execute('SELECT COUNT(*) AS c FROM sr_state_user WHERE prenom=?',
+                        (prenom,)).fetchone()['c']
+    due = 0
+    if deck:
+        max_active = int(params.get('max_active_num', 36))
+        due = conn.execute(
+            'SELECT COUNT(*) AS c FROM forgecards f JOIN sr_state_user s '
+            'ON s.numero=f.numero AND s.prenom=? '
+            'WHERE f.numero<=? AND (s.next_review IS NULL OR s.next_review<=?)',
+            (prenom, max_active, day)).fetchone()['c']
+    has_activity = conn.execute(
+        "SELECT 1 FROM events WHERE prenom=? AND substr(created_at,1,10)=? "
+        "AND type IN ('sr_open','login','review') LIMIT 1", (prenom, day)).fetchone()
+    if deck == 0 or (due == 0 and has_activity):
+        conn.execute('INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) VALUES(?,?,1)',
+                     (prenom, day))
+        conn.commit()
+        return 'validated_free'
+    if due == 0:
+        return 'missed'
+    conn.execute('BEGIN IMMEDIATE')
+    try:
+        jk = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
+        if not jk or jk['count'] <= 0:
+            conn.commit()
+            return 'missed'
+        cur = conn.execute('INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) VALUES(?,?,1)',
+                           (prenom, day))
+        if cur.rowcount == 1:
+            apply_joker_change(conn, prenom, -1, reason, day)
+            log_event(conn, prenom, 'joker_spent', f'{reason}:{day}')
+            conn.commit()
+            return 'joker_spent'
+        conn.commit()
+        return 'already'
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def streak_verdict(conn, prenom, params, when=None, prediction=False):
+    # Eliot : Same issue as before but with streak_verdict: the guard and the UI can disagree on streak status if the guard has not yet closed the day. This is a problem because the UI may show "validated" while the guard has not yet processed the day, leading to confusion.
+    when = when or now_paris()
+    today = when.date().isoformat()
+    if prediction and when.hour == 23 and when.minute >= 55:
+        return 'too_late'
+    if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=? AND validated=1',
+                    (prenom, today)).fetchone():
+        return 'done'
+    if conn.execute('SELECT 1 FROM reviews WHERE prenom=? AND substr(created_at,1,10)=? LIMIT 1',
+                    (prenom, today)).fetchone():
+        return 'done'
+    deck = conn.execute('SELECT COUNT(*) AS c FROM sr_state_user WHERE prenom=?',
+                        (prenom,)).fetchone()['c']
+    if deck == 0:
+        return 'validated'
+    max_active = int(params.get('max_active_num', 36))
+    due = conn.execute(
+        'SELECT COUNT(*) AS c FROM forgecards f JOIN sr_state_user s '
+        'ON s.numero=f.numero AND s.prenom=? '
+        'WHERE f.numero<=? AND (s.next_review IS NULL OR s.next_review<=?)',
+        (prenom, max_active, today)).fetchone()['c']
+    if due > 0:
+        return 'due'
+    has_activity = conn.execute(
+        "SELECT 1 FROM events WHERE prenom=? AND substr(created_at,1,10)=? "
+        "AND type IN ('sr_open','login','review') LIMIT 1", (prenom, today)).fetchone()
+    return 'validated' if has_activity else 'inactive'
+
+
 def reconcile_streak(conn, prenom):
     # Steph: Reconciliation can award milestones, but it must never spend a joker.
     days = activity_days(conn, prenom)
@@ -46,81 +143,26 @@ def reconcile_streak(conn, prenom):
     cursor = now_paris().date()
     if cursor.isoformat() not in days:
         cursor -= timedelta(days=1)
-    if cursor.isoformat() not in days:
-        # Xiao: A gap means no current streak. Don't spend a joker here.
-        conn.execute("UPDATE user_jokers SET last_milestone=0 WHERE prenom=?", (prenom,))
-        conn.commit()
-        return 0
+        if cursor.isoformat() not in days:
+            # Trou dans la serie : on reset les paliers, AUCUN depense ici.
+            conn.execute("UPDATE user_jokers SET last_milestone=0 WHERE prenom=?", (prenom,))
+            conn.commit()
+            return 0
     streak = 0
     while cursor.isoformat() in days:
         streak += 1
         cursor -= timedelta(days=1)
     if streak >= JOKER_EVERY:
         milestone = streak // JOKER_EVERY
-        jrow = conn.execute('SELECT count, last_milestone FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
+        jrow = conn.execute('SELECT count, last_milestone FROM user_jokers WHERE prenom=?',
+                            (prenom,)).fetchone()
         current = jrow['count'] if jrow else 0
         last_ms = jrow['last_milestone'] if jrow else 0
         if milestone > last_ms:
-            # Small: Cap the reward before updating the stored count.
             gained = max(0, min(milestone - last_ms, JOKER_CAP - current))
-            conn.execute(
-                "INSERT INTO user_jokers (prenom, count, last_milestone) VALUES (?,?,?) "
-                "ON CONFLICT(prenom) DO UPDATE SET count=count+?, last_milestone=?",
-                (prenom, gained, milestone, gained, milestone))
+            if gained > 0:
+                apply_joker_change(conn, prenom, gained, 'milestone_award')
+            conn.execute("UPDATE user_jokers SET last_milestone=? WHERE prenom=?",
+                         (milestone, prenom))
             conn.commit()
     return streak
-
-def streak_verdict(conn, prenom, params, when=None, prediction=False):
-    # Ethan: Keep prediction and the real guard on the exact same rules.
-    when = when or now_paris()
-    today = when.date().isoformat()
-    if prediction and when.hour == 23 and when.minute >= 55:
-        # Flying: This cutoff belongs to prediction only. Don't move it elsewhere.
-        return 'too_late'
-    if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=?', (prenom, today)).fetchone():
-        return 'done'
-    if conn.execute('SELECT 1 FROM reviews WHERE prenom=? AND substr(created_at,1,10)=? LIMIT 1', (prenom, today)).fetchone():
-        return 'done'
-    deck = conn.execute('SELECT COUNT(*) AS c FROM sr_state_user WHERE prenom=?', (prenom,)).fetchone()['c']
-    if deck == 0:
-        # Steph: Empty deck means there is nothing left to review.
-        return 'validated'
-    has_activity = conn.execute(
-        "SELECT 1 FROM events WHERE prenom=? AND substr(created_at,1,10)=? AND type IN ('sr_open','login','review') LIMIT 1",
-        (prenom, today)).fetchone()
-    if not has_activity:
-        # Eliot: Don't validate a day just because someone advanced the date.
-        return 'inactive'
-    max_active = int(params.get('max_active_num', 36))
-    due = conn.execute(
-        'SELECT COUNT(*) AS c FROM forgecards f JOIN sr_state_user s ON s.numero=f.numero AND s.prenom=? '
-        'WHERE f.numero<=? AND (s.next_review IS NULL OR s.next_review<=?)',
-        (prenom, max_active, today)).fetchone()['c']
-    return 'validated' if due == 0 else 'due'
-
-def streak_guard_user(conn, prenom, params):
-    # Xiao: The guard may spend a joker; reconcile_streak still must not.
-    today = now_paris().date().isoformat()
-    events = []
-    verdict = streak_verdict(conn, prenom, params)
-    if verdict == 'validated':
-        conn.execute('INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) VALUES(?,?,1)', (prenom, today))
-        events.append('validated')
-    elif verdict == 'due':
-        jk = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
-        if jk and jk['count'] > 0:
-            # Small: Check count before decrementing. Revolutionary concept, I know.
-            conn.execute('UPDATE user_jokers SET count=count-1 WHERE prenom=? AND count > 0', (prenom,))
-            conn.execute('INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) VALUES(?,?,1)', (prenom, today))
-            events.append('joker_spent')
-            log_event(conn, prenom, 'joker_spent')
-    jk_before = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
-    before = jk_before['count'] if jk_before else 0
-    streak = reconcile_streak(conn, prenom)
-    jk_after = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
-    after = jk_after['count'] if jk_after else 0
-    if after > before:
-        # Ethan: Compare before/after so the reward event is only logged when something changed.
-        events.append('joker_awarded')
-        log_event(conn, prenom, 'joker_awarded', f'streak={streak}')
-    return streak, events, after
