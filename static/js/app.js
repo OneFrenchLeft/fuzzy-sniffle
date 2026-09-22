@@ -1738,9 +1738,9 @@ function loadSrToday() {
       var div = document.createElement('div');
       div.className = 'sr-item';
       div.setAttribute('data-numero', c.numero);
-      var html = '<div class="sr-top"><div class="sr-name">Fiche ' + esc(c.numero) + (c.titre ? (' - ' + esc(c.titre)) : '') + '<span class="chip-chapitre">' + esc(c.chapitre || 'Autre') + '</span>' + (c.was_new ? '<span class="chip-chapitre" style="background:rgba(230,126,34,.12);color:#e67e22">Nouvelle</span>' : '');
+      var html = '<div class="sr-top"><div class="sr-name">Fiche ' + esc(c.numero) + (c.titre ? (' - ' + esc(c.titre)) : '') + '<span class="chip-chapitre">' + esc(c.chapitre || 'Autre') + '</span>' + (c.was_new ? '<span class="chip-chapitre" style="background:rgba(230,126,34,.12);color:#e67e22">Nouvelle</span>' : '') + '</div></div>';
       html += '<div class="sr-block sr-toolbar">';
-      html += '<a class="sr-chip" data-action="open-enonce" data-numero="' + esc(c.numero) + '" href="/uploads/fiche/' + encodeURIComponent(c.numero) + '.pdf" target="_blank">📄 Énoncé</a>';
+      html += '<a class="sr-chip" data-action="open-enonce" data-numero="' + esc(c.numero) + '" href="/uploads/fiche/' + encodeURIComponent(c.fiche_file || (c.numero + '.pdf')) + '" target="_blank">📄 Énoncé</a>';
       if (c.indices) {
         html += '<button class="sr-chip" data-action="toggle-indices" data-numero="' + esc(c.numero) + '" aria-expanded="false">💡 Indices</button>';
       }
@@ -1770,7 +1770,12 @@ function loadSrToday() {
       if (enonceLink) {
         enonceLink.addEventListener('click', function () {
           var numero = enonceLink.getAttribute('data-numero');
-          if (!cardStartTimes[numero]) cardStartTimes[numero] = Date.now();
+          // Flying: The timer starts on the first "Énoncé" click — say so,
+          // otherwise nobody believes it's running.
+          if (!cardStartTimes[numero]) {
+            cardStartTimes[numero] = Date.now();
+            showToast('⏱️ Minuteur lancé — fiche n°' + numero);
+          }
         });
       }
 

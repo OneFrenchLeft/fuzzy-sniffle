@@ -490,6 +490,8 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
   header{position:sticky;top:0;padding:var(--space-3) var(--space-4)}
   .theme-toggle{order:2}
   main{padding:var(--space-8) var(--space-4);justify-content:flex-start}
+  .panel{padding:var(--space-4)}
+  .toast{bottom:calc(1.5rem + env(safe-area-inset-bottom));max-width:calc(100vw - 2rem);text-align:center}
   .fields-grid,.sr-help-grid{grid-template-columns:1fr}
   .admin-row{flex-direction:column;align-items:flex-start}
   .site-footer{position:static;transform:none;text-align:center;margin-top:var(--space-6)}
