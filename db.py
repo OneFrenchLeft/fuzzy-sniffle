@@ -16,11 +16,80 @@ def db():
     conn.execute('PRAGMA busy_timeout=5000')
     return conn
 
+# --- Migration v1 -> v2 (colonne subject) ---
+# Les tables dont la cle primaire gagne subject sont recreees (SQLite ne sait
+# pas modifier une PK en place) ; les autres recoivent un ALTER TABLE.
+_SUBJECT_PK_TABLES = ('forgecards', 'sr_state_user', 'sr_daily_streak',
+                      'user_jokers', 'sr_weights_user')
+_SUBJECT_ALTER_TABLES = ('reviews', 'reviews_archive', 'draw_history',
+                         'events', 'joker_ledger')
+
+
+def _table_cols(conn, table):
+    return [r[1] for r in conn.execute(f'PRAGMA table_info({table})').fetchall()]
+
+
+def _snapshot_db_file():
+    """Copie de secours de la base avant migration (API backup SQLite, sure en WAL)."""
+    ts = now_paris().strftime('%Y%m%d-%H%M%S')
+    dst_path = DB_PATH.with_name(f'{DB_PATH.stem}.bak-{ts}{DB_PATH.suffix}')
+    src = db()
+    dst = sqlite3.connect(str(dst_path))
+    try:
+        src.backup(dst)
+    finally:
+        dst.close()
+        src.close()
+    return dst_path
+
+
+def _prepare_subject_migration(conn):
+    """Detecte une base v1 (pas de colonne subject dans forgecards), la
+    sauvegarde, puis renomme les tables a PK composite pour laisser la place
+    au schema v2. Retourne [(table, colonnes_v1)] pour la recopie."""
+    cols = _table_cols(conn, 'forgecards')
+    if not cols or 'subject' in cols:
+        return []
+    snapshot = _snapshot_db_file()
+    print(f'[db] migration v1 -> v2 (subjects) — snapshot : {snapshot}')
+    renamed = []
+    for table in _SUBJECT_PK_TABLES:
+        old_cols = _table_cols(conn, table)
+        if not old_cols or 'subject' in old_cols:
+            continue
+        conn.execute(f'ALTER TABLE {table} RENAME TO {table}_old')
+        renamed.append((table, old_cols))
+    conn.commit()
+    return renamed
+
+
+def _finish_subject_migration(conn, renamed):
+    """Recopie les donnees v1 en subject='physique' dans le schema v2, puis
+    ajoute la colonne subject aux tables sans changement de PK."""
+    for table, old_cols in renamed:
+        cols_csv = ','.join(old_cols)
+        conn.execute(
+            f"INSERT INTO {table}(subject,{cols_csv}) "
+            f"SELECT 'physique',{cols_csv} FROM {table}_old")
+        conn.execute(f'DROP TABLE {table}_old')
+    for table in _SUBJECT_ALTER_TABLES:
+        cols = _table_cols(conn, table)
+        if cols and 'subject' not in cols:
+            conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN subject TEXT NOT NULL DEFAULT 'physique'")
+    if renamed:
+        print(f'[db] migration terminee : {len(renamed)} tables recreees, '
+              f'donnees conservees en subject=physique')
+    conn.commit()
+
+
 def init_db():
     conn = db()
+    migrated = _prepare_subject_migration(conn)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS forgecards ("
-        "numero INTEGER PRIMARY KEY,"
+        "subject TEXT NOT NULL DEFAULT 'physique',"
+        "numero INTEGER NOT NULL,"
         "fiche_file TEXT NOT NULL,"
         "correction_file TEXT NOT NULL,"
         "bareme_file TEXT DEFAULT '',"
@@ -28,7 +97,10 @@ def init_db():
         "indices TEXT DEFAULT '',"
         "chapitre TEXT DEFAULT 'Autre',"
         "teacher_difficulty REAL,"
-        "created_at TEXT DEFAULT CURRENT_TIMESTAMP"
+        "hors_serie INTEGER DEFAULT 0,"
+        "code TEXT DEFAULT '',"
+        "created_at TEXT DEFAULT CURRENT_TIMESTAMP,"
+        "PRIMARY KEY (subject, numero)"
         ")"
     )
     conn.execute(
@@ -39,13 +111,16 @@ def init_db():
         ")"
     )
     conn.execute('''CREATE TABLE IF NOT EXISTS user_jokers (
-        prenom TEXT PRIMARY KEY,
+        prenom TEXT NOT NULL,
+        subject TEXT NOT NULL DEFAULT 'physique',
         count INTEGER NOT NULL DEFAULT 0,
-        last_milestone INTEGER DEFAULT 0
+        last_milestone INTEGER DEFAULT 0,
+        PRIMARY KEY (prenom, subject)
     )''')
     conn.execute('''CREATE TABLE IF NOT EXISTS joker_ledger (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         prenom TEXT NOT NULL,
+        subject TEXT NOT NULL DEFAULT 'physique',
         day TEXT NOT NULL,
         delta INTEGER NOT NULL,
         reason TEXT NOT NULL,
@@ -56,6 +131,7 @@ def init_db():
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sr_state_user ("
         "prenom TEXT NOT NULL,"
+        "subject TEXT NOT NULL DEFAULT 'physique',"
         "numero INTEGER NOT NULL,"
         "stability REAL,"
         "difficulty REAL,"
@@ -65,12 +141,13 @@ def init_db():
         "repetitions INTEGER DEFAULT 0,"
         "lapses INTEGER DEFAULT 0,"
         "last_retrievability REAL,"
-        "PRIMARY KEY (prenom, numero)"
+        "PRIMARY KEY (prenom, subject, numero)"
         ")"
     )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS reviews ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "subject TEXT NOT NULL DEFAULT 'physique',"
         "numero INTEGER NOT NULL,"
         "prenom TEXT NOT NULL,"
         "result TEXT NOT NULL,"
@@ -83,26 +160,30 @@ def init_db():
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sr_daily_streak ("
         "prenom TEXT NOT NULL,"
+        "subject TEXT NOT NULL DEFAULT 'physique',"
         "day TEXT NOT NULL,"
         "validated INTEGER DEFAULT 0,"
-        "PRIMARY KEY (prenom, day)"
+        "PRIMARY KEY (prenom, subject, day)"
         ")"
     )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS draw_history ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "subject TEXT NOT NULL DEFAULT 'physique',"
         "numero INTEGER NOT NULL,"
         "created_at TEXT DEFAULT CURRENT_TIMESTAMP"
         ")"
     )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sr_weights_user ("
-        "prenom TEXT PRIMARY KEY,"
+        "prenom TEXT NOT NULL,"
+        "subject TEXT NOT NULL DEFAULT 'physique',"
         "weights_json TEXT NOT NULL,"
         "nb_reviews_used INTEGER DEFAULT 0,"
         "loss_before REAL,"
         "loss_after REAL,"
-        "trained_at TEXT DEFAULT CURRENT_TIMESTAMP"
+        "trained_at TEXT DEFAULT CURRENT_TIMESTAMP,"
+        "PRIMARY KEY (prenom, subject)"
         ")"
     )
     conn.execute(
@@ -139,6 +220,7 @@ def init_db():
     conn.execute(
         "CREATE TABLE IF NOT EXISTS events ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "subject TEXT NOT NULL DEFAULT 'physique',"
         "prenom TEXT NOT NULL,"
         "type TEXT NOT NULL,"
         "payload TEXT DEFAULT '',"
@@ -166,6 +248,7 @@ def init_db():
     conn.execute(
         "CREATE TABLE IF NOT EXISTS reviews_archive ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "subject TEXT NOT NULL DEFAULT 'physique',"
         "numero INTEGER NOT NULL,"
         "prenom TEXT NOT NULL,"
         "result TEXT NOT NULL,"
@@ -242,6 +325,7 @@ def init_db():
     conn.execute('CREATE INDEX IF NOT EXISTS idx_reviews_prenom_date ON reviews(prenom, created_at)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_qcm_prenom_ok ON qcm_answers(prenom, ok)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_streak_prenom_day ON sr_daily_streak(prenom, day)')
+    _finish_subject_migration(conn, migrated)
     conn.commit()
     conn.close()
 
@@ -302,7 +386,7 @@ _db_ready = False
 
 
 
-def apply_joker_change(conn, prenom, delta, reason, day=None):
+def apply_joker_change(conn, prenom, delta, reason, day=None, subject='physique'):
     """Toute modification du stock de jokers passe par ici (append-only).
 
     Met a jour user_jokers.count (borne [0, JOKER_CAP]) et ecrit la ligne
@@ -313,13 +397,14 @@ def apply_joker_change(conn, prenom, delta, reason, day=None):
     """
     from config import JOKER_CAP
     conn.execute(
-        "INSERT INTO user_jokers (prenom, count) VALUES (?, max(0, min(?, ?))) "
-        "ON CONFLICT(prenom) DO UPDATE SET count = max(0, min(count + ?, ?))",
-        (prenom, delta, JOKER_CAP, delta, JOKER_CAP))
-    bal = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()['count']
+        "INSERT INTO user_jokers (prenom, subject, count) VALUES (?, ?, max(0, min(?, ?))) "
+        "ON CONFLICT(prenom, subject) DO UPDATE SET count = max(0, min(count + ?, ?))",
+        (prenom, subject, delta, JOKER_CAP, delta, JOKER_CAP))
+    bal = conn.execute('SELECT count FROM user_jokers WHERE prenom=? AND subject=?',
+                       (prenom, subject)).fetchone()['count']
     conn.execute(
-        "INSERT INTO joker_ledger(prenom, day, delta, reason, balance_after, created_at) "
-        "VALUES(?,?,?,?,?,?)",
-        (prenom, day or now_paris().date().isoformat(), delta, reason, bal,
+        "INSERT INTO joker_ledger(prenom, subject, day, delta, reason, balance_after, created_at) "
+        "VALUES(?,?,?,?,?,?,?)",
+        (prenom, subject, day or now_paris().date().isoformat(), delta, reason, bal,
          now_paris().isoformat()))
     return bal

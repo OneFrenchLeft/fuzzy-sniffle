@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Pages publiques, erreurs, entetes de securite, fichiers servis."""
 from flask import Blueprint, render_template, request, jsonify, session, send_from_directory, make_response, abort
-from config import TEMPLATES, STATIC, DATA, UPLOADS, read_params, write_params, CHAPITRES
+from config import TEMPLATES, STATIC, DATA, UPLOADS, read_params, write_params, CHAPITRES, subjects_payload, all_subjects_payload
 import os
 from auth import require_admin
 
@@ -25,7 +25,9 @@ def page_compte():
 
 @bp.route('/admin')
 def page_admin():
-    return render_template('admin.html', active='admin')
+    # L'admin voit TOUTES les matieres connues : il prepare la chimie pendant
+    # qu'elle est encore cachee aux eleves.
+    return render_template('admin.html', active='admin', subjects=all_subjects_payload())
 
 @bp.route('/favicon.ico')
 def favicon():
@@ -35,7 +37,7 @@ def favicon():
 def qcm_page():
     if not session.get('sr_user'):
         return render_template('index.html')
-    return render_template('qcm.html', prenom=session['sr_user'])
+    return render_template('qcm.html', prenom=session['sr_user'], subjects=subjects_payload())
 
 @bp.route('/qcm-images/<path:filename>')
 def qcm_image(filename):
@@ -106,6 +108,11 @@ def post_params():
 @bp.route('/api/chapitres', methods=['GET'])
 def get_chapitres():
     return jsonify(CHAPITRES)
+
+@bp.route('/api/subjects', methods=['GET'])
+def get_subjects():
+    # L'UI ne montre que les matieres activees par les flags du .env.
+    return jsonify({'ok': True, 'subjects': subjects_payload()})
 
 @bp.route('/papayou')
 def page_papayou():

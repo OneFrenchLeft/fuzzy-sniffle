@@ -512,8 +512,12 @@ def try_start_lobby(lobby):
 
 def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=None):
     global io, QCM_FILES, _record_answer, _record_game, _review_query
+    from config import ENABLED_SUBJECTS
     io = socketio
-    QCM_FILES = {name: Path(data_dir) / f'qcm_{name}.json' for name in QCM_THEMES}
+    # Seules les matieres activees par les flags du .env sont jouables :
+    # un client ne peut pas forcer une partie sur une matiere cachee.
+    QCM_FILES = {name: Path(data_dir) / f'qcm_{name}.json'
+                 for name in QCM_THEMES if name in ENABLED_SUBJECTS}
     _record_answer = on_answer
     _record_game = on_game_end
     _review_query = review_query

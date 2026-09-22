@@ -130,12 +130,12 @@ def upload_forgecard():
         elif existing and existing['bareme_file']:
             final_bareme_name = existing['bareme_file']
         conn.execute(
-            'INSERT INTO forgecards(numero, code, fiche_file, correction_file, bareme_file, titre, indices, chapitre, teacher_difficulty, hors_serie) '
-            'VALUES(?,?,?,?,?,?,?,?,?,?) '
-            'ON CONFLICT(numero) DO UPDATE SET '
+            'INSERT INTO forgecards(subject, numero, code, fiche_file, correction_file, bareme_file, titre, indices, chapitre, teacher_difficulty, hors_serie) '
+            'VALUES(?,?,?,?,?,?,?,?,?,?,?) '
+            'ON CONFLICT(subject, numero) DO UPDATE SET '
             'code=excluded.code, fiche_file=excluded.fiche_file, correction_file=excluded.correction_file, '
             'bareme_file=excluded.bareme_file, titre=excluded.titre, indices=excluded.indices, chapitre=excluded.chapitre, teacher_difficulty=excluded.teacher_difficulty, hors_serie=excluded.hors_serie',
-            (numero, code, fiche_name, corr_name, final_bareme_name, titre, indices, chapitre, teacher_difficulty, hors_serie)
+            ('physique', numero, code, fiche_name, corr_name, final_bareme_name, titre, indices, chapitre, teacher_difficulty, hors_serie)
         )
         conn.commit()
     finally:

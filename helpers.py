@@ -2,6 +2,19 @@ from werkzeug.utils import secure_filename
 from config import UPLOADS, ALLOWED_EXTENSIONS, MAX_REVIEW_DURATION_SECONDS
 
 
+def current_subject():
+    """Matiere active lue dans la session ; physique par defaut, y compris
+    hors contexte requete (bot, scripts). Les requetes SQL se brancheront
+    dessus en phase 3 — pour l'instant tout reste en physique."""
+    from flask import session
+    from config import ENABLED_SUBJECTS, DEFAULT_SUBJECT
+    try:
+        s = session.get('subject')
+    except RuntimeError:
+        return DEFAULT_SUBJECT
+    return s if s in ENABLED_SUBJECTS else DEFAULT_SUBJECT
+
+
 def allowed_file(filename):
     # Xiao: Extension check. Please don't trust the filename itself.
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS

@@ -344,7 +344,7 @@ function joueurLine(j,couronne,canKick){
   return line;
 }
 
-var THEMES=[['physique','Physique','#01696f'],['chimie','Chimie','#8e44ad'],['maths','Maths','#2980b9']];
+var THEMES={{ subjects | tojson }}.map(function(s){return [s.key,s.label,s.color];});
 function themeLabel(key){var t=THEMES.find(function(x){return x[0]===key;});return t?t[1]:key;}
 function themeColor(key){var t=THEMES.find(function(x){return x[0]===key;});return t?t[2]:'#01696f';}
 function themeChipEl(keys){var list=Array.isArray(keys)?keys:(keys?[keys]:[]);var s=document.createElement('span');s.className='theme-chip';s.style.background=list.length===1?themeColor(list[0]):'#01696f';s.textContent=list.length?list.map(themeLabel).join(' + '):'Tout';return s;}

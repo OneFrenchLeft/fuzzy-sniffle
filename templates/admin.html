@@ -88,9 +88,7 @@
             <div class="field">
               <label for="qcm-subject-select">Matière</label>
               <select id="qcm-subject-select">
-                <option value="physique">Physique</option>
-                <option value="chimie">Chimie</option>
-                <option value="maths">Maths</option>
+                {% for s in subjects %}<option value="{{ s.key }}">{{ s.label }}</option>{% endfor %}
               </select>
             </div>
             <div class="field">
@@ -208,9 +206,7 @@
               <label for="qcm-weak-subject">Matière</label>
               <select id="qcm-weak-subject">
                 <option value="">Toutes</option>
-                <option value="physique">Physique</option>
-                <option value="chimie">Chimie</option>
-                <option value="maths">Maths</option>
+                {% for s in subjects %}<option value="{{ s.key }}">{{ s.label }}</option>{% endfor %}
               </select>
             </div>
             <div class="field">
