@@ -460,6 +460,8 @@ details.import-box > summary:hover::after{color:var(--primary)}
 
 .toast{position:fixed;left:50%;bottom:1.5rem;transform:translateX(-50%) translateY(1rem);background:var(--surface);color:var(--text);border:1px solid var(--border);box-shadow:var(--shadow);border-radius:999px;padding:.6rem 1.2rem;font-size:.85rem;font-weight:600;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:3000}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+/* Chrono SR : persistant, au-dessus du toast classique, chiffres stables */
+.toast-chrono{bottom:4.6rem;font-variant-numeric:tabular-nums;border-color:var(--primary)}
 
 
 /* pill search field */
@@ -492,6 +494,7 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
   main{padding:var(--space-8) var(--space-4);justify-content:flex-start}
   .panel{padding:var(--space-4)}
   .toast{bottom:calc(1.5rem + env(safe-area-inset-bottom));max-width:calc(100vw - 2rem);text-align:center}
+  .toast-chrono{bottom:calc(4.6rem + env(safe-area-inset-bottom))}
   .fields-grid,.sr-help-grid{grid-template-columns:1fr}
   .admin-row{flex-direction:column;align-items:flex-start}
   .site-footer{position:static;transform:none;text-align:center;margin-top:var(--space-6)}

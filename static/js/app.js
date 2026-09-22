@@ -100,6 +100,43 @@ function showToast(msg) {
   toastTimer = setTimeout(function () { t.classList.remove('show'); }, 3000);
 }
 
+/* --- Chronometre SR : toast persistant tant qu'une fiche est en cours --- */
+var chronoCard = null;
+var chronoInterval = null;
+var chronoDone = {};  // numero -> true quand "J'ai fini" est coche
+
+function chronoPick() {
+  // Eliot: The most recently opened card that's still being worked on.
+  var best = null, bestT = -1;
+  Object.keys(cardStartTimes).forEach(function (n) {
+    if (chronoDone[n]) return;
+    if (cardStartTimes[n] > bestT) { bestT = cardStartTimes[n]; best = n; }
+  });
+  return best;
+}
+
+function renderChrono() {
+  var t = document.getElementById('toast-chrono');
+  if (!t || !chronoCard || !cardStartTimes[chronoCard]) return;
+  var elapsed = Math.max(0, Math.floor((Date.now() - cardStartTimes[chronoCard]) / 1000));
+  var mm = Math.floor(elapsed / 60), ss = String(elapsed % 60).padStart(2, '0');
+  t.textContent = '⏱️ Fiche n°' + chronoCard + ' — ' + mm + ':' + ss;
+}
+
+function updateChrono() {
+  var t = document.getElementById('toast-chrono');
+  if (!t) return;
+  chronoCard = chronoPick();
+  if (!chronoCard) {
+    t.classList.remove('show');
+    if (chronoInterval) { clearInterval(chronoInterval); chronoInterval = null; }
+    return;
+  }
+  renderChrono();
+  t.classList.add('show');
+  if (!chronoInterval) chronoInterval = setInterval(renderChrono, 1000);
+}
+
 var flashTimers = {};
 function flashStatus(elId, message, isError, ms) {
   var el = document.getElementById(elId);
@@ -1690,7 +1727,7 @@ function removeCardFromList(numero) {
     div.style.transition = 'opacity .3s, transform .3s';
     div.style.opacity = '0';
     div.style.transform = 'scale(0.95)';
-    setTimeout(function () { div.remove(); delete cardStartTimes[numero]; srDoneToday++; updateSrProgress(); checkSrListEmpty(); }, 300);
+    setTimeout(function () { div.remove(); delete cardStartTimes[numero]; delete chronoDone[numero]; updateChrono(); srDoneToday++; updateSrProgress(); checkSrListEmpty(); }, 300);
   } else {
     checkSrListEmpty();
   }
@@ -1771,12 +1808,12 @@ function loadSrToday() {
       if (enonceLink) {
         enonceLink.addEventListener('click', function () {
           var numero = enonceLink.getAttribute('data-numero');
-          // Flying: The timer starts on the first "Énoncé" click — say so,
-          // otherwise nobody believes it's running.
+          // Flying: The timer starts on the first "Énoncé" click — and now
+          // it STAYS visible in its own toast until "J'ai fini".
           if (!cardStartTimes[numero]) {
             cardStartTimes[numero] = Date.now();
-            showToast('⏱️ Minuteur lancé — fiche n°' + numero);
           }
+          updateChrono();
         });
       }
 
@@ -1802,6 +1839,9 @@ function loadSrToday() {
           setLinkEnabled(corrLink, finishedCheckbox.checked);
           setLinkEnabled(baremeLink, finishedCheckbox.checked);
           div.querySelectorAll('.btn-rate').forEach(function (rb) { rb.disabled = !finishedCheckbox.checked; });
+          // Small: "J'ai fini" retires the chrono toast; unchecking brings it back.
+          if (finishedCheckbox.checked) { chronoDone[numero] = true; } else { delete chronoDone[numero]; }
+          updateChrono();
         };
       }
       var advanceBtn = div.querySelector('[data-action="advance"]');
