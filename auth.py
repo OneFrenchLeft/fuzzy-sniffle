@@ -22,18 +22,18 @@ RATE_LIMIT_WINDOW = 300
 
 RATE_LIMIT_MAX = 8
 
-def rate_limited(key):
+def rate_limited(key, max_attempts=RATE_LIMIT_MAX, window=RATE_LIMIT_WINDOW):
     now = time.time()
     attempts = _login_attempts.get(key, [])
-    attempts = [t for t in attempts if now - t < RATE_LIMIT_WINDOW]
-    if len(attempts) >= RATE_LIMIT_MAX:
+    attempts = [t for t in attempts if now - t < window]
+    if len(attempts) >= max_attempts:
         _login_attempts[key] = attempts
         return True
     attempts.append(now)
     _login_attempts[key] = attempts
 
     if len(_login_attempts) > 1000:
-        for k in [k for k, v in _login_attempts.items() if not v or now - v[-1] > RATE_LIMIT_WINDOW]:
+        for k in [k for k, v in _login_attempts.items() if not v or now - v[-1] > window]:
             del _login_attempts[k]
     return False
 
@@ -204,7 +204,7 @@ def users_delete(prenom):
     conn = db()
     conn.execute('DELETE FROM users WHERE prenom=?', (prenom,))
     conn.execute('DELETE FROM sr_state_user WHERE prenom=?', (prenom,))
-
+    conn.execute('DELETE FROM sr_weights_user WHERE prenom=?', (prenom,))
     conn.execute('DELETE FROM reviews WHERE prenom=?', (prenom,))
     conn.execute('DELETE FROM sr_daily_streak WHERE prenom=?', (prenom,))
     conn.execute('DELETE FROM user_jokers WHERE prenom=?', (prenom,))
@@ -276,6 +276,12 @@ def users_stats():
     ).fetchall()
     done_by_prenom = {r['prenom']: r['c'] for r in done_rows}
 
+    joker_rows = conn.execute('SELECT prenom, count FROM user_jokers').fetchall()
+    jokers_by_prenom = {r['prenom']: r['count'] for r in joker_rows}
+    # Impulse: The admin hands out jokers — let them see the current stock
+    # and streak first instead of clicking blind.
+    streak_by_prenom = {p: compute_streak(conn, p) for p in users}
+
     conn.close()
     daily_review_limit = int(read_params().get('daily_review_limit', 3))
 
@@ -294,6 +300,8 @@ def users_stats():
             'due_today': due_by_prenom.get(prenom, 0),
             'done_today': done_by_prenom.get(prenom, 0),
             'daily_review_limit': daily_review_limit,
+            'jokers': jokers_by_prenom.get(prenom, 0),
+            'streak': streak_by_prenom.get(prenom, 0),
             'todo_today': min(max(0, due_by_prenom.get(prenom, 0) - done_by_prenom.get(prenom, 0)),
                               max(0, daily_review_limit - done_by_prenom.get(prenom, 0))),
         })

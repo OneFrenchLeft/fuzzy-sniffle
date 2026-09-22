@@ -202,9 +202,16 @@ def fmt_grade(g):
 
 
 def ensure_joker_table():
+    # Small: Same schema as db.py — if the bot boots before the site on a
+    # fresh install, its table used to miss last_milestone and break the
+    # milestone awards. Self-heal older tables while we're here.
     conn = fc_db()
     conn.execute('CREATE TABLE IF NOT EXISTS user_jokers ('
-                 'prenom TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0)')
+                 'prenom TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0,'
+                 'last_milestone INTEGER DEFAULT 0)')
+    cols = [r[1] for r in conn.execute('PRAGMA table_info(user_jokers)').fetchall()]
+    if 'last_milestone' not in cols:
+        conn.execute('ALTER TABLE user_jokers ADD COLUMN last_milestone INTEGER DEFAULT 0')
     conn.commit()
     conn.close()
 
@@ -1084,17 +1091,26 @@ async def rotate_status():
     if now.hour >= 23 or now.hour < 7:
         await client.change_presence(activity=discord.Streaming(name='📹 les forgecards que tu n\'as pas faites', url='https://www.youtube.com/watch?v=E4WlUXrJgy4'))
         return
-    conn = fc_db()
-    bots = bot_db()
-    n = 0
-    for prenom, _ in bots.execute("SELECT prenom, discord_id FROM links WHERE prenom != 'admin'").fetchall():
-        try:
-            if compute_remaining(conn, prenom, read_params()) > 0:
-                n += 1
-        except Exception:
-            continue
-    conn.close()
-    bots.close()
+    # Xiao: This loop fires every 15s — nobody needs the count to be that
+    # fresh. Cache it 5 minutes and save thousands of queries a day.
+    import time as _time
+    cache = getattr(rotate_status, '_cache', None)
+    if cache and _time.time() - cache[0] < 300:
+        n = cache[1]
+    else:
+        conn = fc_db()
+        bots = bot_db()
+        params = read_params()
+        n = 0
+        for prenom, _ in bots.execute("SELECT prenom, discord_id FROM links WHERE prenom != 'admin'").fetchall():
+            try:
+                if compute_remaining(conn, prenom, params) > 0:
+                    n += 1
+            except Exception:
+                continue
+        conn.close()
+        bots.close()
+        rotate_status._cache = (_time.time(), n)
     if n == 0:
         msg_count = 'Tout le monde est à jour. Suspect.'
     elif n == 1:

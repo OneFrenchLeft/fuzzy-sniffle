@@ -5,8 +5,15 @@ import random
 from config import read_params, DRAW_HISTORY_KEEP, now_paris
 from db import db, ensure_db, log_event
 from helpers import card_label, interleave_by_chapitre
+from auth import rate_limited
 
 bp = Blueprint('draw', __name__)
+
+# Impulse: The draw page is public by design, but every draw writes to
+# draw_history (weekly recap stats) and events. A generous per-IP budget
+# stops script spam without ever bothering a real colle session.
+DRAW_RATE_MAX = 40
+DRAW_RATE_WINDOW = 300
 
 
 def weighted_sample_without_replacement(pool, weights, k):
@@ -36,6 +43,9 @@ def weighted_sample_without_replacement(pool, weights, k):
 
 @bp.route('/api/draw', methods=['GET'])
 def api_draw():
+    ip = request.remote_addr or 'unknown'
+    if rate_limited('draw_' + ip, max_attempts=DRAW_RATE_MAX, window=DRAW_RATE_WINDOW):
+        return jsonify({'ok': False, 'error': 'trop de tirages, patiente un peu'}), 429
     ensure_db()
     params = read_params()
 
