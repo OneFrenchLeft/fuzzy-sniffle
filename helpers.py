@@ -7,6 +7,16 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def is_real_pdf(file_storage):
+    # Xiao: An extension proves nothing. Check the %PDF- magic bytes instead.
+    try:
+        head = file_storage.stream.read(5)
+        file_storage.stream.seek(0)
+    except Exception:
+        return False
+    return head == b'%PDF-'
+
+
 def parse_teacher_difficulty(raw):
     # Small: Clamp it here so nobody has to remember the range later.
     if raw in (None, ''):

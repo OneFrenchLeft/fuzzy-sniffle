@@ -5,10 +5,11 @@ from functools import wraps
 import hmac, io, time, secrets
 from flask import Blueprint, jsonify, request, session
 from werkzeug.utils import secure_filename
-from config import (ADMIN_PASSWORD, EMOJI_KEYPAD, EMOJI_PW_LENGTH, EMOJI_SEP,
+import config
+from config import (EMOJI_KEYPAD, EMOJI_PW_LENGTH, EMOJI_SEP,
                     gen_emoji_password, now_paris, read_params, JOKER_CAP)
 from helpers import card_label
-from db import db, ensure_db, log_event, csv_safe, csv_response
+from db import db, ensure_db, log_event, csv_safe, csv_response, apply_joker_change
 from replay import replay_reviews
 from streak import compute_streak
 import csv
@@ -61,7 +62,13 @@ def login():
         return jsonify({'ok': False, 'error': 'trop de tentatives'}), 429
     data = request.get_json(silent=True) or {}
     candidate = str(data.get('password') or '')
-    if hmac.compare_digest(candidate.encode('utf-8'), ADMIN_PASSWORD.encode('utf-8')):
+    # Eliot: Read it live. db.py may have generated a temp password AFTER this
+    # module was imported (MADEC_ADMIN_PASSWORD missing from .env), and the
+    # frozen import used to crash every login with a 500.
+    expected = config.ADMIN_PASSWORD
+    if not expected:
+        return jsonify({'ok': False, 'error': 'login admin non configure'}), 503
+    if hmac.compare_digest(candidate.encode('utf-8'), expected.encode('utf-8')):
         session['admin'] = True
         session.permanent = True
         return jsonify({'ok': True})
@@ -86,14 +93,16 @@ def sr_login():
     if rate_limited('sr_login_' + ip + '_' + prenom):
         return jsonify({'ok': False, 'error': 'trop de tentatives, patiente quelques minutes'}), 429
 
-    if not isinstance(emojis, list) or len(emojis) != EMOJI_PW_LENGTH:
+    if (not isinstance(emojis, list) or len(emojis) != EMOJI_PW_LENGTH
+            or not all(isinstance(e, str) for e in emojis)):
         return jsonify({'ok': False, 'error': f'mot de passe invalide ({EMOJI_PW_LENGTH} emoji attendus)'}), 400
 
     conn = db()
     row = conn.execute('SELECT emoji_password FROM users WHERE prenom=?', (prenom,)).fetchone()
     conn.close()
-    stored = row['emoji_password'].split(EMOJI_SEP) if row and row['emoji_password'] else None
-    if stored != emojis:
+    stored = row['emoji_password'] if row and row['emoji_password'] else ''
+    # Xiao: Constant-time compare on the joined form. No timing leaks today.
+    if not stored or not hmac.compare_digest(stored, EMOJI_SEP.join(emojis)):
         return jsonify({'ok': False, 'error': 'bad password'}), 403
 
     session['sr_user'] = prenom
@@ -224,10 +233,9 @@ def user_add_joker(prenom):
     if row and row['count'] >= JOKER_CAP:
         conn.close()
         return jsonify({'ok': False, 'full': True, 'error': prenom + ' a deja ' + str(JOKER_CAP) + ' jokers, plafond atteint.', 'jokers': row['count']}), 400
-    conn.execute(
-        "INSERT INTO user_jokers (prenom, count) VALUES (?,1) "
-        "ON CONFLICT(prenom) DO UPDATE SET count = count + 1",
-        (prenom,))
+    # Flying: Every joker movement goes through the ledger. If it's not
+    # auditable, it didn't happen.
+    apply_joker_change(conn, prenom, 1, 'admin_grant')
     row = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
     conn.commit()
     conn.close()

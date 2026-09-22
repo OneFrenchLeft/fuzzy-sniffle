@@ -993,17 +993,21 @@ async def qcm(interaction: discord.Interaction):
 
 # ---------- Taches planifiees ----------
 
-@tasks.loop(time=dtime(hour=REMINDER_HOUR, minute=1, tzinfo=TZ_PARIS))
+# Eliot: _post is a helper, NOT a loop. The @tasks.loop belongs on
+# daily_reminder below — it once sat on _post, which turned _post into an
+# uncallable Loop and crashed on_ready before ANY scheduled task could start
+# (no reminders, no 23h55 streak guard, no weekly recap). Dark times.
 async def _post(path, payload, timeout=10):
     """POST interne non bloquant : requests est synchrone, on le pousse dans un thread."""
     def _do():
         r = requests.post(f"{SITE_URL}{path}",
-                          headers={"X-Madec-Internal-Key": INTERNAL_KEY},
+                          headers={"X-Madec-Internal-Key": INTERNAL_API_KEY},
                           json=payload, timeout=timeout)
         return r.json()
     return await asyncio.to_thread(_do)
 
 
+@tasks.loop(time=dtime(hour=REMINDER_HOUR, minute=1, tzinfo=TZ_PARIS))
 async def daily_reminder():
     params = read_params()
     conn = fc_db()
@@ -1104,7 +1108,14 @@ async def rotate_status():
 
 @tasks.loop(time=dtime(hour=23, minute=55, tzinfo=TZ_PARIS))
 async def nightly_streak_guard():
-    resp = await _post('/api/internal/streak-guard', {}, timeout=30)
+    try:
+        resp = await _post('/api/internal/streak-guard', {}, timeout=30)
+    except Exception as e:
+        print(f'[streak-guard] appel impossible: {e!r}')
+        return
+    if not isinstance(resp, dict) or not resp.get('ok'):
+        print(f'[streak-guard] reponse invalide: {resp!r}')
+        return
     bots = bot_db()
     links = {p: d for p, d in bots.execute("SELECT prenom, discord_id FROM links WHERE prenom != 'admin'").fetchall()}
     bots.close()

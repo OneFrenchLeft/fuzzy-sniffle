@@ -288,6 +288,10 @@ DATA.mkdir(parents=True, exist_ok=True)
 
 if not ADMIN_PASSWORD:
     ADMIN_PASSWORD = secrets.token_hex(16)
+    # Impulse: Push it back into config so auth.py can actually see it.
+    # Otherwise the temp password we print below is just decoration.
+    import config as _config
+    _config.ADMIN_PASSWORD = ADMIN_PASSWORD
     print('!' * 60)
     print('MADEC_ADMIN_PASSWORD non defini dans .env')
     print('Mot de passe admin temporaire pour cette session :', ADMIN_PASSWORD)

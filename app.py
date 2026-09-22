@@ -35,7 +35,9 @@ app.after_request(add_security_headers)
 for module in (views, auth, cards, sr_routes, qcm_admin, qcm_invites, internal_routes, draw):
     app.register_blueprint(module.bp)
 
-socketio = SocketIO(app, async_mode='gevent')
+# Small: Same-origin only. The default ('*') lets any random site open a
+# socket riding on the user's session cookies. No thanks.
+socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins=[])
 
 
 def _qcm_review_query(prenom):
