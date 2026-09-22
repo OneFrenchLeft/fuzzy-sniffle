@@ -1297,13 +1297,14 @@ function loadStats() {
       det.innerHTML =
         '<summary><span class="name">' + esc(s.prenom) + '</span>' +
         '<span class="meta">' + esc(total + ' rev. - ' + (taux != null ? taux + ' % reussite' : 'pas de revision') +
-        ' - moy. ' + fmtDuree(s.avg_duration) + ' - ' + (jours >= 9999 ? 'jamais actif' : 'il y a ' + jours + ' j')) + '</span></summary>' +
+        ' - moy. ' + fmtDuree(s.avg_duration) + ' - ' + (jours >= 9999 ? 'jamais actif' : 'il y a ' + jours + ' j') +
+        ' - 🔥 ' + (s.streak || 0) + ' j - 🃏 ' + (s.jokers || 0)) + '</span></summary>' +
         '<div class="eleve-detail">' +
         '<div class="meta">' + esc(s.easy + ' automatique - ' + s.good + ' reussi - ' + s.hard + ' difficile - ' + s.again + ' echec - ' + (s.todo_today != null ? s.todo_today + ' a faire aujourd hui (' + s.due_today + ' dues au total)' : s.due_today + ' du aujourd hui')) + '</div>' +
         '<div class="admin-row-actions" style="margin-top:.5rem">' +
         '<button class="btn-ghost btn-small" data-action="show-pw">Voir mdp</button>' +
         '<button class="btn-ghost btn-small" data-action="regen-pw">New mdp</button>' +
-        '<button class="btn-ghost btn-small" data-action="joker" title="Donner un joker">🃏</button>' +
+        '<button class="btn-ghost btn-small" data-action="joker" title="Donner un joker">🃏 ' + (s.jokers || 0) + '</button>' +
         '<button class="btn-ghost btn-small" data-action="deck">Deck</button>' +
         '<a class="btn-ghost btn-small" style="text-decoration:none;text-align:center" href="/api/users/' + encodeURIComponent(s.prenom) + '/export">Export CSV</a>' +
         '<button class="btn-danger btn-small" data-action="delete">Retirer</button></div>' +
