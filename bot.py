@@ -1136,7 +1136,7 @@ async def nightly_streak_guard():
 
 @tasks.loop(time=dtime(hour=20, minute=0, tzinfo=TZ_PARIS))
 async def weekly_recap():
-    """Recap du dimanche 20h : reviews, tirages, streak max anonyme."""
+    """Recap du dimanche 20h : tirages, revisions, streak record de la classe."""
     if datetime.now(TZ_PARIS).weekday() != 6:
         return
     ch_id = get_setting('channel_id')
@@ -1147,18 +1147,18 @@ async def weekly_recap():
     reviews = conn.execute(
         "SELECT COUNT(*) FROM reviews WHERE substr(created_at,1,10) >= ? AND prenom != 'admin'",
         (week_ago,)).fetchone()[0]
+    total_reviews = conn.execute(
+        "SELECT COUNT(*) FROM reviews WHERE prenom != 'admin'").fetchone()[0]
     draws = conn.execute('SELECT COUNT(*) FROM draw_history WHERE substr(created_at,1,10) >= ?',
                          (week_ago,)).fetchone()[0]
     conn.close()
-    classement, fiche_top, podium_qcm, nb_parties = [], None, [], 0
-    resp = None
+    classement, fiche_top, fiche_rev = [], None, None
     try:
         resp = await _post('/api/internal/weekly-stats', {}, timeout=30)
         if resp and resp.get('ok'):
             classement = resp.get('classement', [])
             fiche_top = resp.get('fiche_top')
-            podium_qcm = resp.get('podium_qcm', [])
-            nb_parties = resp.get('nb_parties_qcm', 0)
+            fiche_rev = resp.get('fiche_rev')
     except Exception as e:
         print('weekly-stats:', e)
     channel = client.get_channel(int(ch_id))
@@ -1169,27 +1169,26 @@ async def weekly_recap():
             return
     lines = [
         "📊 **Recap de la semaine**",
-        f"🔁 {plural(reviews, 'revision')}",
-        f"🎲 {plural(draws, 'tirage')}",
+        "",
+        f"🎲 Tirages de la semaine : {draws}",
+        f"🔁 Révisions de la semaine : {reviews}",
+        f"📚 Révisions depuis la rentrée : {total_reviews}",
+        "",
     ]
+    # Xiao: One line for the class record, everyone tied at the top gets named.
     actifs = [c for c in classement if c['streak'] > 0]
     if actifs:
-        medals = ['🥇', '🥈', '🥉']
-        lines.append("🔥 **Classement des streaks :**")
-        for rank, c in enumerate(actifs[:10]):
-            tag = medals[rank] if rank < 3 else f"{rank + 1}."
-            lines.append(f"{tag} {c['prenom']} — {plural(c['streak'], 'jour')}")
+        best = actifs[0]['streak']
+        names = ', '.join(c['prenom'] for c in actifs if c['streak'] == best)
+        lines.append(f"🔥 Streak la plus longue de la classe : {plural(best, 'jour')} — {names}")
     else:
         lines.append("🔥 Aucune streak en cours. Le désert.")
     if fiche_top:
         titre = f"« {fiche_top['titre']} »" if fiche_top.get('titre') else ''
-        lines.append(f"🃏 Fiche la plus tirée : **n°{fiche_top['numero']}** {titre} ({plural(fiche_top['c'], 'tirage')})")
-    if podium_qcm:
-        medals = ['🥇', '🥈', '🥉']
-        lines.append(f"🎯 **QCM de la semaine** ({plural(nb_parties, 'partie')}) :")
-        for rank, c in enumerate(podium_qcm):
-            tag = medals[rank] if rank < 3 else f"{rank + 1}."
-            lines.append(f"{tag} {c['prenom']} — {c['score']} pts")
+        lines.append(f"🃏 Carte la plus tirée : {fiche_top.get('label') or fiche_top['numero']} {titre} ({plural(fiche_top['c'], 'tirage')})")
+    if fiche_rev:
+        titre = f"« {fiche_rev['titre']} »" if fiche_rev.get('titre') else ''
+        lines.append(f"📖 Carte la plus révisée : {fiche_rev.get('label') or fiche_rev['numero']} {titre} ({plural(fiche_rev['c'], 'revision')})")
     await channel.send('\n'.join(lines))
 
 

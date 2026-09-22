@@ -117,6 +117,19 @@ def create_qcm_invite_internal():
         'expires_at': expires.isoformat(),
     })
 
+GUARD_CATCHUP_DAYS = 14
+
+
+def _first_activity_day(conn, prenom):
+    """Premier jour ou l'eleve a laisse une trace (review ou evenement)."""
+    d1 = conn.execute('SELECT MIN(substr(created_at,1,10)) AS d FROM reviews WHERE prenom=?',
+                      (prenom,)).fetchone()['d']
+    d2 = conn.execute('SELECT MIN(substr(created_at,1,10)) AS d FROM events WHERE prenom=?',
+                      (prenom,)).fetchone()['d']
+    days = [d for d in (d1, d2) if d]
+    return min(days) if days else None
+
+
 @bp.route('/api/internal/streak-guard', methods=['POST'])
 def internal_streak_guard():
     expected = os.environ.get('MADEC_INTERNAL_API_KEY')
@@ -127,17 +140,36 @@ def internal_streak_guard():
     params = read_params()
     conn = db()
     users = [r['prenom'] for r in conn.execute("SELECT prenom FROM users WHERE prenom != 'admin'").fetchall()]
-    # On cloture explicitement HIER : le guard peut tourner a n'importe quelle
-    # heure (23h55, 00h05, rattrapage manuel le lendemain) sans risque de
-    # traiter le mauvais jour. Idempotent : relancer le guard ne coute rien.
-    target = (now_paris().date() - timedelta(days=1)).isoformat()
+    # On cloture explicitement les jours PASSES (jamais aujourd'hui) : le guard
+    # peut tourner a n'importe quelle heure (23h55, 00h05, rattrapage manuel)
+    # sans risque de traiter le mauvais jour. Idempotent : relancer le guard
+    # ne coute rien.
+    # Small: Catch-up on the last GUARD_CATCHUP_DAYS days, oldest first, so a
+    # few nights of downtime can't silently kill every streak. No early stop:
+    # a missed day leaves no trace, and closing newer days still matters —
+    # a joker spent yesterday keeps the CURRENT chain alive even if an older
+    # day is a hole. Chronological order keeps multi-day absences spending
+    # jokers exactly like nightly runs would have.
+    today = now_paris().date()
+    yesterday = today - timedelta(days=1)
     results = {}
     for prenom in users:
         try:
             events = []
-            outcome = close_day(conn, prenom, target, params, reason='guard_spend')
-            if outcome == 'joker_spent':
-                events.append('joker_spent')
+            outcomes = []
+            first = _first_activity_day(conn, prenom)
+            start = max(yesterday - timedelta(days=GUARD_CATCHUP_DAYS - 1),
+                        datetime.strptime(first, '%Y-%m-%d').date() if first else yesterday)
+            # Impulse: Always close at least yesterday, even for an account
+            # born today — an inactive day leaves no trace anyway.
+            start = min(start, yesterday)
+            day = start
+            while day <= yesterday:
+                outcome = close_day(conn, prenom, day.isoformat(), params, reason='guard_spend')
+                outcomes.append(outcome)
+                if outcome == 'joker_spent':
+                    events.append('joker_spent')
+                day += timedelta(days=1)
             jk_before = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
             before = jk_before['count'] if jk_before else 0
             streak = reconcile_streak(conn, prenom)
@@ -147,7 +179,7 @@ def internal_streak_guard():
                 events.append('joker_awarded')
                 log_event(conn, prenom, 'joker_awarded', f'streak={streak}')
             results[prenom] = {'streak': streak, 'events': events, 'jokers': after,
-                               'closed': outcome}
+                               'closed': outcomes[-1] if outcomes else 'skipped'}
         except Exception as exc:
             print(f'[streak-guard] {prenom}: {exc!r}')
             conn.rollback()

@@ -2,7 +2,7 @@
 """Weighted random draw of cards."""
 from flask import Blueprint, jsonify, request, session
 import random
-from config import read_params, DRAW_HISTORY_KEEP
+from config import read_params, DRAW_HISTORY_KEEP, now_paris
 from db import db, ensure_db, log_event
 from helpers import card_label, interleave_by_chapitre
 
@@ -142,9 +142,12 @@ def api_draw():
     # Eliot: Random first, chapter-friendly ordering after. That's deliberate.
     reordered = interleave_by_chapitre(chosen)
 
+    # Flying: Paris time, like every other table — the UTC default used to
+    # shift the weekly recap's "tirages de la semaine" around midnight.
+    now_iso = now_paris().isoformat()
     conn.executemany(
-        "INSERT INTO draw_history(numero) VALUES(?)",
-        [(c["numero"],) for c in reordered],
+        "INSERT INTO draw_history(numero, created_at) VALUES(?,?)",
+        [(c["numero"], now_iso) for c in reordered],
     )
 
     conn.execute(
