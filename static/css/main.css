@@ -496,10 +496,18 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
   .admin-row{flex-direction:column;align-items:flex-start}
   .site-footer{position:static;transform:none;text-align:center;margin-top:var(--space-6)}
   .weak-table{font-size:.75rem}
+  /* Xiao: admin tables were born on a desktop. Let them scroll sideways
+     instead of crushing every column into unreadable mush. */
+  #qcm-weak-table,#stats-overview{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  #qcm-weak-table .weak-table,#stats-overview .weak-table{min-width:540px}
+  #qcm-games-table .admin-row>div:last-child{text-align:left !important}
+  /* Small: 520px of JSON editor is a scroll marathon on a phone. */
+  #qcm-json-editor{min-height:300px !important}
+  #qcm-preview-json{min-height:180px !important}
   #view-sr::before,#view-tirage::before{display:none}
   .sr-grade-row{grid-template-columns:1fr 1fr;gap:.75rem}
   button,a,input,select{min-height:44px}
-  .info-btn,.hamburger-btn{min-height:0}
+  .info-btn,.hamburger-btn,.picker-nav{min-height:0}
   input[type=checkbox],input[type=radio]{min-height:0}
   .btn-primary,.btn-save{min-height:52px}
   .btn-rate{min-height:64px;padding:.75rem .5rem;font-size:.8rem}
