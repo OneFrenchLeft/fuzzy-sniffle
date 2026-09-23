@@ -493,7 +493,7 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
   .nav .nav-btn{min-height:44px}
   header{position:sticky;top:0;padding:var(--space-3) var(--space-4)}
   .theme-toggle{order:2}
-  .subject-toggle{order:2}
+  .nav .subject-toggle{width:100%;min-height:44px}
   main{padding:var(--space-8) var(--space-4);justify-content:flex-start}
   .panel{padding:var(--space-4)}
   .toast{bottom:calc(1.5rem + env(safe-area-inset-bottom));max-width:calc(100vw - 2rem);text-align:center}
