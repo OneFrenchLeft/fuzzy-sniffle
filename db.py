@@ -63,15 +63,36 @@ def _prepare_subject_migration(conn):
     return renamed
 
 
+def _copy_v1_rows(conn, table, old_cols):
+    """Recopie v1 -> v2 en subject='physique', puis jette la table _old.
+    Intersection des colonnes : les vieilles bases traînent des colonnes
+    tombées en désuétude (p. ex. difficulte_prof avant teacher_difficulty)
+    que le schéma v2 n'a plus — leur présence ne doit pas faire échouer
+    toute la migration. OR IGNORE : une ligne re-créée depuis le crash
+    (p. ex. une fiche re-uploadée) gagne devant l'ancienne."""
+    new_cols = set(_table_cols(conn, table))
+    common = [c for c in old_cols if c in new_cols]
+    cols_csv = ','.join(common)
+    conn.execute(
+        f"INSERT OR IGNORE INTO {table}(subject,{cols_csv}) "
+        f"SELECT 'physique',{cols_csv} FROM {table}_old")
+    conn.execute(f'DROP TABLE {table}_old')
+
+
 def _finish_subject_migration(conn, renamed):
     """Recopie les donnees v1 en subject='physique' dans le schema v2, puis
     ajoute la colonne subject aux tables sans changement de PK."""
     for table, old_cols in renamed:
-        cols_csv = ','.join(old_cols)
-        conn.execute(
-            f"INSERT INTO {table}(subject,{cols_csv}) "
-            f"SELECT 'physique',{cols_csv} FROM {table}_old")
-        conn.execute(f'DROP TABLE {table}_old')
+        _copy_v1_rows(conn, table, old_cols)
+    # Reprise d'une migration interrompue (plantage entre le rename et la
+    # recopie, p. ex. colonne v1 inconnue du v2) : des <table>_old
+    # residuels trainent dans la base avec les donnees hors schema v2.
+    # On finit le travail au lieu de demarrer sur des tables vides.
+    for table in _SUBJECT_PK_TABLES:
+        old_cols = _table_cols(conn, f'{table}_old')
+        if old_cols:
+            print(f'[db] reprise migration : recopie de {table}_old')
+            _copy_v1_rows(conn, table, old_cols)
     for table in _SUBJECT_ALTER_TABLES:
         cols = _table_cols(conn, table)
         if cols and 'subject' not in cols:
