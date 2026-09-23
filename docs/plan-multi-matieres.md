@@ -3,156 +3,135 @@
 Objectif : faire tourner la chimie à côté de la physique sur la même instance,
 sans second déploiement ni second bot.
 
+**Statut : implémenté sur `feat/multi-matieres` (backend, frontend, admin,
+bot). Reste la recette manuelle en conditions réelles (dernière section).**
+
 ## Décisions actées (ne pas rouvrir)
 
-* **Un seul login par élève.** Le compte, le mot de passe emoji, la session : inchangés.
+* **Un seul login par élève.** Le compte, le mot de passe emoji, la session :
+  inchangés. La session est **commune** : le switch matière ne fait que changer
+  un contexte de navigation (`session['subject']`), jamais l'authentification.
 
-* **Un switch physique ⇄ chimie** dans le header, dans l'esprit du toggle jour/nuit.
+* **Un switch physique ⇄ chimie** dans le header, dans l'esprit du toggle
+  jour/nuit (`POST /api/subject`, liste des matières via `/api/subjects`).
 
-* **Deux pages admin séparées** : `/admin` (physique) et `/cadmin` (chimie).
+* **Deux pages admin séparées** : `/admin` (physique) et `/cadmin` (chimie),
+  même template, même mot de passe admin. Chaque page ne voit et ne modifie
+  que sa matière — **sauf les QCM, communs** : l'éditeur QCM garde son
+  sélecteur de matière et chaque admin voit/enregistre les QCM de **toutes**
+  les matières depuis les deux pages. Les stats de questions QCM (`weak`,
+  `games`, exports `qcm-par-mois`) restent communes aussi.
 
-* **Un seul mot de passe admin**, partagé par les deux pages.
+* **Ce qui est séparé par matière** : fiches (`forgecards`), numérotation
+  (repart de 1 en chimie), historique de tirages (`draw_history`), options de
+  tirage et paramètres (`params_<matiere>.json` : max tirable, quotas/jour,
+  rétention FSRS, bonus de chapitre), révisions (`reviews`, FSRS, poids
+  entraînés), streaks (`sr_daily_streak`), jokers (`user_jokers` +
+  `joker_ledger`), stats admin (overview, exports, suivi élèves), events.
+  **Pages élèves séparées** : tirage, liste, SR, compte (dashboard), suivent
+  la matière active de la session.
 
-* Le QCM est **déjà multi-matières** (`qcm_physique.json`, `qcm_chimie.json`,
-  `qcm_maths.json`) : on n'y touche pas.
+* Le QCM est **déjà multi-thèmes** (`qcm_physique.json`, `qcm_chimie.json`,
+  `qcm_maths.json`) : inchangé, et volontairement **hors scope matière**.
 
 ## Architecture retenue : une seule app, une dimension `subject`
 
-Pas de deuxième instance Flask, pas de deuxième base. On ajoute une colonne
-`subject` (`'physique'` / `'chimie'`) aux tables métier et on scope toutes les
-requêtes. La donnée existante devient `subject='physique'`.
+Pas de deuxième instance Flask, pas de deuxième base. Colonne `subject`
+(`'physique'` / `'chimie'`) sur les tables métier, toutes les requêtes sont
+scopées. La donnée existante devient `subject='physique'`.
 
-### 1. Base de données (migration)
+### 1. Base de données (migration) — fait
 
-Ajouter `subject TEXT NOT NULL DEFAULT 'physique'` et adapter les clés :
+Schéma v2 en place (`init_db`) : `forgecards` PK `(subject, numero)`,
+`sr_state_user` PK `(prenom, subject, numero)`, `sr_daily_streak` PK
+`(prenom, subject, day)`, `user_jokers` PK `(prenom, subject)`,
+`sr_weights_user` PK `(prenom, subject)` ; colonne `subject` sur `reviews`,
+`reviews_archive`, `draw_history`, `events`, `joker_ledger`. `users` et les
+tables QCM inchangées. Migration automatique au démarrage : snapshot
+horodaté `forgecards.bak-<ts>.db`, tables à PK composée renommées puis
+recréées, données recopiées en `subject='physique'`, `ALTER TABLE` pour les
+autres. Idempotent. *(Validée par le smoke test : migration d'une base v1 de
+référence, données intactes.)*
 
-| Table                         | Changement                                                                           |
-| ----------------------------- | ------------------------------------------------------------------------------------ |
-| `forgecards`                  | PK `(numero)` → `(subject, numero)` — les numéros de fiches repartent de 1 en chimie |
-| `sr_state_user`               | PK `(prenom, numero)` → `(prenom, subject, numero)`                                  |
-| `sr_daily_streak`             | PK `(prenom, day)` → `(prenom, subject, day)`                                        |
-| `user_jokers`                 | PK `(prenom)` → `(prenom, subject)` — jokers et streaks **par matière**              |
-| `joker_ledger`                | colonne `subject` (audit)                                                            |
-| `reviews` / `reviews_archive` | colonne `subject`                                                                    |
-| `draw_history`                | colonne `subject`                                                                    |
-| `sr_weights_user`             | PK `(prenom)` → `(prenom, subject)` — poids FSRS entraînés par matière               |
-| `events`                      | colonne `subject` (stats admin par matière)                                          |
-| `users`                       | **inchangée** — un seul compte                                                       |
-| tables QCM                    | **inchangées** — déjà multi-thèmes/matières                                          |
+### 2. Configuration — fait
 
-Migration **automatique au démarrage** (`init_db`) : SQLite ne sait pas
-modifier une PK en place, les tables à clé composée sont renommées puis
-recréées, les données recopiées en `subject='physique'` ; les autres tables
-reçoivent un simple `ALTER TABLE`. Snapshot horodaté de `data/forgecards.db`
-avant toute migration, et opération idempotente. *(Implémenté sur la branche
-`feat/multi-matieres`.)*
+* `SUBJECT_META` + flags `.env` (`CHIMIE=True`, plus tard `MATHS=True`) :
+  `subject_enabled()`, `ENABLED_SUBJECTS`, `/api/subjects` (élèves : matières
+  activées uniquement ; admin : toutes via `all_subjects_payload()`).
+* `CHAPITRES_BY_SUBJECT` + `chapitres_for(subject)` (`CHAPITRES` reste la
+  liste physique ; chimie/maths = `['Autre']` à remplir avant le lancement).
+* `params_path/read_params/write_params(subject)` : `params.json` conservé
+  pour la physique (zéro migration), `params_chimie.json`, …
+* Uploads : physique garde ses noms plats historiques (`1.pdf`, `1-c.pdf`…,
+  **zéro migration de fichiers ni de URLs** déjà publiées) ; les autres
+  matières vivent dans `uploads/fiche/<matiere>/…` (`filenames_for(code,
+  subject)`) pour ne pas collisionner les numéros.
 
-### 2. Configuration
+### 3. Backend — scoping des routes — fait
 
-* **Feature flags `.env`** : physique est la matière de base, toujours active.
-  Chaque autre matière se réveille avec une variable (`CHIMIE=True`, plus tard
-  `MATHS=True`). Tant que le flag est absent ou `False`, la matière n'apparaît
-  **nulle part** côté élèves (switch, thèmes QCM, selects) — le code reste sur
-  git, invisible. L'admin, lui, voit toutes les matières connues pour pouvoir
-  préparer le contenu avant l'activation. *(Implémenté sur la branche
-  `feat/multi-matieres` : `SUBJECT_META`, `subject_enabled`,
-  `ENABLED_SUBJECTS`, endpoint `/api/subjects`.)*
+* `current_subject()` (élèves, session, défaut physique) et `admin_subject()`
+  (`?subject=` validé contre **toutes** les matières connues — l'admin prépare
+  une matière avant son activation ; repli sur la matière de session).
+  Règle simple : **aucune requête métier sans filtre `subject`**.
+* Élèves : `draw.py`, `sr.py`, `auth.py` (deck/export élève), `views.py`
+  (`/api/params`, `/api/chapitres`, `/api/subjects`, `/api/subject`) — tout
+  passe par `current_subject()`.
+* Admin : `cards.py`, `auth.py` (stats, jokers, deck, export), exports CSV —
+  tout passe par `admin_subject()`. `?subject=` absent → matière de session.
+* `log_event(..., subject=)` écrit la colonne `subject`.
+* `qcm_admin.py`, `qcm_engine.py`, `qcm_invites.py` : **non scopés** (QCM
+  communs, voir décisions).
 
-* `CHAPITRES` devient un dict par matière (`CHAPITRES_BY_SUBJECT['physique']` =
-  liste actuelle, `['chimie']` = à remplir).
+### 4. Frontend — le switch — fait
 
-* `params.json` → un fichier par matière (`params.json` conservé pour la
-  physique, `params_chimie.json`, …) : rétention FSRS, limites/jour et numéros
-  max indépendants. `read_params(subject)` / `write_params(data, subject)`.
+* Toggle matière dans le header (à côté du jour/nuit) : chargé depuis
+  `/api/subjects`, caché si une seule matière activée, libellé coloré par
+  matière. Clic → `POST /api/subject` → rechargement (la session serveur fait
+  foi) ; `localStorage` ne sert que l'affichage immédiat.
+* `admin.html` reçoit `data-subject` (via `{% block body_attrs %}`) ;
+  `app.js` ajoute `?subject=` à tous ses appels admin (`adminUrl()`), sauf
+  QCM. Les routes `/admin` et `/cadmin` rendent le même template avec
+  `subject_key` physique/chimie.
+* Le thème jour/nuit reste global.
 
-* Uploads : `uploads/fiche/<subject>/...` (sous-dossier par matière, les PDF
-  actuels sont déplacés dans `physique/`).
+### 5. Bot Discord — fait
 
-### 3. Backend — scoping des routes
+* Mêmes flags lus dans le `.env` (`SUBJECT_META` dupliqué dans `bot.py`, à
+  garder en sync avec `config.py`), `read_params(subject)`,
+  `compute_daily/compute_remaining/compute_streak/get_jokers` scopés.
+* `streak-guard` 23h55 : le site boucle sur `ENABLED_SUBJECTS`
+  (`results[matiere][prenom]`), le bot mentionne la matière dans ses DM
+  (joker dépensé / gagné par matière).
+* Rappel quotidien : un DM par matière ayant des cartes restantes, avec le
+  libellé de la matière.
+* Recap du dimanche : **une section par matière** (tirages, révisions,
+  streak record, cartes les plus tirées/révisées de la matière) + un bloc
+  QCM commun. `weekly-stats` prend `?subject=`.
+* `watch_new_cards` : drop annoncé par matière (clé de suivi
+  `last_announced_num:<matiere>`).
+* `/madec streak` et `/madec progress` : une ligne par matière.
+* Les duels restent en physique pour l'instant (seule piscine de fiches).
 
-* `session['subject']`, défaut `'physique'`, modifié via
-  `POST /api/subject {subject: 'chimie'}` (valide contre `SUBJECTS`).
+## Recette avant activation (CHIMIE=True en prod)
 
-* Helper `current_subject()` dans `helpers.py`, utilisé partout où une requête
-  SQL touche une table migrée. Règle simple : **aucune requête métier sans
-  filtre `subject`**, sinon fuite de données entre matières.
+1. Remplir `CHAPITRES_BY_SUBJECT['chimie']` et uploader les fiches via
+   `/cadmin` (numérotation chimie indépendante, repart de 1).
+2. Régler `params_chimie.json` via `/cadmin` (max tirable, quotas, rétention).
+3. Vérifier qu'avec `CHIMIE` absent du `.env` **rien ne change** côté élèves
+   (smoke test : le switch est caché, tout reste en physique).
+4. Allumer `CHIMIE=True`, parcours complet : tirage, liste, SR (quotas
+   chimie), streak/jokers indépendants, switch aller-retour, exports,
+   guard 23h55 sur les deux matières.
+5. Mettre à jour le `.env` du bot (même flag) et redémarrer le bot.
 
-* Routes concernées : `cards.py`, `sr.py`, `draw.py`, `auth.py` (stats, deck,
-  jokers), `views.py` (`/api/params`, `/api/chapitres`, `/uploads/fiche/...`),
-  `internal.py` (weekly-stats, streak-guard), exports CSV.
+## Points de vigilance
 
-* Le login élève (`/api/sr/login`) ne change pas : la matière est un contexte
-  de navigation, pas un périmètre d'authentification.
-
-### 4. Frontend — le switch
-
-* Toggle dans le header à côté du jour/nuit : deux états (⚛️ Physique / ⚗️
-  Chimie), même mécanique que le thème (clic → `POST /api/subject` →
-  rechargement des données de la vue courante).
-
-* Affichage immédiat via `localStorage` en attendant la réponse, la session
-  serveur fait foi au chargement.
-
-* Titre de page et libellés adaptés à la matière active.
-
-* Le thème jour/nuit reste global (pas par matière).
-
-### 5. Admin — `/cadmin`
-
-* Nouvelle route `GET /cadmin` dans `views.py` qui rend **le même**
-  `admin.html` avec `subject='chimie'` exposé au JS
-  (`<body data-subject="chimie">` ou variable injectée).
-
-* `session['admin']` existante : même mot de passe, une connexion admin ouvre
-  les deux pages (décision actée).
-
-* Le JS admin lit `data-subject` et passe `?subject=` (ou un header) à tous
-  ses appels `/api/admin/*` et `/api/forgecards/*`. `/admin` sans paramètre =
-  physique, comportement actuel préservé.
-
-* Chaque page admin ne voit et ne modifie que sa matière : paramètres, fiches,
-  élèves (suivi par matière), stats, exports.
-
-### 6. Bot Discord
-
-* `streak-guard`, `daily_reminder`, `weekly_recap` itèrent sur `SUBJECTS`.
-
-* Streaks et jokers **par matière** : un élève peut avoir une streak physique
-  de 12 et une streak chimie de 3, avec des jokers indépendants.
-
-* Le recap du dimanche affiche deux sections (📊 Recap physique / 📊 Recap
-  chimie) dans le même message, au format actuel.
-
-* Le rappel quotidien mentionne la matière concernée.
-
-### 7. Phases de mise en œuvre
-
-1. **Config** : `SUBJECTS`, chapitres par matière, chemins uploads/params.
-2. **Migration DB** : script + snapshot + vérification que la physique
-   fonctionne exactement comme avant (régression zéro).
-3. **Scoping backend** : `current_subject()` + propagation route par route,
-   tests du smoke test étendus aux deux matières.
-4. **Switch frontend** : toggle header + rechargement des vues.
-5. **`/cadmin`** : route + `data-subject` + paramétrage des appels JS.
-6. **Bot** : boucle sur les matières + recap en deux sections.
-7. **Recette** : parcours complet sur les deux matières (tirage, SR, streak,
-   joker, admin, exports), dont un passage du guard à 23h55 sur les deux.
-
-### Points de vigilance
-
-* **Fuite croisée** : le risque n°1 est une requête oubliée sans filtre
-  `subject` (une fiche de chimie qui sort en physique). Le helper centralisé
-  et la revue route par route sont là pour ça.
-
-* **PK composites** : la migration SQLite doit recréer les tables, pas les
-  altérer — tester le script sur une copie avant la prod.
-
-* **Numérotation** : les fiches chimie repartent à n°1, toutes les URLs et
-  logs qui affichent un `numero` doivent être lus avec leur matière.
-
-* **Charge du guard** : deux matières = deux clôtures par élève et par nuit ;
-  le rattrapage sur 14 jours reste borné, pas de souci de performance à cette
-  échelle.
-
-* <br />
-
+* **Fuite croisée** : le risque n°1 reste une requête oubliée sans filtre
+  `subject`. Le smoke test couvre les routes principales ; toute nouvelle
+  route métier doit prendre `current_subject()` ou `admin_subject()`.
+* **Numérotation** : un `numero` se lit toujours avec sa matière ; les
+  URL/logs d'admin affichent les deux via `?subject=`.
+* **QCM communs** : ne jamais scoper `qcm_answers`/`qcm_games` par matière —
+  les deux admins partagent ces stats.
+* **Bot/site sync** : `SUBJECT_META`/flags dupliqués dans `bot.py` ; un oubli
+  de mise à jour d'un côté se voit (matière absente des DM/recaps).

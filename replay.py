@@ -5,9 +5,10 @@ from fsrs import apply_review, DEFAULT_WEIGHTS
 from config import GRADE_MAP_FR, read_params, now_paris
 from db import db
 
-def get_user_weights(conn, prenom):
+def get_user_weights(conn, prenom, subject='physique'):
     # Small: Validate the shape before trusting stored weights.
-    row = conn.execute('SELECT weights_json FROM sr_weights_user WHERE prenom=?', (prenom,)).fetchone()
+    row = conn.execute('SELECT weights_json FROM sr_weights_user WHERE prenom=? AND subject=?',
+                       (prenom, subject)).fetchone()
     if row and row['weights_json']:
         try:
             w = json.loads(row['weights_json'])
@@ -18,15 +19,16 @@ def get_user_weights(conn, prenom):
             pass
     return list(DEFAULT_WEIGHTS)
 
-def replay_reviews(conn, prenom, rows):
+def replay_reviews(conn, prenom, rows, subject='physique'):
     """Replays a student's FSRS history: for each review, returns the card state
     AFTER that review plus retrievability BEFORE it.
     rows: rows with created_at, numero, result keys, sorted chronologically."""
     # Flying: Build this once instead of querying teacher difficulty for every review.
     prof_by_num = {r['numero']: r['teacher_difficulty']
-                   for r in conn.execute('SELECT numero, teacher_difficulty FROM forgecards').fetchall()}
-    weights = get_user_weights(conn, prenom)
-    retention = float(read_params().get('fsrs_retention', 0.90))
+                   for r in conn.execute('SELECT numero, teacher_difficulty FROM forgecards WHERE subject=?',
+                                         (subject,)).fetchall()}
+    weights = get_user_weights(conn, prenom, subject)
+    retention = float(read_params(subject).get('fsrs_retention', 0.90))
     state_by_card = {}
     out = []
     for rv in rows:

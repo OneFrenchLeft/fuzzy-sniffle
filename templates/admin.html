@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Admin{% endblock %}
+{% block body_attrs %}data-subject="{{ subject_key }}"{% endblock %}
 {% block content %}
   <section class="view active" id="view-admin">
     <div class="panel">

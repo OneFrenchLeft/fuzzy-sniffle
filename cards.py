@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
-"""Fiches (forgecards) cote admin : upload, edition, stats, notes."""
+"""Fiches (forgecards) cote admin : upload, edition, stats, notes.
+
+Tout est scopé par matière : `admin_subject()` lit ?subject= (valide contre
+SUBJECT_META, l'admin prépare une matière avant son activation). La liste
+publique, elle, suit la matière de session de l'élève (current_subject).
+"""
 import io, csv
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
-from config import CHAPITRES, UPLOADS, now_paris, read_params
+from config import chapitres_for, UPLOADS, now_paris, read_params
 from db import db, ensure_db, log_event
 from helpers import (allowed_file, is_real_pdf, parse_teacher_difficulty, hs_sort_key,
                      card_label, filenames_for, remove_pdf_if_exists, card_exists,
-                     interleave_by_chapitre)
+                     interleave_by_chapitre, admin_subject, current_subject)
 
 from auth import require_admin
 from db import csv_safe, csv_response
@@ -20,8 +25,9 @@ bp = Blueprint('cards', __name__)
 @require_admin
 def list_forgecards():
     ensure_db()
+    subject = admin_subject()
     conn = db()
-    rows = conn.execute('SELECT numero, code, fiche_file, correction_file, bareme_file, titre, indices, chapitre, teacher_difficulty, hors_serie, created_at FROM forgecards ORDER BY numero ASC').fetchall()
+    rows = conn.execute('SELECT numero, code, fiche_file, correction_file, bareme_file, titre, indices, chapitre, teacher_difficulty, hors_serie, created_at FROM forgecards WHERE subject=? ORDER BY numero ASC', (subject,)).fetchall()
     conn.close()
     out = [dict(r) for r in rows]
     for c in out:
@@ -31,19 +37,20 @@ def list_forgecards():
 @bp.route('/api/forgecards/public')
 def list_forgecards_public():
     ensure_db()
+    subject = current_subject()
     q = (request.args.get('q') or '').strip().lower()
-    params = read_params()
+    params = read_params(subject)
     max_active = int(params.get('max_active_num', 36))
     max_hs = int(params.get('max_hors_serie_num', 0))
     conn = db()
     rows = conn.execute(
-        "SELECT numero, code, titre, chapitre, teacher_difficulty, fiche_file, correction_file, bareme_file, indices, hors_serie FROM forgecards WHERE hors_serie = 0 AND numero <= ? ORDER BY numero ASC",
-        (max_active,)
+        "SELECT numero, code, titre, chapitre, teacher_difficulty, fiche_file, correction_file, bareme_file, indices, hors_serie FROM forgecards WHERE subject=? AND hors_serie = 0 AND numero <= ? ORDER BY numero ASC",
+        (subject, max_active)
     ).fetchall()
     if max_hs > 0:
         rows += conn.execute(
-            "SELECT numero, code, titre, chapitre, teacher_difficulty, fiche_file, correction_file, bareme_file, indices, hors_serie FROM forgecards WHERE hors_serie = 1 ORDER BY numero ASC LIMIT ?",
-            (max_hs,)
+            "SELECT numero, code, titre, chapitre, teacher_difficulty, fiche_file, correction_file, bareme_file, indices, hors_serie FROM forgecards WHERE subject=? AND hors_serie = 1 ORDER BY numero ASC LIMIT ?",
+            (subject, max_hs)
         ).fetchall()
     conn.close()
     cards = [dict(r) for r in rows]
@@ -64,6 +71,8 @@ def list_forgecards_public():
 @require_admin
 def upload_forgecard():
     ensure_db()
+    subject = admin_subject()
+    chapitres = chapitres_for(subject)
     numero = (request.form.get('numero') or '').strip()
     titre = (request.form.get('titre') or '').strip()
     indices = (request.form.get('indices') or '').strip()
@@ -80,7 +89,7 @@ def upload_forgecard():
     # Impulse: Magic bytes, not vibes. A renamed .exe is not a fiche.
     if not is_real_pdf(fiche) or not is_real_pdf(correction) or (bareme and not is_real_pdf(bareme)):
         return jsonify({'ok': False, 'error': 'fichier invalide : ce n\'est pas un vrai PDF'}), 400
-    if chapitre not in CHAPITRES:
+    if chapitre not in chapitres:
         chapitre = 'Autre'
     teacher_difficulty = parse_teacher_difficulty(request.form.get('difficulty'))
     hors_serie = 1 if (request.form.get('hors_serie') or '') == '1' else 0
@@ -97,23 +106,23 @@ def upload_forgecard():
     conn = db()
     try:
         if hs_target:
-            row_t = conn.execute("SELECT numero FROM forgecards WHERE code = ? AND hors_serie = 1", (hs_target,)).fetchone()
+            row_t = conn.execute("SELECT numero FROM forgecards WHERE subject=? AND code = ? AND hors_serie = 1", (subject, hs_target)).fetchone()
             if not row_t:
-                return jsonify({'ok': False, 'error': 'fiche ' + hs_target.upper() + ' introuvable'}), 404
+                return jsonify({'ok': False, 'error': 'fiche ' + hs_target.upper() + ' introuvable (' + subject + ')'}), 404
             numero = row_t['numero']
             code = hs_target
         elif hors_serie:
-            existing_codes = [r[0] for r in conn.execute("SELECT code FROM forgecards WHERE hors_serie = 1").fetchall()]
+            existing_codes = [r[0] for r in conn.execute("SELECT code FROM forgecards WHERE subject=? AND hors_serie = 1", (subject,)).fetchall()]
             next_idx = max([hs_sort_key(c) for c in existing_codes] + [0]) + 1
             code = f'h{next_idx}'
             # Un hors-serie ne squatte JAMAIS le numero d'une fiche normale :
             # slot force >= 9001 pour eviter tout ecrasement ON CONFLICT.
-            row_max = conn.execute("SELECT MAX(numero) AS m FROM forgecards").fetchone()
+            row_max = conn.execute("SELECT MAX(numero) AS m FROM forgecards WHERE subject=?", (subject,)).fetchone()
             numero = max(9001, (row_max['m'] or 0) + 1)
         else:
             code = str(numero)
-        fiche_name, corr_name, bareme_name = filenames_for(code)
-        existing = conn.execute('SELECT fiche_file, correction_file, bareme_file FROM forgecards WHERE numero=?', (numero,)).fetchone()
+        fiche_name, corr_name, bareme_name = filenames_for(code, subject)
+        existing = conn.execute('SELECT fiche_file, correction_file, bareme_file FROM forgecards WHERE subject=? AND numero=?', (subject, numero)).fetchone()
         if existing:
             # L'ancien barème n'est supprime QUE si un nouveau est fourni :
             # sinon on conserve le fichier ET la reference en base.
@@ -121,6 +130,8 @@ def upload_forgecard():
                 remove_pdf_if_exists(name)
             if bareme:
                 remove_pdf_if_exists(existing['bareme_file'])
+        target_dir = UPLOADS / subject if subject != 'physique' else UPLOADS
+        target_dir.mkdir(parents=True, exist_ok=True)
         fiche.save(UPLOADS / fiche_name)
         correction.save(UPLOADS / corr_name)
         final_bareme_name = ''
@@ -135,39 +146,40 @@ def upload_forgecard():
             'ON CONFLICT(subject, numero) DO UPDATE SET '
             'code=excluded.code, fiche_file=excluded.fiche_file, correction_file=excluded.correction_file, '
             'bareme_file=excluded.bareme_file, titre=excluded.titre, indices=excluded.indices, chapitre=excluded.chapitre, teacher_difficulty=excluded.teacher_difficulty, hors_serie=excluded.hors_serie',
-            ('physique', numero, code, fiche_name, corr_name, final_bareme_name, titre, indices, chapitre, teacher_difficulty, hors_serie)
+            (subject, numero, code, fiche_name, corr_name, final_bareme_name, titre, indices, chapitre, teacher_difficulty, hors_serie)
         )
         conn.commit()
     finally:
         conn.close()
-    return jsonify({'ok': True, 'numero': numero, 'code': code, 'label': card_label(code, hors_serie)})
+    return jsonify({'ok': True, 'numero': numero, 'code': code, 'label': card_label(code, hors_serie), 'subject': subject})
 
 @bp.route('/api/forgecards/<int:numero>', methods=['DELETE'])
 @require_admin
 def delete_forgecard(numero):
     ensure_db()
+    subject = admin_subject()
     conn = db()
-    row = conn.execute('SELECT fiche_file, correction_file, bareme_file FROM forgecards WHERE numero=?', (numero,)).fetchone()
+    row = conn.execute('SELECT fiche_file, correction_file, bareme_file FROM forgecards WHERE subject=? AND numero=?', (subject, numero)).fetchone()
     if not row:
         conn.close()
         return jsonify({'ok': False, 'error': 'not found'}), 404
-    conn.execute('DELETE FROM forgecards WHERE numero=?', (numero,))
-    conn.execute('DELETE FROM sr_state_user WHERE numero=?', (numero,))
+    conn.execute('DELETE FROM forgecards WHERE subject=? AND numero=?', (subject, numero))
+    conn.execute('DELETE FROM sr_state_user WHERE subject=? AND numero=?', (subject, numero))
 
     # Preserver les jours d'activite de tous les eleves (sinon leurs streaks
     # cassent retroactivement) puis archiver les reviews pour la tracabilite.
     conn.execute(
-        "INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) "
-        "SELECT DISTINCT prenom, substr(created_at,1,10), 1 FROM reviews WHERE numero=?",
-        (numero,),
+        "INSERT OR IGNORE INTO sr_daily_streak(prenom, subject, day, validated) "
+        "SELECT DISTINCT prenom, subject, substr(created_at,1,10), 1 FROM reviews WHERE subject=? AND numero=?",
+        (subject, numero),
     )
     conn.execute(
-        "INSERT INTO reviews_archive(numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee) "
-        "SELECT numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee FROM reviews WHERE numero=?",
-        (numero,),
+        "INSERT INTO reviews_archive(subject, numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee) "
+        "SELECT subject, numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee FROM reviews WHERE subject=? AND numero=?",
+        (subject, numero),
     )
-    conn.execute('DELETE FROM reviews WHERE numero=?', (numero,))
-    conn.execute('DELETE FROM draw_history WHERE numero=?', (numero,))
+    conn.execute('DELETE FROM reviews WHERE subject=? AND numero=?', (subject, numero))
+    conn.execute('DELETE FROM draw_history WHERE subject=? AND numero=?', (subject, numero))
     conn.commit()
     conn.close()
     for name in [row['fiche_file'], row['correction_file'], row['bareme_file']]:
@@ -178,6 +190,8 @@ def delete_forgecard(numero):
 @require_admin
 def edit_forgecard(numero):
     ensure_db()
+    subject = admin_subject()
+    chapitres = chapitres_for(subject)
     titre = (request.form.get('titre') or '').strip()
     indices = (request.form.get('indices') or '').strip()
     chapitre = (request.form.get('chapitre') or 'Autre').strip()
@@ -186,7 +200,7 @@ def edit_forgecard(numero):
     fiche = request.files.get('fiche_pdf')
     correction = request.files.get('correction_pdf')
     bareme = request.files.get('bareme_pdf')
-    if chapitre not in CHAPITRES:
+    if chapitre not in chapitres:
         chapitre = 'Autre'
     teacher_difficulty = parse_teacher_difficulty(request.form.get('difficulty'))
     if fiche and not allowed_file(fiche.filename):
@@ -203,30 +217,30 @@ def edit_forgecard(numero):
     hors_serie_edit = 1 if (request.form.get('hors_serie') or '') == '1' else 0
     conn = db()
     try:
-        row = conn.execute('SELECT fiche_file, correction_file, bareme_file, code, hors_serie FROM forgecards WHERE numero=?', (numero,)).fetchone()
+        row = conn.execute('SELECT fiche_file, correction_file, bareme_file, code, hors_serie FROM forgecards WHERE subject=? AND numero=?', (subject, numero)).fetchone()
         if not row:
             return jsonify({'ok': False, 'error': 'not found'}), 404
         code = row['code'] or str(numero)
         if hors_serie_edit and not row['hors_serie']:
-            existing_codes = [r[0] for r in conn.execute("SELECT code FROM forgecards WHERE hors_serie = 1").fetchall()]
+            existing_codes = [r[0] for r in conn.execute("SELECT code FROM forgecards WHERE subject=? AND hors_serie = 1", (subject,)).fetchall()]
             code = f"h{max([hs_sort_key(c) for c in existing_codes] + [0]) + 1}"
         elif not hors_serie_edit and row['hors_serie']:
             code = str(numero)
         if code != (row['code'] or str(numero)):
             for old_name, new_name in zip(
                     [row['fiche_file'], row['correction_file'], row['bareme_file']],
-                    filenames_for(code)):
+                    filenames_for(code, subject)):
                 old_path = UPLOADS / old_name if old_name else None
                 if old_name and old_name != new_name and old_path.exists():
                     old_path.replace(UPLOADS / new_name)
             conn.execute(
-                'UPDATE forgecards SET fiche_file=?, correction_file=?, bareme_file=? WHERE numero=?',
-                (filenames_for(code)[0],
-                 filenames_for(code)[1] if row['correction_file'] else '',
-                 filenames_for(code)[2] if row['bareme_file'] else '',
-                 numero))
-            row = conn.execute('SELECT fiche_file, correction_file, bareme_file, code, hors_serie FROM forgecards WHERE numero=?', (numero,)).fetchone()
-        fiche_name, corr_name, bareme_name = filenames_for(code)
+                'UPDATE forgecards SET fiche_file=?, correction_file=?, bareme_file=? WHERE subject=? AND numero=?',
+                (filenames_for(code, subject)[0],
+                 filenames_for(code, subject)[1] if row['correction_file'] else '',
+                 filenames_for(code, subject)[2] if row['bareme_file'] else '',
+                 subject, numero))
+            row = conn.execute('SELECT fiche_file, correction_file, bareme_file, code, hors_serie FROM forgecards WHERE subject=? AND numero=?', (subject, numero)).fetchone()
+        fiche_name, corr_name, bareme_name = filenames_for(code, subject)
         final_fiche_name = row['fiche_file']
         final_corr_name = row['correction_file']
         final_bareme_name = row['bareme_file']
@@ -246,24 +260,25 @@ def edit_forgecard(numero):
             remove_pdf_if_exists(row['bareme_file'])
             final_bareme_name = ''
         conn.execute(
-            'UPDATE forgecards SET titre=?, indices=?, chapitre=?, fiche_file=?, correction_file=?, bareme_file=?, teacher_difficulty=?, hors_serie=?, code=? WHERE numero=?',
+            'UPDATE forgecards SET titre=?, indices=?, chapitre=?, fiche_file=?, correction_file=?, bareme_file=?, teacher_difficulty=?, hors_serie=?, code=? WHERE subject=? AND numero=?',
             (titre, indices, chapitre, final_fiche_name, final_corr_name, final_bareme_name, teacher_difficulty,
-             hors_serie_edit, code, numero)
+             hors_serie_edit, code, subject, numero)
         )
         conn.commit()
     finally:
         conn.close()
-    return jsonify({'ok': True, 'numero': numero, 'code': code, 'label': card_label(code, hors_serie_edit)})
+    return jsonify({'ok': True, 'numero': numero, 'code': code, 'label': card_label(code, hors_serie_edit), 'subject': subject})
 
 @bp.route("/api/forgecards/<int:numero>/reset-stats", methods=["POST"])
 @require_admin
 def reset_forgecard_stats(numero):
     ensure_db()
+    subject = admin_subject()
     conn = db()
 
     exists = conn.execute(
-        "SELECT 1 FROM forgecards WHERE numero = ?",
-        (numero,),
+        "SELECT 1 FROM forgecards WHERE subject = ? AND numero = ?",
+        (subject, numero),
     ).fetchone()
 
     if not exists:
@@ -273,36 +288,37 @@ def reset_forgecard_stats(numero):
     # Preserver les jours d'activite de tous les eleves (sinon leurs streaks
     # cassent retroactivement) puis archiver les reviews pour la tracabilite.
     conn.execute(
-        "INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) "
-        "SELECT DISTINCT prenom, substr(created_at,1,10), 1 FROM reviews WHERE numero=?",
-        (numero,),
+        "INSERT OR IGNORE INTO sr_daily_streak(prenom, subject, day, validated) "
+        "SELECT DISTINCT prenom, subject, substr(created_at,1,10), 1 FROM reviews WHERE subject=? AND numero=?",
+        (subject, numero),
     )
     conn.execute(
-        "INSERT INTO reviews_archive(numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee) "
-        "SELECT numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee FROM reviews WHERE numero=?",
-        (numero,),
+        "INSERT INTO reviews_archive(subject, numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee) "
+        "SELECT subject, numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee FROM reviews WHERE subject=? AND numero=?",
+        (subject, numero),
     )
     conn.execute(
-        "DELETE FROM reviews WHERE numero = ?",
-        (numero,),
+        "DELETE FROM reviews WHERE subject = ? AND numero = ?",
+        (subject, numero),
     )
 
     conn.execute(
-        "DELETE FROM sr_state_user WHERE numero = ?",
-        (numero,),
+        "DELETE FROM sr_state_user WHERE subject = ? AND numero = ?",
+        (subject, numero),
     )
 
     conn.commit()
     conn.close()
 
-    return jsonify(ok=True, numero=numero)
+    return jsonify(ok=True, numero=numero, subject=subject)
 
 @bp.route('/api/forgecards/stats/export', methods=['GET'])
 @require_admin
 def forgecards_stats_export():
     ensure_db()
+    subject = admin_subject()
     conn = db()
-    cards = conn.execute('SELECT numero, titre, chapitre FROM forgecards ORDER BY numero ASC').fetchall()
+    cards = conn.execute('SELECT numero, titre, chapitre FROM forgecards WHERE subject=? ORDER BY numero ASC', (subject,)).fetchall()
 
     stats_rows = conn.execute(
         "SELECT numero, "
@@ -315,14 +331,16 @@ def forgecards_stats_export():
         "AVG(duration_seconds) as avg_duration, "
         "MIN(created_at) as premiere_revision, "
         "MAX(created_at) as derniere_revision "
-        "FROM reviews GROUP BY numero"
+        "FROM reviews WHERE subject=? GROUP BY numero",
+        (subject,)
     ).fetchall()
     stats_by_numero = {r['numero']: r for r in stats_rows}
 
     avg_rows = conn.execute(
         "SELECT numero, AVG(difficulty) as avg_difficulty, AVG(stability) as avg_stability, "
         "SUM(lapses) as total_lapses, COUNT(*) as nb_decks "
-        "FROM sr_state_user WHERE difficulty IS NOT NULL GROUP BY numero"
+        "FROM sr_state_user WHERE subject=? AND difficulty IS NOT NULL GROUP BY numero",
+        (subject,)
     ).fetchall()
     avg_by_numero = {r['numero']: r for r in avg_rows}
     conn.close()
@@ -365,6 +383,7 @@ def forgecards_stats_export():
 def dashboard_weak_cards():
 
     ensure_db()
+    subject = admin_subject()
     chapitre_filter = request.args.get('chapitre')
     conn = db()
     query = (
@@ -379,16 +398,17 @@ def dashboard_weak_cards():
         "SELECT numero, COUNT(*) as total_revisions, COUNT(DISTINCT prenom) as nb_eleves, "
         "SUM(CASE WHEN result='again' THEN 1 ELSE 0 END) as nb_again, "
         "AVG(duration_seconds) as avg_duration "
-        "FROM reviews WHERE prenom != 'admin' GROUP BY numero"
+        "FROM reviews WHERE subject=? AND prenom != 'admin' GROUP BY numero"
         ") rv ON rv.numero = f.numero "
         "LEFT JOIN ("
         "SELECT numero, AVG(difficulty) as avg_difficulty "
-        "FROM sr_state_user WHERE difficulty IS NOT NULL AND prenom != 'admin' GROUP BY numero"
+        "FROM sr_state_user WHERE subject=? AND difficulty IS NOT NULL AND prenom != 'admin' GROUP BY numero"
         ") s ON s.numero = f.numero "
+        "WHERE f.subject = ? "
     )
-    params_sql = []
+    params_sql = [subject, subject, subject]
     if chapitre_filter:
-        query += "WHERE f.chapitre = ? "
+        query += "AND f.chapitre = ? "
         params_sql.append(chapitre_filter)
     query += "ORDER BY f.numero ASC"
     rows = conn.execute(query, params_sql).fetchall()
@@ -413,12 +433,14 @@ def dashboard_weak_cards():
 def dashboard_failure_notes():
 
     ensure_db()
+    subject = admin_subject()
     conn = db()
     rows = conn.execute(
         "SELECT rv.id, rv.created_at, rv.numero, f.titre, rv.prenom, rv.note, rv.note_masquee "
-        "FROM reviews rv LEFT JOIN forgecards f ON f.numero = rv.numero "
-        "WHERE rv.result = 'again' AND rv.note != '' "
-        "ORDER BY rv.created_at DESC LIMIT 100"
+        "FROM reviews rv LEFT JOIN forgecards f ON f.numero = rv.numero AND f.subject = rv.subject "
+        "WHERE rv.subject = ? AND rv.result = 'again' AND rv.note != '' "
+        "ORDER BY rv.created_at DESC LIMIT 100",
+        (subject,)
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
@@ -459,6 +481,7 @@ def restaurer_failure_note(review_id):
 @require_admin
 def admin_stats_overview():
     ensure_db()
+    subject = admin_subject()
     conn = db()
     today = now_paris().date()
     eight_weeks_ago = (today - timedelta(days=56)).isoformat()
@@ -467,16 +490,16 @@ def admin_stats_overview():
     active_days = {}
     for r in conn.execute(
             "SELECT prenom, substr(created_at,1,10) AS d, COUNT(*) AS n FROM events "
-            "WHERE type IN ('login','sr_open','review') AND created_at >= ? GROUP BY prenom, d",
-            (eight_weeks_ago,)).fetchall():
+            "WHERE subject=? AND type IN ('login','sr_open','review') AND created_at >= ? GROUP BY prenom, d",
+            (subject, eight_weeks_ago)).fetchall():
         active_days.setdefault(r['prenom'], set()).add(r['d'])
     for r in conn.execute(
-            "SELECT prenom, substr(created_at,1,10) AS d FROM reviews WHERE created_at >= ? GROUP BY prenom, d",
-            (eight_weeks_ago,)).fetchall():
+            "SELECT prenom, substr(created_at,1,10) AS d FROM reviews WHERE subject=? AND created_at >= ? GROUP BY prenom, d",
+            (subject, eight_weeks_ago)).fetchall():
         active_days.setdefault(r['prenom'], set()).add(r['d'])
     for r in conn.execute(
-            "SELECT prenom, day FROM sr_daily_streak WHERE validated=1 AND day >= ?",
-            (eight_weeks_ago,)).fetchall():
+            "SELECT prenom, day FROM sr_daily_streak WHERE subject=? AND validated=1 AND day >= ?",
+            (subject, eight_weeks_ago)).fetchall():
         active_days.setdefault(r['prenom'], set()).add(r['day'])
     weeks = [(today - timedelta(days=7 * k)).isoformat() for k in range(8)][::-1]
     assiduite = []
@@ -491,26 +514,27 @@ def admin_stats_overview():
     heures = [0] * 24
     for r in conn.execute(
             "SELECT CAST(substr(created_at,12,2) AS INTEGER) AS h, COUNT(*) AS n "
-            "FROM reviews GROUP BY h").fetchall():
+            "FROM reviews WHERE subject=? GROUP BY h", (subject,)).fetchall():
         if r['h'] is not None:
             heures[r['h']] = r['n']
 
+    # QCM communs aux matieres : pas de filtre subject ici, par decision.
     qcm_mois = [dict(r) for r in conn.execute(
         "SELECT substr(created_at,1,7) AS mois, chapitre, COUNT(*) AS n, SUM(ok) AS bonnes "
         "FROM qcm_answers GROUP BY mois, chapitre ORDER BY mois, chapitre").fetchall()]
 
     ret = conn.execute(
         "SELECT COUNT(*) AS n, SUM(CASE WHEN result IN ('good','easy') THEN 1 ELSE 0 END) AS ok "
-        "FROM reviews WHERE was_new = 0").fetchone()
+        "FROM reviews WHERE subject=? AND was_new = 0", (subject,)).fetchone()
     retention_reelle = round(100 * (ret['ok'] or 0) / ret['n'], 1) if ret['n'] else None
 
     two_months_ago = (today - timedelta(days=60)).isoformat()
     ret_rows = conn.execute(
         "SELECT substr(created_at,1,10) AS d, COUNT(*) AS n, "
         "SUM(CASE WHEN result IN ('good','easy') THEN 1 ELSE 0 END) AS ok "
-        "FROM reviews WHERE was_new = 0 AND created_at >= ? "
+        "FROM reviews WHERE subject=? AND was_new = 0 AND created_at >= ? "
         "GROUP BY d ORDER BY d",
-        (two_months_ago,)
+        (subject, two_months_ago)
     ).fetchall()
     retention_jours = [
         {'d': r['d'], 'n': r['n'], 'taux': round(100 * (r['ok'] or 0) / r['n'], 1)}
@@ -521,12 +545,13 @@ def admin_stats_overview():
     return jsonify({'ok': True, 'semaines': weeks, 'assiduite': assiduite,
                     'heures': heures, 'qcm_mois': qcm_mois,
                     'retention_reelle': retention_reelle,
-                    'retention_jours': retention_jours})
+                    'retention_jours': retention_jours, 'subject': subject})
 
 @bp.route('/api/admin/stats/export/<kind>', methods=['GET'])
 @require_admin
 def admin_stats_export(kind):
     ensure_db()
+    subject = admin_subject()
     conn = db()
     output = io.StringIO()
     writer = csv.writer(output)
@@ -541,19 +566,20 @@ def admin_stats_export(kind):
                 "SUM(CASE WHEN result='good' THEN 1 ELSE 0 END) AS good, "
                 "SUM(CASE WHEN result='easy' THEN 1 ELSE 0 END) AS easy, "
                 "SUM(duration_seconds) AS duree "
-                "FROM reviews GROUP BY prenom, d").fetchall():
+                "FROM reviews WHERE subject=? GROUP BY prenom, d", (subject,)).fetchall():
             rev[(r['prenom'], r['d'])] = r
         ev = {}
         for r in conn.execute(
                 "SELECT prenom, substr(created_at,1,10) AS d, type, COUNT(*) AS n "
-                "FROM events GROUP BY prenom, d, type").fetchall():
+                "FROM events WHERE subject=? GROUP BY prenom, d, type", (subject,)).fetchall():
             ev.setdefault((r['prenom'], r['d']), {})[r['type']] = r['n']
+        # Les reponses QCM sont communes aux matieres : pas de filtre subject.
         qcm = {}
         for r in conn.execute(
                 "SELECT prenom, substr(created_at,1,10) AS d, COUNT(*) AS n, SUM(ok) AS bonnes "
                 "FROM qcm_answers GROUP BY prenom, d").fetchall():
             qcm[(r['prenom'], r['d'])] = r
-        writer.writerow(['Eleve', 'Date', 'Revisions', 'Echecs', 'Difficiles', 'Reussies', 'Automatiques',
+        writer.writerow(['Eleve', 'Matiere', 'Date', 'Revisions', 'Echecs', 'Difficiles', 'Reussies', 'Automatiques',
                          'Duree totale (s)', 'Connexions', 'Ouvertures SR', 'Tirages', 'Reports',
                          'Jokers depenses', 'Relances recues', 'Reponses QCM', 'Bonnes QCM'])
         jours = sorted({d for (p, d) in rev} | {d for (p, d) in ev} | {d for (p, d) in qcm})
@@ -562,7 +588,7 @@ def admin_stats_export(kind):
                 rv, e, q = rev.get((p, d)), ev.get((p, d), {}), qcm.get((p, d))
                 if rv is None and not e and q is None:
                     continue
-                writer.writerow([csv_safe(p), d,
+                writer.writerow([csv_safe(p), subject, d,
                                  rv['n'] if rv else 0, rv['again'] if rv else 0,
                                  rv['hard'] if rv else 0, rv['good'] if rv else 0,
                                  rv['easy'] if rv else 0,
@@ -571,9 +597,10 @@ def admin_stats_export(kind):
                                  e.get('advance', 0), e.get('joker_spent', 0), e.get('reminder', 0),
                                  q['n'] if q else 0, (q['bonnes'] or 0) if q else 0])
         conn.close()
-        return csv_response(output, 'activite_quotidienne.csv')
+        return csv_response(output, f'activite_quotidienne_{subject}.csv')
 
     if kind == 'qcm-par-mois':
+        # Export QCM commun : identique depuis /admin et /cadmin.
         writer.writerow(['Mois', 'Theme', 'Chapitre', 'Question', 'Sorties', 'Bonnes', 'Taux echec (%)'])
         for r in conn.execute(
                 "SELECT substr(created_at,1,7) AS mois, theme, chapitre, question, "
@@ -588,42 +615,49 @@ def admin_stats_export(kind):
 
     if kind == 'synthese-eleves':
         users = [r['prenom'] for r in conn.execute("SELECT prenom FROM users WHERE prenom != 'admin'").fetchall()]
-        writer.writerow(['Eleve', 'Jours actifs', 'Plus longue serie', 'Serie en cours',
+        writer.writerow(['Eleve', 'Matiere', 'Jours actifs', 'Plus longue serie', 'Serie en cours',
                          'Revisions totales', 'Taux reussite (%)', 'Temps total (min)',
                          'Jokers gagnes', 'Jokers depenses', 'Relances recues',
                          'Parties QCM jouees', 'Reponses QCM', 'Taux reussite QCM (%)'])
         for p in users:
-            days = activity_days(conn, p)
+            days = activity_days(conn, p, subject)
             record = compute_record(days)
-            streak = compute_streak(conn, p)
+            streak = compute_streak(conn, p, subject)
             rv = conn.execute(
                 "SELECT COUNT(*) AS n, SUM(CASE WHEN result IN ('good','easy') THEN 1 ELSE 0 END) AS ok, "
-                "SUM(duration_seconds) AS duree FROM reviews WHERE prenom=?", (p,)).fetchone()
+                "SUM(duration_seconds) AS duree FROM reviews WHERE prenom=? AND subject=?",
+                (p, subject)).fetchone()
             ev = {r['type']: r['n'] for r in conn.execute(
-                "SELECT type, COUNT(*) AS n FROM events WHERE prenom=? GROUP BY type", (p,)).fetchall()}
+                "SELECT type, COUNT(*) AS n FROM events WHERE prenom=? AND subject=? GROUP BY type",
+                (p, subject)).fetchall()}
+            jk = conn.execute('SELECT count FROM user_jokers WHERE prenom=? AND subject=?',
+                              (p, subject)).fetchone()
+            nb_jokers = jk['count'] if jk else 0
+            # Les stats QCM restent communes aux matieres.
             q = conn.execute(
                 "SELECT COUNT(*) AS n, SUM(ok) AS bonnes FROM qcm_answers WHERE prenom=?", (p,)).fetchone()
-            writer.writerow([csv_safe(p), len(days), record, streak,
+            writer.writerow([csv_safe(p), subject, len(days), record, streak,
                              rv['n'], round(100 * (rv['ok'] or 0) / rv['n'], 1) if rv['n'] else '',
                              round((rv['duree'] or 0) / 60, 1) if rv['duree'] else '',
                              ev.get('joker_awarded', 0), ev.get('joker_spent', 0), ev.get('reminder', 0),
                              ev.get('qcm_played', 0), q['n'],
                              round(100 * (q['bonnes'] or 0) / q['n'], 1) if q['n'] else ''])
         conn.close()
-        return csv_response(output, 'synthese_eleves.csv')
+        return csv_response(output, f'synthese_eleves_{subject}.csv')
 
     if kind == 'etude-revisions':
         users = [r['prenom'] for r in conn.execute("SELECT prenom FROM users WHERE prenom != 'admin'").fetchall()]
-        writer.writerow(['Eleve', 'Date', 'Numero fiche', 'Chapitre', 'Resultat', 'Duree (s)',
+        writer.writerow(['Eleve', 'Matiere', 'Date', 'Numero fiche', 'Chapitre', 'Resultat', 'Duree (s)',
                          'Jours depuis la revision precedente', 'Retrievabilite FSRS avant (%)',
                          'Stabilite apres (j)', 'Difficulte apres', 'N-ieme revision de la fiche'])
         for p in users:
             rows = conn.execute(
                 'SELECT rv.created_at, rv.numero, f.chapitre, rv.result, rv.duration_seconds '
-                'FROM reviews rv LEFT JOIN forgecards f ON f.numero = rv.numero '
-                'WHERE rv.prenom = ? ORDER BY rv.created_at ASC, rv.id ASC', (p,)).fetchall()
-            for r, snap in zip(rows, replay_reviews(conn, p, rows)):
-                writer.writerow([csv_safe(p), r['created_at'], r['numero'], csv_safe(r['chapitre'] or ''),
+                'FROM reviews rv LEFT JOIN forgecards f ON f.numero = rv.numero AND f.subject = rv.subject '
+                'WHERE rv.prenom = ? AND rv.subject = ? ORDER BY rv.created_at ASC, rv.id ASC',
+                (p, subject)).fetchall()
+            for r, snap in zip(rows, replay_reviews(conn, p, rows, subject=subject)):
+                writer.writerow([csv_safe(p), subject, r['created_at'], r['numero'], csv_safe(r['chapitre'] or ''),
                                  r['result'], r['duration_seconds'] if r['duration_seconds'] is not None else '',
                                  snap['elapsed_days'] if snap['elapsed_days'] is not None else '',
                                  round(100 * snap['r_before'], 1) if snap['r_before'] is not None else '',
@@ -631,8 +665,7 @@ def admin_stats_export(kind):
                                  round(snap['difficulty'], 2) if snap['difficulty'] is not None else '',
                                  snap['repetitions']])
         conn.close()
-        return csv_response(output, 'etude_revisions.csv')
+        return csv_response(output, f'etude_revisions_{subject}.csv')
 
     conn.close()
     return jsonify({'ok': False, 'error': 'export inconnu'}), 404
-

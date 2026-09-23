@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}Forgecard{% endblock %}</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css', v=21) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css', v=22) }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='katex/katex.min.css') }}">
   <script defer src="{{ url_for('static', filename='katex/katex.min.js') }}"></script>
   <script defer src="{{ url_for('static', filename='katex/contrib/auto-render.min.js') }}"></script>
@@ -17,9 +17,9 @@
     { left: '\\(', right: '\\)', display: false }
   ];
   </script>
-  <script src="{{ url_for('static', filename='js/app.js', v=19) }}" defer></script>
+  <script src="{{ url_for('static', filename='js/app.js', v=20) }}" defer></script>
 </head>
-<body data-page="{{ active }}">
+<body data-page="{{ active }}" {% block body_attrs %}{% endblock %}>
 <canvas id="confetti-canvas"></canvas>
 <header>
 <a class="logo" href="/" title="Retour à l'accueil">Forgecards</a>
@@ -37,6 +37,7 @@
 <button class="nav-btn auth-only" onclick="logoutSr()" hidden>Déconnexion</button>
 </nav>
 <div class="nav-overlay" id="nav-overlay" onclick="closeMobileNav()"></div>
+<button class="subject-toggle" id="subject-toggle" onclick="switchSubject()" hidden title="Changer de matiere"></button>
 <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Basculer theme clair/sombre"></button>
 </header>
 <main>

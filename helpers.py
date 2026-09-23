@@ -4,8 +4,8 @@ from config import UPLOADS, ALLOWED_EXTENSIONS, MAX_REVIEW_DURATION_SECONDS
 
 def current_subject():
     """Matiere active lue dans la session ; physique par defaut, y compris
-    hors contexte requete (bot, scripts). Les requetes SQL se brancheront
-    dessus en phase 3 — pour l'instant tout reste en physique."""
+    hors contexte requete (bot, scripts). Toutes les routes eleves scopent
+    leurs requetes SQL sur cette valeur."""
     from flask import session
     from config import ENABLED_SUBJECTS, DEFAULT_SUBJECT
     try:
@@ -13,6 +13,22 @@ def current_subject():
     except RuntimeError:
         return DEFAULT_SUBJECT
     return s if s in ENABLED_SUBJECTS else DEFAULT_SUBJECT
+
+
+def admin_subject():
+    """Matiere cible d'une action admin : lue dans ?subject= (query ou form),
+    validee contre TOUTES les matieres connues — l'admin prepare une matiere
+    avant son activation eleve. Defaut : la matiere de session (physique
+    hors contexte requete)."""
+    from flask import request
+    from config import SUBJECT_META, DEFAULT_SUBJECT
+    try:
+        s = request.values.get('subject')
+    except RuntimeError:
+        return current_subject()
+    if s in SUBJECT_META:
+        return s
+    return current_subject()
 
 
 def allowed_file(filename):
@@ -64,13 +80,18 @@ def card_label(code, hors_serie):
     return code.upper() if hors_serie else code
 
 
-def filenames_for(code):
+def filenames_for(code, subject=None):
     # Eliot: Keep filenames generated here. One source of truth, please.
-    return (
-        secure_filename(f'{code}.pdf'),
-        secure_filename(f'{code}-c.pdf'),
-        secure_filename(f'{code}-b.pdf'),
-    )
+    # Physique garde les noms plats historiques (zero migration des URLs et
+    # des fichiers existants) ; les autres matieres vivent dans un
+    # sous-dossier pour ne pas collisionsner les numeros.
+    base = secure_filename(f'{code}.pdf')
+    corr = secure_filename(f'{code}-c.pdf')
+    bareme = secure_filename(f'{code}-b.pdf')
+    if subject and subject != 'physique':
+        sub = secure_filename(subject)
+        return (f'{sub}/{base}', f'{sub}/{corr}', f'{sub}/{bareme}')
+    return (base, corr, bareme)
 
 
 def remove_pdf_if_exists(filename):
@@ -81,10 +102,10 @@ def remove_pdf_if_exists(filename):
         path.unlink()
 
 
-def card_exists(conn, numero):
+def card_exists(conn, numero, subject='physique'):
     return conn.execute(
-        'SELECT 1 FROM forgecards WHERE numero=?',
-        (numero,)
+        'SELECT 1 FROM forgecards WHERE numero=? AND subject=?',
+        (numero, subject)
     ).fetchone() is not None
 
 

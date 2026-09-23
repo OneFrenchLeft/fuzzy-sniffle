@@ -8,7 +8,7 @@ from werkzeug.utils import secure_filename
 import config
 from config import (EMOJI_KEYPAD, EMOJI_PW_LENGTH, EMOJI_SEP,
                     gen_emoji_password, now_paris, read_params, JOKER_CAP)
-from helpers import card_label
+from helpers import card_label, admin_subject, current_subject
 from db import db, ensure_db, log_event, csv_safe, csv_response, apply_joker_change
 from replay import replay_reviews
 from streak import compute_streak
@@ -220,31 +220,33 @@ def users_delete(prenom):
 def user_add_joker(prenom):
 
     ensure_db()
+    subject = admin_subject()
     conn = db()
     exists = conn.execute('SELECT 1 FROM users WHERE prenom=?', (prenom,)).fetchone()
     if not exists:
         conn.close()
         return jsonify({'ok': False, 'error': 'utilisateur introuvable'}), 404
 
-    if compute_streak(conn, prenom) <= 0:
+    if compute_streak(conn, prenom, subject) <= 0:
         conn.close()
-        return jsonify({'ok': False, 'error': prenom + " n'a pas de serie en cours : le joker attendra."}), 400
-    row = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
+        return jsonify({'ok': False, 'error': prenom + " n'a pas de serie en cours (" + subject + ") : le joker attendra."}), 400
+    row = conn.execute('SELECT count FROM user_jokers WHERE prenom=? AND subject=?', (prenom, subject)).fetchone()
     if row and row['count'] >= JOKER_CAP:
         conn.close()
-        return jsonify({'ok': False, 'full': True, 'error': prenom + ' a deja ' + str(JOKER_CAP) + ' jokers, plafond atteint.', 'jokers': row['count']}), 400
+        return jsonify({'ok': False, 'full': True, 'error': prenom + ' a deja ' + str(JOKER_CAP) + ' jokers (' + subject + '), plafond atteint.', 'jokers': row['count']}), 400
     # Flying: Every joker movement goes through the ledger. If it's not
     # auditable, it didn't happen.
-    apply_joker_change(conn, prenom, 1, 'admin_grant')
-    row = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
+    apply_joker_change(conn, prenom, 1, 'admin_grant', subject=subject)
+    row = conn.execute('SELECT count FROM user_jokers WHERE prenom=? AND subject=?', (prenom, subject)).fetchone()
     conn.commit()
     conn.close()
-    return jsonify({'ok': True, 'prenom': prenom, 'jokers': row['count']})
+    return jsonify({'ok': True, 'prenom': prenom, 'jokers': row['count'], 'subject': subject})
 
 @bp.route('/api/users/stats', methods=['GET'])
 @require_admin
 def users_stats():
     ensure_db()
+    subject = admin_subject()
     conn = db()
     today = now_paris().date().isoformat()
     users = [r['prenom'] for r in conn.execute('SELECT prenom FROM users ORDER BY prenom ASC').fetchall()]
@@ -258,26 +260,27 @@ def users_stats():
         "SUM(CASE WHEN result='easy' THEN 1 ELSE 0 END) as easy, "
         "MAX(created_at) as last_review, "
         "AVG(duration_seconds) as avg_duration "
-        "FROM reviews GROUP BY prenom"
+        "FROM reviews WHERE subject=? GROUP BY prenom",
+        (subject,)
     ).fetchall()
     review_by_prenom = {r['prenom']: r for r in review_rows}
 
     due_rows = conn.execute(
         "SELECT prenom, COUNT(*) as c FROM sr_state_user "
-        "WHERE next_review IS NULL OR next_review <= ? GROUP BY prenom",
-        (today,)
+        "WHERE subject=? AND (next_review IS NULL OR next_review <= ?) GROUP BY prenom",
+        (subject, today)
     ).fetchall()
     due_by_prenom = {r['prenom']: r['c'] for r in due_rows}
 
     done_rows = conn.execute(
         "SELECT prenom, COUNT(*) as c FROM reviews "
-        "WHERE substr(created_at,1,10)=? GROUP BY prenom",
-        (today,)
+        "WHERE subject=? AND substr(created_at,1,10)=? GROUP BY prenom",
+        (subject, today)
     ).fetchall()
     done_by_prenom = {r['prenom']: r['c'] for r in done_rows}
 
     conn.close()
-    daily_review_limit = int(read_params().get('daily_review_limit', 3))
+    daily_review_limit = int(read_params(subject).get('daily_review_limit', 3))
 
     stats = []
     for prenom in users:
@@ -303,14 +306,15 @@ def users_stats():
 @require_admin
 def user_deck(prenom):
     ensure_db()
-    max_active_deck = int(read_params().get('max_active_num', 36))
+    subject = admin_subject()
+    max_active_deck = int(read_params(subject).get('max_active_num', 36))
     conn = db()
     rows = conn.execute(
         'SELECT f.numero, f.code, f.titre, f.chapitre, f.hors_serie, s.difficulty, s.stability, s.next_review, s.repetitions, s.lapses '
-        'FROM forgecards f LEFT JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? '
-        'WHERE f.numero <= ? AND f.hors_serie = 0 '
+        'FROM forgecards f LEFT JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? AND s.subject = ? '
+        'WHERE f.subject = ? AND f.numero <= ? AND f.hors_serie = 0 '
         'ORDER BY f.numero ASC',
-        (prenom, max_active_deck)
+        (prenom, subject, subject, max_active_deck)
     ).fetchall()
     conn.close()
     out = [dict(r) for r in rows]
@@ -324,24 +328,25 @@ def user_export(prenom):
     if not session.get('admin') and session.get('sr_user') != prenom:
         return jsonify({'ok': False, 'error': 'unauthorized'}), 401
     ensure_db()
-    max_active_export = int(read_params().get('max_active_num', 36))
+    subject = admin_subject() if session.get('admin') else current_subject()
+    max_active_export = int(read_params(subject).get('max_active_num', 36))
     conn = db()
     rows = conn.execute(
         'SELECT rv.created_at, rv.numero, f.code, f.titre, f.chapitre, rv.result, rv.note, rv.duration_seconds '
         'FROM reviews rv '
-        'LEFT JOIN forgecards f ON f.numero = rv.numero '
-        'WHERE rv.prenom = ? '
+        'LEFT JOIN forgecards f ON f.numero = rv.numero AND f.subject = rv.subject '
+        'WHERE rv.prenom = ? AND rv.subject = ? '
         'ORDER BY rv.created_at ASC, rv.id ASC',
-        (prenom,)
+        (prenom, subject)
     ).fetchall()
-    replayed = replay_reviews(conn, prenom, rows)
+    replayed = replay_reviews(conn, prenom, rows, subject=subject)
 
     deck_rows = conn.execute(
         'SELECT f.numero, f.code, f.titre, f.chapitre, s.difficulty, s.stability, s.state, s.repetitions, s.lapses, s.next_review, s.last_review '
-        'FROM forgecards f LEFT JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? '
-        'WHERE f.numero <= ? AND f.hors_serie = 0 '
+        'FROM forgecards f LEFT JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? AND s.subject = ? '
+        'WHERE f.subject = ? AND f.numero <= ? AND f.hors_serie = 0 '
         'ORDER BY f.numero ASC',
-        (prenom, max_active_export)
+        (prenom, subject, subject, max_active_export)
     ).fetchall()
     conn.close()
 

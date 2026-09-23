@@ -279,7 +279,7 @@ def init_db():
         conn.execute("ALTER TABLE forgecards ADD COLUMN code TEXT DEFAULT ''")
     # backfill du code public : numero pour le pool normal, h1/h2... pour les hors-serie
     hs_idx = 0
-    for row in conn.execute("SELECT numero, hors_serie, code, fiche_file, correction_file, bareme_file FROM forgecards ORDER BY numero ASC").fetchall():
+    for row in conn.execute("SELECT subject, numero, hors_serie, code, fiche_file, correction_file, bareme_file FROM forgecards ORDER BY subject ASC, numero ASC").fetchall():
         if row['code']:
             if row['hors_serie']:
                 hs_idx = max(hs_idx, hs_sort_key(row['code']))
@@ -290,14 +290,14 @@ def init_db():
         else:
             code = str(row['numero'])
         old_files = [row['fiche_file'], row['correction_file'], row['bareme_file']]
-        new_files = filenames_for(code)
+        new_files = filenames_for(code, row['subject'])
         for old_name, new_name in zip(old_files, new_files):
             old_path = UPLOADS / old_name if old_name else None
             if old_name and old_name != new_name and old_path.exists():
                 old_path.replace(UPLOADS / new_name)
         conn.execute(
-            'UPDATE forgecards SET code=?, fiche_file=?, correction_file=?, bareme_file=? WHERE numero=?',
-            (code, new_files[0], new_files[1], new_files[2] if row['bareme_file'] else '', row['numero'])
+            'UPDATE forgecards SET code=?, fiche_file=?, correction_file=?, bareme_file=? WHERE subject=? AND numero=?',
+            (code, new_files[0], new_files[1], new_files[2] if row['bareme_file'] else '', row['subject'], row['numero'])
         )
 
     user_cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
@@ -344,12 +344,18 @@ def ensure_db():
         print(f'[db] purge events impossible: {exc!r}')
     _db_ready = True
 
-def log_event(conn, prenom, etype, payload=''):
+def log_event(conn, prenom, etype, payload='', subject=None):
     if not prenom:
         prenom = 'anonyme'
+    if subject is None:
+        try:
+            from helpers import current_subject
+            subject = current_subject()
+        except Exception:
+            subject = 'physique'
     try:
-        conn.execute('INSERT INTO events(prenom, type, payload, created_at) VALUES(?,?,?,?)',
-                     (prenom, etype, str(payload)[:500], now_paris().isoformat()))
+        conn.execute('INSERT INTO events(prenom, subject, type, payload, created_at) VALUES(?,?,?,?,?)',
+                     (prenom, subject, etype, str(payload)[:500], now_paris().isoformat()))
     except Exception as exc:
         print(f'[events] log impossible: {exc!r}')
 

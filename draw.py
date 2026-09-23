@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Weighted random draw of cards."""
+"""Weighted random draw of cards, scoped on the session subject."""
 from flask import Blueprint, jsonify, request, session
 import random
 from config import read_params, DRAW_HISTORY_KEEP, now_paris
 from db import db, ensure_db, log_event
-from helpers import card_label, interleave_by_chapitre
+from helpers import card_label, interleave_by_chapitre, current_subject
 
 bp = Blueprint('draw', __name__)
 
@@ -37,7 +37,8 @@ def weighted_sample_without_replacement(pool, weights, k):
 @bp.route('/api/draw', methods=['GET'])
 def api_draw():
     ensure_db()
-    params = read_params()
+    subject = current_subject()
+    params = read_params(subject)
 
     max_active = int(params.get("max_active_num", 36))
 
@@ -65,15 +66,15 @@ def api_draw():
 
     rows = conn.execute(
         "SELECT numero, code, titre, chapitre, fiche_file, correction_file, bareme_file, indices, teacher_difficulty, hors_serie "
-        "FROM forgecards WHERE numero <= ? AND hors_serie = 0 ORDER BY numero ASC",
-        (plafond,)
+        "FROM forgecards WHERE subject=? AND numero <= ? AND hors_serie = 0 ORDER BY numero ASC",
+        (subject, plafond)
     ).fetchall()
 
     if hs_mode and max_hs > 0:
         rows += conn.execute(
             "SELECT numero, code, titre, chapitre, fiche_file, correction_file, bareme_file, indices, teacher_difficulty, hors_serie "
-            "FROM forgecards WHERE hors_serie = 1 ORDER BY numero ASC LIMIT ?",
-            (max_hs,)
+            "FROM forgecards WHERE subject=? AND hors_serie = 1 ORDER BY numero ASC LIMIT ?",
+            (subject, max_hs)
         ).fetchall()
 
     cards = [dict(r) for r in rows]
@@ -90,10 +91,11 @@ def api_draw():
         """
         SELECT numero
         FROM draw_history
+        WHERE subject = ?
         ORDER BY id DESC
         LIMIT ?
         """,
-        (max(n * 2, 5),),
+        (subject, max(n * 2, 5)),
     ).fetchall()
 
     recent_numbers = {r["numero"] for r in recent}
@@ -146,20 +148,21 @@ def api_draw():
     # shift the weekly recap's "tirages de la semaine" around midnight.
     now_iso = now_paris().isoformat()
     conn.executemany(
-        "INSERT INTO draw_history(numero, created_at) VALUES(?,?)",
-        [(c["numero"], now_iso) for c in reordered],
+        "INSERT INTO draw_history(subject, numero, created_at) VALUES(?,?,?)",
+        [(subject, c["numero"], now_iso) for c in reordered],
     )
 
     conn.execute(
-        "DELETE FROM draw_history WHERE id < (SELECT COALESCE(MAX(id), 0) - ? FROM draw_history)",
-        (DRAW_HISTORY_KEEP,),
+        "DELETE FROM draw_history WHERE subject=? AND id < (SELECT COALESCE(MAX(id), 0) - ? FROM draw_history WHERE subject=?)",
+        (subject, DRAW_HISTORY_KEEP, subject),
     )
 
     log_event(
         conn,
         session.get('sr_user', 'anonyme'),
         'draw',
-        ','.join(str(c['numero']) for c in reordered)
+        ','.join(str(c['numero']) for c in reordered),
+        subject=subject
     )
 
     conn.commit()

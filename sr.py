@@ -1,11 +1,14 @@
 # Xiao: Routes for the student review space. Keep the business logic out of here.
+# Tout est scopé sur la matière de session (current_subject) : cartes, quotas,
+# streaks et jokers sont indépendants par matière ; le compte, lui, est unique.
 from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, request, session
 from fsrs import apply_review, preview_all_grades, humanize_interval
 from config import (GRADE_MAP_FR, MAX_NOTE_LENGTH, QCM_FILES, QCM_WEAK_LIMIT,
                     now_paris, read_params)
 from db import db, ensure_db, log_event, csv_safe, csv_response
-from helpers import card_label, card_exists, interleave_by_chapitre, parse_duration_seconds
+from helpers import (card_label, card_exists, interleave_by_chapitre,
+                     parse_duration_seconds, current_subject, admin_subject)
 from replay import replay_reviews, get_user_weights
 from streak import (compute_streak, activity_days, compute_record,
                      reconcile_streak, streak_verdict, close_day)
@@ -15,17 +18,19 @@ import io, csv
 
 bp = Blueprint('sr', __name__)
 
-def ensure_sr_row(conn, prenom, numero):
+def ensure_sr_row(conn, prenom, numero, subject):
     # Small: Create the state lazily; no reason to pre-fill the whole table.
-    row = conn.execute('SELECT * FROM sr_state_user WHERE prenom=? AND numero=?', (prenom, numero)).fetchone()
+    row = conn.execute('SELECT * FROM sr_state_user WHERE prenom=? AND subject=? AND numero=?',
+                       (prenom, subject, numero)).fetchone()
     if row is None:
         today = now_paris().date().isoformat()
         conn.execute(
-            'INSERT INTO sr_state_user (prenom, numero, stability, difficulty, state, last_review, next_review, repetitions, lapses) '
-            'VALUES (?,?,?,?,?,?,?,?,?)',
-            (prenom, numero, None, None, 'new', None, today, 0, 0)
+            'INSERT INTO sr_state_user (prenom, subject, numero, stability, difficulty, state, last_review, next_review, repetitions, lapses) '
+            'VALUES (?,?,?,?,?,?,?,?,?,?)',
+            (prenom, subject, numero, None, None, 'new', None, today, 0, 0)
         )
-        row = conn.execute('SELECT * FROM sr_state_user WHERE prenom=? AND numero=?', (prenom, numero)).fetchone()
+        row = conn.execute('SELECT * FROM sr_state_user WHERE prenom=? AND subject=? AND numero=?',
+                           (prenom, subject, numero)).fetchone()
     return row
 
 @bp.route('/api/sr/today', methods=['GET'])
@@ -33,35 +38,37 @@ def ensure_sr_row(conn, prenom, numero):
 def sr_today():
     ensure_db()
     prenom = session['sr_user']
+    subject = current_subject()
     try:
         # Ethan: Logging the open is useful for streak validation. Please don't remove it.
         conn0 = db()
-        log_event(conn0, prenom, 'sr_open')
+        log_event(conn0, prenom, 'sr_open', subject=subject)
         conn0.commit()
         conn0.close()
     except Exception:
         pass
     today = now_paris().date().isoformat()
-    params = read_params()
+    params = read_params(subject)
     max_active = int(params.get('max_active_num', 36))
     new_limit = int(params.get('daily_new_limit', 3))
     review_limit = int(params.get('daily_review_limit', 3))
 
     conn = db()
-    all_cards = conn.execute('SELECT numero FROM forgecards WHERE numero <= ? AND hors_serie = 0', (max_active,)).fetchall()
+    all_cards = conn.execute('SELECT numero FROM forgecards WHERE subject=? AND numero <= ? AND hors_serie = 0',
+                             (subject, max_active)).fetchall()
     for c in all_cards:
-        ensure_sr_row(conn, prenom, c['numero'])
+        ensure_sr_row(conn, prenom, c['numero'], subject)
     conn.commit()
 
     try:
         close_day(conn, prenom, (now_paris().date() - timedelta(days=1)).isoformat(),
-                  params, reason='sr_open_spend')
+                  params, reason='sr_open_spend', subject=subject)
     except Exception:
         pass
 
     done_today = conn.execute(
-        "SELECT numero, was_new FROM reviews WHERE prenom=? AND substr(created_at,1,10)=?",
-        (prenom, today)
+        "SELECT numero, was_new FROM reviews WHERE prenom=? AND subject=? AND substr(created_at,1,10)=?",
+        (prenom, subject, today)
     ).fetchall()
     new_done_today = sum(1 for r in done_today if r['was_new'])
     review_done_today = sum(1 for r in done_today if not r['was_new'])
@@ -72,12 +79,12 @@ def sr_today():
         'SELECT f.numero, f.fiche_file, f.correction_file, f.bareme_file, f.titre, f.indices, f.chapitre, '
         's.difficulty, s.stability, s.next_review, s.last_review, s.repetitions '
         'FROM forgecards f '
-        'JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? '
-        'WHERE f.numero <= ? AND f.hors_serie = 0 '
+        'JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? AND s.subject = ? '
+        'WHERE f.subject = ? AND f.numero <= ? AND f.hors_serie = 0 '
         'ORDER BY f.numero ASC',
-        (prenom, max_active)
+        (prenom, subject, subject, max_active)
     ).fetchall()
-    streak = compute_streak(conn, prenom)
+    streak = compute_streak(conn, prenom, subject)
     conn.close()
 
     due = [dict(r) for r in rows if (r['next_review'] is None or r['next_review'] <= today)]
@@ -106,14 +113,15 @@ def sr_today():
     }
     conn = db()
     # Steph: Same verdict as the guard, otherwise the UI and backend will disagree again.
-    auto_validated_streak = len(all_cards) > 0 and streak_verdict(conn, prenom, params, prediction=True) == 'validated'
-    jrow = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
+    auto_validated_streak = len(all_cards) > 0 and streak_verdict(conn, prenom, params, prediction=True, subject=subject) == 'validated'
+    jrow = conn.execute('SELECT count FROM user_jokers WHERE prenom=? AND subject=?', (prenom, subject)).fetchone()
     conn.close()
     jokers = jrow['count'] if jrow else 0
 
     return jsonify({
         'cards': interleaved,
         'streak': streak,
+        'subject': subject,
         'new_done_today': new_done_today,
         'new_limit': new_limit,
         'review_done_today': review_done_today,
@@ -130,26 +138,29 @@ def sr_today():
 def sr_dashboard():
     ensure_db()
     prenom = session['sr_user']
+    subject = current_subject()
     today = now_paris().date()
     week_ago = (today - timedelta(days=7)).isoformat()
     conn = db()
-    streak = compute_streak(conn, prenom)
-    jrow = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
+    streak = compute_streak(conn, prenom, subject)
+    jrow = conn.execute('SELECT count FROM user_jokers WHERE prenom=? AND subject=?', (prenom, subject)).fetchone()
     jokers = jrow['count'] if jrow else 0
-    total = conn.execute('SELECT COUNT(*) AS c FROM reviews WHERE prenom=?', (prenom,)).fetchone()['c']
+    total = conn.execute('SELECT COUNT(*) AS c FROM reviews WHERE prenom=? AND subject=?',
+                         (prenom, subject)).fetchone()['c']
     semaine = conn.execute(
-        'SELECT COUNT(*) AS c FROM reviews WHERE prenom=? AND substr(created_at,1,10)>=?',
-        (prenom, week_ago)).fetchone()['c']
-    days = activity_days(conn, prenom)
+        'SELECT COUNT(*) AS c FROM reviews WHERE prenom=? AND subject=? AND substr(created_at,1,10)>=?',
+        (prenom, subject, week_ago)).fetchone()['c']
+    days = activity_days(conn, prenom, subject)
     record = compute_record(days)
     conn.close()
-    return jsonify({'ok': True, 'prenom': prenom, 'streak': streak, 'record': record,
+    return jsonify({'ok': True, 'prenom': prenom, 'subject': subject, 'streak': streak, 'record': record,
                     'jokers': jokers, 'semaine': semaine, 'total': total})
 
 @bp.route('/api/sr/qcm/errors', methods=['GET'])
 @require_sr_user
 def sr_qcm_errors():
     # Eliot: Only keep the latest failed attempt for each question.
+    # Les QCM sont communs : pas de filtre subject ici.
     ensure_db()
     prenom = session['sr_user']
     conn = db()
@@ -193,6 +204,7 @@ def sr_qcm_errors():
 @bp.route('/api/sr/qcm/weak', methods=['GET'])
 @require_sr_user
 def sr_qcm_weak():
+    # QCM communs : pas de filtre subject.
     ensure_db()
     prenom = session['sr_user']
     conn = db()
@@ -216,17 +228,19 @@ def sr_qcm_weak():
 def sr_preview(numero):
     ensure_db()
     prenom = session['sr_user']
+    subject = current_subject()
     now = now_paris()
-    params = read_params()
+    params = read_params(subject)
     retention = float(params.get('fsrs_retention', 0.90))
     conn = db()
-    if not card_exists(conn, numero):
+    if not card_exists(conn, numero, subject):
         conn.close()
         return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
-    row = ensure_sr_row(conn, prenom, numero)
-    prof_row = conn.execute('SELECT teacher_difficulty FROM forgecards WHERE numero=?', (numero,)).fetchone()
+    row = ensure_sr_row(conn, prenom, numero, subject)
+    prof_row = conn.execute('SELECT teacher_difficulty FROM forgecards WHERE subject=? AND numero=?',
+                            (subject, numero)).fetchone()
     prof_difficulty = prof_row['teacher_difficulty'] if prof_row else None
-    weights = get_user_weights(conn, prenom)
+    weights = get_user_weights(conn, prenom, subject)
     conn.close()
 
     # Small: Preview uses the same weights as an actual review.
@@ -242,6 +256,7 @@ def sr_preview(numero):
 def sr_review(numero):
     ensure_db()
     prenom = session['sr_user']
+    subject = current_subject()
     data = request.get_json(silent=True) or {}
     result = data.get('result')
     note = (data.get('note') or '').strip()[:MAX_NOTE_LENGTH]
@@ -256,45 +271,47 @@ def sr_review(numero):
         return jsonify({'ok': False, 'error': "Decris ton blocage (10 caracteres min) : items du bareme rates, endroit ou tu as bloque..."}), 400
 
     now = now_paris()
-    params = read_params()
+    params = read_params(subject)
     retention = float(params.get('fsrs_retention', 0.90))
 
     conn = db()
-    if not card_exists(conn, numero):
+    if not card_exists(conn, numero, subject):
         conn.close()
         return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
-    prof_row = conn.execute('SELECT teacher_difficulty FROM forgecards WHERE numero=?', (numero,)).fetchone()
+    prof_row = conn.execute('SELECT teacher_difficulty FROM forgecards WHERE subject=? AND numero=?',
+                            (subject, numero)).fetchone()
     prof_difficulty = prof_row['teacher_difficulty'] if prof_row else None
-    row = ensure_sr_row(conn, prenom, numero)
+    row = ensure_sr_row(conn, prenom, numero, subject)
     was_new = 1 if (row['repetitions'] or 0) == 0 else 0
     reps = (row['repetitions'] or 0) + 1
     lapses = (row['lapses'] or 0) + (1 if grade == 1 else 0)
-    weights = get_user_weights(conn, prenom)
+    weights = get_user_weights(conn, prenom, subject)
     r = apply_review(row['stability'], row['difficulty'], row['last_review'], grade, now, retention,
                      w=weights, prof_difficulty=prof_difficulty)
 
     conn.execute(
         'UPDATE sr_state_user SET stability=?, difficulty=?, state=?, last_review=?, next_review=?, '
-        'repetitions=?, lapses=?, last_retrievability=? WHERE prenom=? AND numero=?',
+        'repetitions=?, lapses=?, last_retrievability=? WHERE prenom=? AND subject=? AND numero=?',
         (r['stability'], r['difficulty'], r['state'], now.isoformat(), r['next_review'],
-         reps, lapses, r['retrievability_before'], prenom, numero)
+         reps, lapses, r['retrievability_before'], prenom, subject, numero)
     )
     conn.execute(
-        'INSERT INTO reviews(numero, prenom, result, note, duration_seconds, was_new, created_at) VALUES(?,?,?,?,?,?,?)',
-        (numero, prenom, result, note, duration, was_new, now.isoformat())
+        'INSERT INTO reviews(subject, numero, prenom, result, note, duration_seconds, was_new, created_at) VALUES(?,?,?,?,?,?,?,?)',
+        (subject, numero, prenom, result, note, duration, was_new, now.isoformat())
     )
-    log_event(conn, prenom, 'review', f'{numero}:{result}')
+    log_event(conn, prenom, 'review', f'{numero}:{result}', subject=subject)
     conn.commit()
     # Flying: Reconcile only after the review is safely committed.
-    streak = reconcile_streak(conn, prenom)
+    streak = reconcile_streak(conn, prenom, subject)
     conn.close()
-    return jsonify({'ok': True, 'numero': numero, **r, 'repetitions': reps, 'lapses': lapses, 'streak': streak})
+    return jsonify({'ok': True, 'numero': numero, 'subject': subject, **r, 'repetitions': reps, 'lapses': lapses, 'streak': streak})
 
 @bp.route('/api/sr/<int:numero>/advance', methods=['POST'])
 @require_sr_user
 def sr_advance(numero):
     ensure_db()
     prenom = session['sr_user']
+    subject = current_subject()
     data = request.get_json(silent=True) or {}
     try:
         days = max(1, min(30, int(data.get('days', 1))))
@@ -302,10 +319,10 @@ def sr_advance(numero):
         # Eliot: Invalid input gets a safe default. Better than making the route complain.
         days = 1
     conn = db()
-    if not card_exists(conn, numero):
+    if not card_exists(conn, numero, subject):
         conn.close()
         return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
-    row = ensure_sr_row(conn, prenom, numero)
+    row = ensure_sr_row(conn, prenom, numero, subject)
     base_date = now_paris().date()
     if row['next_review']:
         try:
@@ -314,8 +331,9 @@ def sr_advance(numero):
             # Xiao: Keep malformed legacy dates from killing the endpoint.
             pass
     new_next = (base_date + timedelta(days=days)).isoformat()
-    conn.execute('UPDATE sr_state_user SET next_review=? WHERE prenom=? AND numero=?', (new_next, prenom, numero))
-    log_event(conn, prenom, 'advance', f'{numero}:+{days}j')
+    conn.execute('UPDATE sr_state_user SET next_review=? WHERE prenom=? AND subject=? AND numero=?',
+                 (new_next, prenom, subject, numero))
+    log_event(conn, prenom, 'advance', f'{numero}:+{days}j', subject=subject)
     conn.commit()
     conn.close()
     return jsonify({'ok': True, 'numero': numero, 'next_review': new_next})
@@ -324,26 +342,28 @@ def sr_advance(numero):
 @require_admin
 def sr_export():
     ensure_db()
-    max_active = int(read_params().get('max_active_num', 36))
+    subject = admin_subject()
+    max_active = int(read_params(subject).get('max_active_num', 36))
     conn = db()
     rows = conn.execute(
         'SELECT s.prenom, f.code AS numero, s.difficulty, s.stability, s.last_review, s.next_review, s.repetitions, s.lapses, s.last_retrievability '
-        'FROM sr_state_user s JOIN forgecards f ON f.numero = s.numero '
-        'WHERE f.numero <= ? AND f.hors_serie = 0 '
+        'FROM sr_state_user s JOIN forgecards f ON f.numero = s.numero AND f.subject = s.subject '
+        'WHERE s.subject = ? AND f.numero <= ? AND f.hors_serie = 0 '
         'ORDER BY s.prenom ASC, s.numero ASC',
-        (max_active,)
+        (subject, max_active)
     ).fetchall()
     conn.close()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Prénom', 'Numéro', 'Difficulté', 'Stabilité', 'Dernière révision', 'Prochaine révision', 'Répétitions', "Nombres d'oublie (implique recommencer FSRS)", 'Dernière retention testée'])
+    writer.writerow(['Prénom', 'Matiere', 'Numéro', 'Difficulté', 'Stabilité', 'Dernière révision', 'Prochaine révision', 'Répétitions', "Nombres d'oublie (implique recommencer FSRS)", 'Dernière retention testée'])
     for r in rows:
-        writer.writerow([csv_safe(r['prenom']), r['numero'], r['difficulty'], r['stability'], r['last_review'], r['next_review'], r['repetitions'], r['lapses'], r['last_retrievability']])
-    return csv_response(output, 'Statistiques_FSRS.csv')
+        writer.writerow([csv_safe(r['prenom']), subject, r['numero'], r['difficulty'], r['stability'], r['last_review'], r['next_review'], r['repetitions'], r['lapses'], r['last_retrievability']])
+    return csv_response(output, f'Statistiques_FSRS_{subject}.csv')
 
 @bp.route('/api/qcm/last-states', methods=['GET'])
 @require_sr_user
 def qcm_last_states():
+    # QCM communs : pas de filtre subject.
     ensure_db()
     prenom = session['sr_user']
     conn = db()
@@ -366,4 +386,3 @@ def qcm_last_states():
             t = r['theme'] or 'autre'
             counts[t] = counts.get(t, 0) + 1
     return jsonify({'ok': True, 'wrongs': counts})
-

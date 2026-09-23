@@ -20,6 +20,61 @@ var selectedDrawCount = 1;
 var qcmFullList = [];
 var qcmTheme = '';
 
+// --- Matieres (switch header) ---
+// ADMIN_SUBJECT : matiere cible de la page admin courante (data-subject sur
+// <body>, injecte par views.py : /admin -> physique, /cadmin -> chimie).
+// Tous les appels /api/admin/* et /api/forgecards/* la recoivent en ?subject=.
+// Les appels QCM, eux, restent communs : chaque admin voit les QCM de toutes
+// les matieres (selecteur dedie dans l'editeur).
+var ADMIN_SUBJECT = document.body.dataset.subject || '';
+var ENABLED_SUBJECTS = [];
+var CURRENT_SUBJECT = null;
+
+function adminUrl(url) {
+  if (!ADMIN_SUBJECT) return url;
+  return url + (url.indexOf('?') === -1 ? '?' : '&') + 'subject=' + encodeURIComponent(ADMIN_SUBJECT);
+}
+
+function renderSubjectToggle() {
+  var btn = document.getElementById('subject-toggle');
+  if (!btn) return;
+  if (ENABLED_SUBJECTS.length < 2) { btn.hidden = true; return; }
+  btn.hidden = false;
+  var current = CURRENT_SUBJECT || (ENABLED_SUBJECTS[0] && ENABLED_SUBJECTS[0].key);
+  var meta = null;
+  ENABLED_SUBJECTS.forEach(function (s) { if (s.key === current) meta = s; });
+  btn.textContent = meta ? meta.label : current;
+  if (meta && meta.color) {
+    btn.style.borderColor = meta.color;
+    btn.style.color = meta.color;
+  }
+  btn.title = 'Matiere active : ' + (meta ? meta.label : current) + ' — cliquer pour changer';
+}
+
+function switchSubject() {
+  if (ENABLED_SUBJECTS.length < 2) return;
+  var current = CURRENT_SUBJECT || (ENABLED_SUBJECTS[0] && ENABLED_SUBJECTS[0].key);
+  var idx = -1;
+  ENABLED_SUBJECTS.forEach(function (s, i) { if (s.key === current) idx = i; });
+  var next = ENABLED_SUBJECTS[(idx + 1) % ENABLED_SUBJECTS.length];
+  // Affichage immédiat ; la session serveur fait foi au rechargement.
+  CURRENT_SUBJECT = next.key;
+  localStorage.setItem('mdc-subject', next.key);
+  renderSubjectToggle();
+  fetchJson('/api/subject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: next.key }) })
+    .then(function () { location.reload(); })
+    .catch(function () { showToast('Erreur reseau, la matiere n\'a pas change.'); });
+}
+
+function initSubjects() {
+  return fetchJson('/api/subjects', { cache: 'no-store' }).then(function (d) {
+    if (!d) return;
+    ENABLED_SUBJECTS = d.subjects || [];
+    CURRENT_SUBJECT = d.current || null;
+    renderSubjectToggle();
+  }).catch(function () { /* switch simplement absent */ });
+}
+
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -198,7 +253,7 @@ function chapitreOptionsHtml(list) {
   return list.map(function (c) { return '<option value="' + esc(c) + '">' + esc(c) + '</option>'; }).join('');
 }
 function loadChapitres() {
-  return fetchJson('/api/chapitres').then(function (list) {
+  return fetchJson(adminUrl('/api/chapitres')).then(function (list) {
     chapitresList = list;
     var upSelect = document.getElementById('up-chapitre');
     if (upSelect) upSelect.innerHTML = chapitreOptionsHtml(list);
@@ -653,7 +708,7 @@ function loadQcmPreviewExample() {
 }
 
 function loadParams() {
-  fetchJson('/api/params').then(function (p) {
+  fetchJson(adminUrl('/api/params')).then(function (p) {
     params = p;
     document.getElementById('f-max-active').value = p.max_active_num;
     var hsMaxEl = document.getElementById('f-max-hs');
@@ -680,7 +735,7 @@ function saveParams() {
     daily_new_limit: newEl ? newEl.value : 3,
     daily_review_limit: reviewEl ? reviewEl.value : 3,
   };
-  fetchJson('/api/params', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  fetchJson(adminUrl('/api/params'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function () {
       var msg = document.getElementById('saved-msg');
       msg.classList.add('show');
@@ -987,7 +1042,7 @@ function uploadFiche() {
   fd.append('correction_pdf', correction);
   appendIf(fd, 'bareme_pdf', bareme);
   toggleSpinner('upload-spinner', true);
-  fetchJson('/api/forgecards/upload', { method: 'POST', body: fd })
+  fetchJson(adminUrl('/api/forgecards/upload'), { method: 'POST', body: fd })
     .then(function (res) {
       toggleSpinner('upload-spinner', false);
       var out = document.getElementById('upload-status');
@@ -1014,7 +1069,7 @@ function cardTitleHtml(c) {
 var allAdminCards = [];
 var currentFicheNumero = null;
 function loadAdminList() {
-  fetchJson('/api/forgecards').then(function (cards) {
+  fetchJson(adminUrl('/api/forgecards')).then(function (cards) {
     allAdminCards = cards.slice().sort(function (a, b) { return ((a.hors_serie ? 1 : 0) - (b.hors_serie ? 1 : 0)) || (a.numero - b.numero); });
     var lastNormal = null;
     allAdminCards.forEach(function (c) { if (!c.hors_serie) lastNormal = c.numero; });
@@ -1152,7 +1207,7 @@ function saveEditFiche() {
   if (removeBareme) fd.append('remove_bareme', '1');
   if (removeCorrection) fd.append('remove_correction', '1');
   toggleSpinner('edit-spinner', true);
-  fetchJson('/api/forgecards/' + currentEditNumero, { method: 'PATCH', body: fd })
+  fetchJson(adminUrl('/api/forgecards/' + currentEditNumero), { method: 'PATCH', body: fd })
     .then(function (res) {
       toggleSpinner('edit-spinner', false);
       if (res.ok) { closeEditModal(); loadAdminList(); }
@@ -1165,7 +1220,7 @@ function saveEditFiche() {
 }
 
 function resetCardStats(numero) {
-  adminAction('/api/forgecards/' + numero + '/reset-stats', 'POST', function () {
+  adminAction(adminUrl('/api/forgecards/' + numero + '/reset-stats'), 'POST', function () {
     loadAdminList();
     loadWeakCards();
     loadStats();
@@ -1173,7 +1228,7 @@ function resetCardStats(numero) {
   }, 'reinitialisation impossible');
 }
 function deleteFiche(numero) {
-  adminAction('/api/forgecards/' + numero, 'DELETE', function () { loadAdminList(); }, 'Erreur reseau lors de la suppression.');
+  adminAction(adminUrl('/api/forgecards/' + numero), 'DELETE', function () { loadAdminList(); }, 'Erreur reseau lors de la suppression.');
 }
 
 function loadPrenomList() { loadStats(); }
@@ -1241,7 +1296,7 @@ function addPrenom() {
     .catch(function () { showToast('Erreur reseau.'); });
 }
 function grantJoker(prenom) {
-  adminAction('/api/users/' + encodeURIComponent(prenom) + '/joker', 'POST', function (res) {
+  adminAction(adminUrl('/api/users/' + encodeURIComponent(prenom) + '/joker'), 'POST', function (res) {
     if (res && res.full) { showToast(prenom + ' a deja 2 jokers, plafond atteint.'); return; }
     showToast('🃏 Joker donne a ' + prenom + ' (total: ' + (res && res.jokers != null ? res.jokers : '?') + ').');
   }, 'Erreur reseau.');
@@ -1279,7 +1334,7 @@ function renderInactiveAlert(stats) {
 
 
 function loadStats() {
-  fetchJson('/api/users/stats').then(function (stats) {
+  fetchJson(adminUrl('/api/users/stats')).then(function (stats) {
     var list = document.getElementById('stats-list');
     if (!list) return;
     list.innerHTML = '';
@@ -1305,7 +1360,7 @@ function loadStats() {
         '<button class="btn-ghost btn-small" data-action="regen-pw">New mdp</button>' +
         '<button class="btn-ghost btn-small" data-action="joker" title="Donner un joker">🃏</button>' +
         '<button class="btn-ghost btn-small" data-action="deck">Deck</button>' +
-        '<a class="btn-ghost btn-small" style="text-decoration:none;text-align:center" href="/api/users/' + encodeURIComponent(s.prenom) + '/export">Export CSV</a>' +
+        '<a class="btn-ghost btn-small" style="text-decoration:none;text-align:center" href="' + adminUrl('/api/users/' + encodeURIComponent(s.prenom) + '/export') + '">Export CSV</a>' +
         '<button class="btn-danger btn-small" data-action="delete">Retirer</button></div>' +
         '<div class="deck-slot"></div></div>';
       det.querySelector('[data-action="show-pw"]').onclick = function () { showUserPassword(s.prenom, this); };
@@ -1327,7 +1382,7 @@ function loadStats() {
 function loadDeck(prenom, slot, btn) {
   var box = slot || document.getElementById('deck-view');
   if (!box) return;
-  fetchJson('/api/users/' + encodeURIComponent(prenom) + '/deck').then(function (cards) {
+  fetchJson(adminUrl('/api/users/' + encodeURIComponent(prenom) + '/deck')).then(function (cards) {
     var rowsHtml = cards.map(function (c) {
       return '<div class="admin-row"><div>' + cardTitleHtml(c) +
         '<div class="meta">Difficulte ' + esc(c.difficulty ? c.difficulty.toFixed(1) : '-') + ' - Stabilite ' + esc(c.stability ? c.stability.toFixed(1) + 'j' : '-') + ' - ' + esc(c.repetitions || 0) + ' revisions - ' + esc(c.lapses || 0) + ' echecs</div></div>' +
@@ -1343,7 +1398,7 @@ function loadDeck(prenom, slot, btn) {
 }
 var allWeakCards = [];
 function loadWeakCards() {
-  fetchJson('/api/dashboard/weak-cards').then(function (rows) {
+  fetchJson(adminUrl('/api/dashboard/weak-cards')).then(function (rows) {
     allWeakCards = rows;
     renderAdminDetail();
   }).catch(function (e) { console.error(e); });
@@ -1378,7 +1433,7 @@ function toggleNoteMask(id, masquer) {
 }
 
 function loadFailureNotes() {
-  fetchJson('/api/dashboard/failure-notes').then(function (rows) {
+  fetchJson(adminUrl('/api/dashboard/failure-notes')).then(function (rows) {
     allFailureNotes = rows;
     renderFailureNotes();
     renderFicheNotes();
@@ -1438,17 +1493,17 @@ function purgeQcmRetired() {
   });
 }
 
-function exportCSV() { window.location.href = '/api/sr/export'; }
+function exportCSV() { window.location.href = adminUrl('/api/sr/export'); }
 
 function exportCsv(kind) {
-  window.location.href = '/api/admin/stats/export/' + encodeURIComponent(kind);
+  window.location.href = adminUrl('/api/admin/stats/export/' + encodeURIComponent(kind));
 }
 
 function loadStatsOverview() {
   var box = document.getElementById('stats-overview');
   if (!box) return;
   box.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">Calcul en cours…</p>';
-  fetchJson('/api/admin/stats/overview', { cache: 'no-store' }).then(function (d) {
+  fetchJson(adminUrl('/api/admin/stats/overview'), { cache: 'no-store' }).then(function (d) {
     if (!d || d.ok === false) {
       box.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">Calcul impossible.</p>';
       return;
@@ -1500,7 +1555,7 @@ function loadStatsOverview() {
     box.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">Erreur réseau.</p>';
   });
 }
-function exportStatsByCard() { window.location.href = '/api/forgecards/stats/export'; }
+function exportStatsByCard() { window.location.href = adminUrl('/api/forgecards/stats/export'); }
 
 function selectDrawCount(n) {
   selectedDrawCount = n;
@@ -1989,6 +2044,7 @@ document.addEventListener('keydown', function (e) {
 
 document.addEventListener('DOMContentLoaded', function () {
   applyTheme(localStorage.getItem('mdc-theme') || 'light');
+  initSubjects();
   if (PAGE === 'compte') loadCompteDashboard();
 
   ['up-difficulty', 'edit-difficulty'].forEach(function (id) {

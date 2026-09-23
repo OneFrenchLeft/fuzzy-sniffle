@@ -38,6 +38,32 @@ JOKER_CAP = 2
 JOKER_EVERY = 4
 BOT_EXCLUDED_PRENOMS = frozenset({'admin'})
 
+# Matieres : memes flags que le site (CHIMIE=True, MATHS=True dans le .env).
+# Physique est toujours active. A garder en sync avec config.py.
+SUBJECT_META = {
+    'physique': {'label': 'Physique', 'env': None},
+    'chimie': {'label': 'Chimie', 'env': 'CHIMIE'},
+    'maths': {'label': 'Maths', 'env': 'MATHS'},
+}
+
+
+def subject_enabled(key):
+    meta = SUBJECT_META.get(key)
+    if not meta:
+        return False
+    if meta['env'] is None:
+        return True
+    return os.environ.get(meta['env'], '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+ENABLED_SUBJECTS = [k for k in SUBJECT_META if subject_enabled(k)]
+
+PARAMS_PATHS = {
+    'physique': PARAMS_PATH,
+    'chimie': BASE / 'data' / 'params_chimie.json',
+    'maths': BASE / 'data' / 'params_maths.json',
+}
+
 
 
 INTERNAL_API_KEY = os.environ.get('MADEC_INTERNAL_API_KEY')
@@ -103,9 +129,10 @@ def set_setting(key, value):
     conn.close()
 
 
-def read_params():
+def read_params(subject='physique'):
+    path = PARAMS_PATHS.get(subject, PARAMS_PATHS['physique'])
     try:
-        data = json.loads(PARAMS_PATH.read_text(encoding='utf-8'))
+        data = json.loads(path.read_text(encoding='utf-8'))
     except Exception:
         data = {}
     out = DEFAULT_PARAMS.copy()
@@ -121,15 +148,15 @@ def today_paris():
     return datetime.now(TZ_PARIS).date().isoformat()
 
 
-def compute_daily(conn, prenom, params):
+def compute_daily(conn, prenom, params, subject='physique'):
     """Decompose la journee : dues, faites, total (capte par quota), restantes."""
     today = today_paris()
     max_active = params['max_active_num']
     rows = conn.execute(
         'SELECT s.repetitions, s.next_review FROM forgecards f '
-        'LEFT JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? '
-        'WHERE f.numero <= ?',
-        (prenom, max_active)
+        'LEFT JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? AND s.subject = ? '
+        'WHERE f.subject = ? AND f.numero <= ?',
+        (prenom, subject, subject, max_active)
     ).fetchall()
     due_new = due_review = 0
     for reps, next_review in rows:
@@ -140,8 +167,8 @@ def compute_daily(conn, prenom, params):
             else:
                 due_review += 1
     done = conn.execute(
-        'SELECT was_new, COUNT(*) FROM reviews WHERE prenom=? AND substr(created_at,1,10)=? GROUP BY was_new',
-        (prenom, today)
+        'SELECT was_new, COUNT(*) FROM reviews WHERE prenom=? AND subject=? AND substr(created_at,1,10)=? GROUP BY was_new',
+        (prenom, subject, today)
     ).fetchall()
     new_done = sum(c for w, c in done if w)
     review_done = sum(c for w, c in done if not w)
@@ -153,18 +180,20 @@ def compute_daily(conn, prenom, params):
             'remaining': remaining}
 
 
-def compute_remaining(conn, prenom, params):
-    return compute_daily(conn, prenom, params)['remaining']
+def compute_remaining(conn, prenom, params, subject='physique'):
+    return compute_daily(conn, prenom, params, subject)['remaining']
 
 
-def compute_streak(conn, prenom):
+def compute_streak(conn, prenom, subject='physique'):
     """Jours consecutifs avec >= 1 review OU jour valide (sr_daily_streak)."""
     rows = conn.execute(
-        'SELECT DISTINCT substr(created_at,1,10) FROM reviews WHERE prenom=?', (prenom,)
+        'SELECT DISTINCT substr(created_at,1,10) FROM reviews WHERE prenom=? AND subject=?',
+        (prenom, subject)
     ).fetchall()
     days = {r[0] for r in rows}
     rows = conn.execute(
-        'SELECT day FROM sr_daily_streak WHERE prenom=? AND validated>=1', (prenom,)
+        'SELECT day FROM sr_daily_streak WHERE prenom=? AND subject=? AND validated>=1',
+        (prenom, subject)
     ).fetchall()
     days |= {r[0] for r in rows}
     if not days:
@@ -202,15 +231,23 @@ def fmt_grade(g):
 
 
 def ensure_joker_table():
+    # Meme schema v2 que le site : stock de jokers par (prenom, subject).
+    # Sans ca, un demarrage du bot avant le site recreait l'ancien schema
+    # mono-matiere et cassait les PK composites.
     conn = fc_db()
     conn.execute('CREATE TABLE IF NOT EXISTS user_jokers ('
-                 'prenom TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0)')
+                 'prenom TEXT NOT NULL,'
+                 'subject TEXT NOT NULL DEFAULT \'physique\','
+                 'count INTEGER NOT NULL DEFAULT 0,'
+                 'last_milestone INTEGER DEFAULT 0,'
+                 'PRIMARY KEY (prenom, subject))')
     conn.commit()
     conn.close()
 
 
-def get_jokers(conn, prenom):
-    row = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
+def get_jokers(conn, prenom, subject='physique'):
+    row = conn.execute('SELECT count FROM user_jokers WHERE prenom=? AND subject=?',
+                       (prenom, subject)).fetchone()
     return row[0] if row else 0
 
 
@@ -397,7 +434,7 @@ async def notification(interaction: discord.Interaction, etat: str):
 
 
 
-@madec.command(name='streak', description='Ta streak, ou celle du membre mentionne')
+@madec.command(name='streak', description='Tes streaks par matiere, ou celle du membre mentionne')
 @channel_required()
 @app_commands.describe(membre='Optionnel : membre Discord')
 async def streak(interaction: discord.Interaction, membre: discord.Member = None):
@@ -408,19 +445,23 @@ async def streak(interaction: discord.Interaction, membre: discord.Member = None
             f"❌ {target.display_name} n'est pas link.", ephemeral=True)
         return
     conn = fc_db()
-    s = compute_streak(conn, prenom)
-    jk = get_jokers(conn, prenom)
-    remaining = compute_remaining(conn, prenom, read_params())
+    lines = [f"🔥 **{prenom}**"]
+    for subject in ENABLED_SUBJECTS:
+        s = compute_streak(conn, prenom, subject)
+        jk = get_jokers(conn, prenom, subject)
+        remaining = compute_remaining(conn, prenom, read_params(subject), subject)
+        label = SUBJECT_META[subject]['label']
+        line = f"• **{label}** : {plural(s, 'jour')} de suite"
+        if jk:
+            line += f" — 🃏×{jk}"
+        if remaining:
+            line += f" — encore {plural(remaining, 'carte')} aujourd'hui"
+        lines.append(line)
     conn.close()
-    msg = f"🔥 **{prenom}** : {plural(s, 'jour')} de suite."
-    if jk:
-        msg += f" 🃏×{jk}"
-    if remaining:
-        msg += f" Encore {plural(remaining, 'carte')} aujourd'hui."
-    await interaction.response.send_message(msg, ephemeral=True)
+    await interaction.response.send_message('\n'.join(lines), ephemeral=True)
 
 
-@madec.command(name='progress', description='Ta progression du jour')
+@madec.command(name='progress', description='Ta progression du jour, par matiere')
 @channel_required()
 async def progress(interaction: discord.Interaction):
     prenom = prenom_for_discord(interaction.user.id)
@@ -428,18 +469,18 @@ async def progress(interaction: discord.Interaction):
         await interaction.response.send_message("Tu n'es pas relié à un prenom.", ephemeral=True)
         return
     conn = fc_db()
-    d = compute_daily(conn, prenom, read_params())
+    lines = [f"📊 **{prenom}**"]
+    for subject in ENABLED_SUBJECTS:
+        d = compute_daily(conn, prenom, read_params(subject), subject)
+        if d['total'] == 0:
+            lines.append(f"• **{SUBJECT_META[subject]['label']}** : rien à faire 🎉")
+            continue
+        done = min(d['done'], d['total'])
+        bar = progress_bar(done, d['total'])
+        status = "✅ terminé !" if d['remaining'] == 0 else f"encore {plural(d['remaining'], 'carte')}"
+        lines.append(f"• **{SUBJECT_META[subject]['label']}** : {done}/{d['total']} `{bar}` {status}")
     conn.close()
-    if d['total'] == 0:
-        await interaction.response.send_message(
-            "🎉 Rien a faire aujourd'hui. Profite (ou avance).", ephemeral=True)
-        return
-    done = min(d['done'], d['total'])
-    bar = progress_bar(done, d['total'])
-    status = "✅ Journee terminee !" if d['remaining'] == 0 else f"Encore {plural(d['remaining'], 'carte')}."
-    await interaction.response.send_message(
-        f"📊 **{prenom}** : {done}/{d['total']} cartes aujourd'hui\n`{bar}` {status}",
-        ephemeral=True)
+    await interaction.response.send_message('\n'.join(lines), ephemeral=True)
 
 
 # ---------- Duels ----------
@@ -500,8 +541,10 @@ class Duel:
 
     async def start(self):
         conn = fc_db()
-        row = conn.execute('SELECT numero FROM forgecards WHERE numero <= ? ORDER BY RANDOM() LIMIT 1',
-                           (read_params()['max_active_num'],)).fetchone()
+        # Les duels restent en physique pour l'instant (une seule piscine de
+        # fiches) ; les URL plates physique ({numero}.pdf) restent valides.
+        row = conn.execute('SELECT numero FROM forgecards WHERE subject=? AND numero <= ? ORDER BY RANDOM() LIMIT 1',
+                           ('physique', read_params('physique')['max_active_num'])).fetchone()
         conn.close()
         if row is None:
             await self.cancel('aucune forgecard active')
@@ -1009,25 +1052,27 @@ async def _post(path, payload, timeout=10):
 
 @tasks.loop(time=dtime(hour=REMINDER_HOUR, minute=1, tzinfo=TZ_PARIS))
 async def daily_reminder():
-    params = read_params()
     conn = fc_db()
     bots = bot_db()
     for prenom, discord_id in bots.execute(
         'SELECT prenom, discord_id FROM links WHERE notifications=1 AND prenom != \'admin\''
     ).fetchall():
-        try:
-            remaining = compute_remaining(conn, prenom, params)
-        except Exception:
-            continue
-        if remaining <= 0:
-            continue
-        await dm_user(discord_id,
-                      f"⏰ Il te reste **{plural(remaining, 'carte')}** Forgecards aujourd'hui.\n{SITE_URL}")
-        try:
-            await _post('/api/internal/log-event',
-                        {'prenom': prenom, 'type': 'reminder', 'payload': 'daily'})
-        except Exception:
-            pass
+        for subject in ENABLED_SUBJECTS:
+            try:
+                remaining = compute_remaining(conn, prenom, read_params(subject), subject)
+            except Exception:
+                continue
+            if remaining <= 0:
+                continue
+            label = SUBJECT_META[subject]['label']
+            await dm_user(discord_id,
+                          f"⏰ **{label}** — il te reste **{plural(remaining, 'carte')}** aujourd'hui.\n{SITE_URL}")
+            try:
+                await _post('/api/internal/log-event',
+                            {'prenom': prenom, 'type': 'reminder',
+                             'payload': f'daily:{subject}', 'subject': subject})
+            except Exception:
+                pass
     conn.close()
     bots.close()
 
@@ -1037,27 +1082,34 @@ async def watch_new_cards():
     ch_id = get_setting('channel_id')
     if not ch_id:
         return
-    max_active = read_params()['max_active_num']
     conn = fc_db()
-    rows = conn.execute(
-        'SELECT numero FROM forgecards WHERE numero <= ? ORDER BY numero',
-        (max_active,)).fetchall()
+    drops = []
+    for subject in ENABLED_SUBJECTS:
+        max_active = read_params(subject)['max_active_num']
+        rows = conn.execute(
+            'SELECT numero FROM forgecards WHERE subject=? AND numero <= ? ORDER BY numero',
+            (subject, max_active)).fetchall()
+        nums = [r[0] for r in rows]
+
+        # Cle de suivi par matiere : les numerotations sont independantes.
+        key = f'last_announced_num:{subject}'
+        last = get_setting(key)
+        if last is None:
+            # premier demarrage : tout ce qui est deja tirable est considere connu
+            set_setting(key, max(nums) if nums else 0)
+            continue
+
+        new = [n for n in nums if n > int(last)]
+        if not new:
+            # Suit AUSSI les reductions du max tirable : si tu re-elargis ensuite,
+            # les fiches redevenues disponibles seront annoncees comme un drop.
+            set_setting(key, max(nums) if nums else 0)
+            continue
+        set_setting(key, max(new))
+        drops.append((subject, new))
     conn.close()
-    nums = [r[0] for r in rows]
-
-    last = get_setting('last_announced_num')
-    if last is None:
-        # premier demarrage : tout ce qui est deja tirable est considere connu
-        set_setting('last_announced_num', max(nums) if nums else 0)
+    if not drops:
         return
-
-    new = [n for n in nums if n > int(last)]
-    if not new:
-        # Suit AUSSI les réductions du max tirable : si tu ré-élargis ensuite,
-        # les fiches redevenues disponibles seront annoncées comme un drop.
-        set_setting('last_announced_num', max(nums) if nums else 0)
-        return
-    set_setting('last_announced_num', max(new))
 
     channel = client.get_channel(int(ch_id))
     if channel is None:
@@ -1067,15 +1119,17 @@ async def watch_new_cards():
             return
     role = discord.utils.get(channel.guild.roles, name=NOTIF_ROLE_NAME)
     mention = f'{role.mention} ' if role else ''
-    if len(new) <= 5:
-        detail = ', '.join(f'n°{n}' for n in new)
-        await channel.send(
-            f"📦 {mention}**Drop de forgecards** : {plural(len(new), 'nouvelle forgecard')} "
-            f"maintenant tirables ({detail}) !")
-    else:
-        await channel.send(
-            f"📦 {mention}**Gros drop** : {plural(len(new), 'nouvelle forgecard')} "
-            f"maintenant tirables (jusqu'à la n°{max(new)}) !")
+    for subject, new in drops:
+        label = SUBJECT_META[subject]['label']
+        if len(new) <= 5:
+            detail = ', '.join(f'n°{n}' for n in new)
+            await channel.send(
+                f"📦 {mention}**Drop {label}** : {plural(len(new), 'nouvelle forgecard')} "
+                f"maintenant tirables ({detail}) !")
+        else:
+            await channel.send(
+                f"📦 {mention}**Gros drop {label}** : {plural(len(new), 'nouvelle forgecard')} "
+                f"maintenant tirables (jusqu'à la n°{max(new)}) !")
 
 
 @tasks.loop(seconds=15)
@@ -1089,7 +1143,11 @@ async def rotate_status():
     n = 0
     for prenom, _ in bots.execute("SELECT prenom, discord_id FROM links WHERE prenom != 'admin'").fetchall():
         try:
-            if compute_remaining(conn, prenom, read_params()) > 0:
+            remaining_total = sum(
+                compute_remaining(conn, prenom, read_params(subject), subject)
+                for subject in ENABLED_SUBJECTS
+            )
+            if remaining_total > 0:
                 n += 1
         except Exception:
             continue
@@ -1119,24 +1177,32 @@ async def nightly_streak_guard():
     bots = bot_db()
     links = {p: d for p, d in bots.execute("SELECT prenom, discord_id FROM links WHERE prenom != 'admin'").fetchall()}
     bots.close()
-    for prenom, info in resp.get('results', {}).items():
-        for ev in info['events']:
-            if ev == 'joker_spent':
-                await dm_user(links.get(prenom),
-                              f"🃏 Joker utilisé ! Ta streak est sauvée. Il te reste {info['jokers']} joker(s).")
-                try:
-                    await _post('/api/internal/log-event',
-                                {'prenom': prenom, 'type': 'reminder', 'payload': 'joker'})
-                except Exception:
-                    pass
-            elif ev == 'joker_awarded':
-                await dm_user(links.get(prenom),
-                              f"🃏 Streak de {info['streak']} jours ! Tu gagnes un joker (total {info['jokers']}). Il sauvera ta streak si tu oublies un jour.")
+    # results est nested par matiere : {subject: {prenom: {...}}}
+    for subject, per_prenom in resp.get('results', {}).items():
+        label = SUBJECT_META.get(subject, {}).get('label', subject)
+        for prenom, info in per_prenom.items():
+            for ev in info['events']:
+                if ev == 'joker_spent':
+                    await dm_user(links.get(prenom),
+                                  f"🃏 **{label}** — joker utilisé ! Ta streak est sauvée. "
+                                  f"Il te reste {info['jokers']} joker(s).")
+                    try:
+                        await _post('/api/internal/log-event',
+                                    {'prenom': prenom, 'type': 'reminder',
+                                     'payload': f'joker:{subject}', 'subject': subject})
+                    except Exception:
+                        pass
+                elif ev == 'joker_awarded':
+                    await dm_user(links.get(prenom),
+                                  f"🃏 **{label}** — streak de {info['streak']} jours ! "
+                                  f"Tu gagnes un joker (total {info['jokers']}). "
+                                  f"Il sauvera ta streak si tu oublies un jour.")
 
 
 @tasks.loop(time=dtime(hour=20, minute=0, tzinfo=TZ_PARIS))
 async def weekly_recap():
-    """Recap du dimanche 20h : tirages, revisions, streak record de la classe."""
+    """Recap du dimanche 20h : une section par matiere (tirages, revisions,
+    streak record), plus un bloc QCM commun aux matieres."""
     if datetime.now(TZ_PARIS).weekday() != 6:
         return
     ch_id = get_setting('channel_id')
@@ -1144,52 +1210,73 @@ async def weekly_recap():
         return
     conn = fc_db()
     week_ago = (datetime.now(TZ_PARIS).date() - timedelta(days=7)).isoformat()
-    reviews = conn.execute(
-        "SELECT COUNT(*) FROM reviews WHERE substr(created_at,1,10) >= ? AND prenom != 'admin'",
-        (week_ago,)).fetchone()[0]
-    total_reviews = conn.execute(
-        "SELECT COUNT(*) FROM reviews WHERE prenom != 'admin'").fetchone()[0]
-    draws = conn.execute('SELECT COUNT(*) FROM draw_history WHERE substr(created_at,1,10) >= ?',
-                         (week_ago,)).fetchone()[0]
+    per_subject = {}
+    for subject in ENABLED_SUBJECTS:
+        reviews = conn.execute(
+            "SELECT COUNT(*) FROM reviews WHERE subject=? AND substr(created_at,1,10) >= ? AND prenom != 'admin'",
+            (subject, week_ago)).fetchone()[0]
+        total_reviews = conn.execute(
+            "SELECT COUNT(*) FROM reviews WHERE subject=? AND prenom != 'admin'",
+            (subject,)).fetchone()[0]
+        draws = conn.execute(
+            'SELECT COUNT(*) FROM draw_history WHERE subject=? AND substr(created_at,1,10) >= ?',
+            (subject, week_ago)).fetchone()[0]
+        per_subject[subject] = {'reviews': reviews, 'total_reviews': total_reviews, 'draws': draws}
     conn.close()
-    classement, fiche_top, fiche_rev = [], None, None
-    try:
-        resp = await _post('/api/internal/weekly-stats', {}, timeout=30)
-        if resp and resp.get('ok'):
-            classement = resp.get('classement', [])
-            fiche_top = resp.get('fiche_top')
-            fiche_rev = resp.get('fiche_rev')
-    except Exception as e:
-        print('weekly-stats:', e)
+    classements, fiches = {}, {}
+    qcm_podium, nb_parties = [], 0
+    for subject in ENABLED_SUBJECTS:
+        try:
+            resp = await _post(f'/api/internal/weekly-stats?subject={subject}', {}, timeout=30)
+            if resp and resp.get('ok'):
+                classements[subject] = resp.get('classement', [])
+                fiches[subject] = (resp.get('fiche_top'), resp.get('fiche_rev'))
+                if subject == ENABLED_SUBJECTS[0]:
+                    # Le podium QCM est commun : une seule section le reprend.
+                    qcm_podium = resp.get('podium_qcm', [])
+                    nb_parties = resp.get('nb_parties_qcm', 0)
+        except Exception as e:
+            print('weekly-stats:', e)
     channel = client.get_channel(int(ch_id))
     if channel is None:
         try:
             channel = await client.fetch_channel(int(ch_id))
         except Exception:
             return
-    lines = [
-        "📊 **Recap de la semaine**",
-        "",
-        f"🎲 Tirages de la semaine : {draws}",
-        f"🔁 Révisions de la semaine : {reviews}",
-        f"📚 Révisions depuis la rentrée : {total_reviews}",
-        "",
-    ]
-    # Xiao: One line for the class record, everyone tied at the top gets named.
-    actifs = [c for c in classement if c['streak'] > 0]
-    if actifs:
-        best = actifs[0]['streak']
-        names = ', '.join(c['prenom'] for c in actifs if c['streak'] == best)
-        lines.append(f"🔥 Streak la plus longue de la classe : {plural(best, 'jour')} — {names}")
-    else:
-        lines.append("🔥 Aucune streak en cours. Le désert.")
-    if fiche_top:
-        titre = f"« {fiche_top['titre']} »" if fiche_top.get('titre') else ''
-        lines.append(f"🃏 Carte la plus tirée : {fiche_top.get('label') or fiche_top['numero']} {titre} ({plural(fiche_top['c'], 'tirage')})")
-    if fiche_rev:
-        titre = f"« {fiche_rev['titre']} »" if fiche_rev.get('titre') else ''
-        lines.append(f"📖 Carte la plus révisée : {fiche_rev.get('label') or fiche_rev['numero']} {titre} ({plural(fiche_rev['c'], 'revision')})")
-    await channel.send('\n'.join(lines))
+    blocks = []
+    for subject in ENABLED_SUBJECTS:
+        label = SUBJECT_META[subject]['label']
+        stats = per_subject[subject]
+        lines = [
+            f"📊 **Recap de la semaine — {label}**",
+            "",
+            f"🎲 Tirages de la semaine : {stats['draws']}",
+            f"🔁 Révisions de la semaine : {stats['reviews']}",
+            f"📚 Révisions depuis la rentrée : {stats['total_reviews']}",
+            "",
+        ]
+        # Xiao: One line for the class record, everyone tied at the top gets named.
+        actifs = [c for c in classements.get(subject, []) if c['streak'] > 0]
+        if actifs:
+            best = actifs[0]['streak']
+            names = ', '.join(c['prenom'] for c in actifs if c['streak'] == best)
+            lines.append(f"🔥 Streak la plus longue : {plural(best, 'jour')} — {names}")
+        else:
+            lines.append("🔥 Aucune streak en cours. Le désert.")
+        fiche_top, fiche_rev = fiches.get(subject, (None, None))
+        if fiche_top:
+            titre = f"« {fiche_top['titre']} »" if fiche_top.get('titre') else ''
+            lines.append(f"🃏 Carte la plus tirée : {fiche_top.get('label') or fiche_top['numero']} {titre} ({plural(fiche_top['c'], 'tirage')})")
+        if fiche_rev:
+            titre = f"« {fiche_rev['titre']} »" if fiche_rev.get('titre') else ''
+            lines.append(f"📖 Carte la plus révisée : {fiche_rev.get('label') or fiche_rev['numero']} {titre} ({plural(fiche_rev['c'], 'revision')})")
+        blocks.append('\n'.join(lines))
+    qcm_lines = []
+    if qcm_podium:
+        podium_txt = ' · '.join(f"**{p['prenom']}** ({p['score']})" for p in qcm_podium)
+        qcm_lines.append(f"🎮 **QCM** (toutes matières) : {plural(nb_parties, 'partie')} cette semaine — {podium_txt}")
+        blocks.append('\n'.join(qcm_lines))
+    await channel.send('\n\n'.join(blocks))
 
 
 # ---------- Demarrage ----------
