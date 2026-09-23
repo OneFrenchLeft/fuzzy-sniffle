@@ -100,6 +100,23 @@ function showToast(msg) {
   toastTimer = setTimeout(function () { t.classList.remove('show'); }, 3000);
 }
 
+// --- Rendu LaTeX : MathJax en priorite, KaTeX en secours ---
+// MathJax (charge en defer) couvre plus de constructions ; tant qu'il n'est
+// pas pret on retente, et si son fichier manque on retombe sur KaTeX.
+function typesetMath(root) {
+  if (!root) return;
+  if (window.MathJax && MathJax.typesetPromise) {
+    MathJax.typesetPromise([root]).catch(function (e) { console.warn('MathJax:', e); });
+    return;
+  }
+  if (window.renderMathInElement && window.katexDelimiters) {
+    try { renderMathInElement(root, { delimiters: window.katexDelimiters, throwOnError: false }); }
+    catch (e) { console.warn('KaTeX:', e); }
+    return;
+  }
+  setTimeout(function () { typesetMath(root); }, 300);
+}
+
 /* --- Chronometre SR : toast persistant tant qu'une fiche est en cours --- */
 var chronoCard = null;
 var chronoInterval = null;
@@ -642,13 +659,7 @@ function renderQcmPreview() {
   document.getElementById('qcm-preview-prev').disabled = qcmPreviewIndex === 0;
   document.getElementById('qcm-preview-next').disabled = qcmPreviewIndex === qcmPreviewQuestions.length - 1;
 
-  if (window.renderMathInElement) {
-    try {
-      renderMathInElement(render, { delimiters: window.katexDelimiters, throwOnError: false });
-    } catch (error) {
-      console.warn('KaTeX aperçu QCM :', error);
-    }
-  }
+  typesetMath(render);
 }
 
 function moveQcmPreview(d) {
@@ -970,9 +981,36 @@ function renderWeakQcm() {
   weakQcmRows.forEach(function (r) {
     var color = r.taux_echec >= 40 ? '#c0392b' : (r.taux_echec >= 20 ? '#e67e22' : '#27ae60');
     var label = r.question.length > 90 ? r.question.slice(0, 90) + '…' : r.question;
+    // Menu déroulant : ce que les élèves ont répondu de faux (choice NULL =
+    // sans réponse). Les choix viennent du catalogue, avec lettre A/B/C/D.
+    var wrongHtml = '';
+    var wrongKeys = Object.keys(r.wrong || {});
+    var nbFautes = wrongKeys.reduce(function (s, k) { return s + r.wrong[k]; }, 0);
+    if (r.sorties > 0 && nbFautes > 0) {
+      var items = wrongKeys.sort(function (a, b) { return r.wrong[b] - r.wrong[a]; }).map(function (k) {
+        var nb = r.wrong[k];
+        var pct = Math.round(100 * nb / r.sorties);
+        var txt;
+        if (k === 'absent') {
+          txt = 'Sans réponse';
+        } else {
+          var idx = parseInt(k, 10);
+          var letter = String.fromCharCode(65 + idx);
+          var opt = ((r.options || [])[idx] || '').trim();
+          if (opt.length > 60) opt = opt.slice(0, 60) + '…';
+          txt = letter + (opt ? ' — ' + opt : '');
+        }
+        return '<li>' + esc(txt) + ' · ' + nb + '× (' + pct + ' %)</li>';
+      }).join('');
+      wrongHtml = '<details class="weak-wrong" style="margin-top:.3rem;font-size:.8rem">' +
+        '<summary style="cursor:pointer;color:var(--muted)">' + nbFautes + ' réponse' + (nbFautes > 1 ? 's' : '') +
+        ' fausse' + (nbFautes > 1 ? 's' : '') + ' — voir les choix</summary>' +
+        '<ul style="margin:.3rem 0 0;padding-left:1.2rem">' + items + '</ul></details>';
+    }
     html += '<tr' + (r.absente ? ' style="opacity:.55" title="Question retirée du fichier : stats conservées"' : '') + '>' +
       '<td><div style="font-size:.85rem">' + esc(label) + (r.absente ? ' <em>(retirée)</em>' : '') + '</div>' +
-      '<div class="meta">' + esc(r.theme) + (r.chapitre ? ' · ' + esc(r.chapitre) : '') + '</div></td>' +
+      '<div class="meta">' + esc(r.theme) + (r.chapitre ? ' · ' + esc(r.chapitre) : '') + '</div>' +
+      wrongHtml + '</td>' +
       '<td>' + r.sorties + '</td>' +
       '<td><span class="weak-badge" style="background:' + color + '">' + r.taux_echec + ' %</span></td>' +
       '<td>' + fmtDateShort(r.derniere) + '</td>' +
@@ -987,6 +1025,7 @@ function renderWeakQcm() {
     html += '<p style="margin-top:.4rem"><button class="btn-ghost btn-small" onclick="purgeQcmRetired()">Purger les ' + retiredCount + ' question' + (retiredCount > 1 ? 's' : '') + ' retiree' + (retiredCount > 1 ? 's' : '') + '</button></p>';
   }
   box.innerHTML = html;
+  typesetMath(box);
 }
 
 var MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
@@ -2206,11 +2245,7 @@ function loadSrQcmErrors() {
         '</div>';
     });
     box.innerHTML = html;
-    if (window.renderMathInElement && window.katexDelimiters) {
-      try { renderMathInElement(box, { delimiters: window.katexDelimiters, throwOnError: false }); } catch (e) { console.warn('KaTeX compte:', e); }
-    } else if (window.MathJax && MathJax.typesetPromise) {
-      MathJax.typesetPromise([box]).catch(function () {});
-    }
+    typesetMath(box);
   }).catch(function () {
     box.innerHTML = '<p class="hint">Impossible de charger les erreurs QCM.</p>';
   });

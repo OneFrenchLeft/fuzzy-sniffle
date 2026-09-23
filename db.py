@@ -130,6 +130,7 @@ def init_db():
         "question TEXT DEFAULT '',"
         "prenom TEXT DEFAULT '',"
         "ok INTEGER NOT NULL DEFAULT 0,"
+        "choice INTEGER,"
         "elapsed REAL,"
         "created_at TEXT DEFAULT CURRENT_TIMESTAMP"
         ")"
@@ -238,6 +239,10 @@ def init_db():
         conn.execute("ALTER TABLE user_jokers ADD COLUMN last_milestone INTEGER DEFAULT 0")
     if 'note_masquee' not in rev_cols:
         conn.execute("ALTER TABLE reviews ADD COLUMN note_masquee INTEGER DEFAULT 0")
+
+    qcm_ans_cols = [r[1] for r in conn.execute("PRAGMA table_info(qcm_answers)").fetchall()]
+    if 'choice' not in qcm_ans_cols:
+        conn.execute("ALTER TABLE qcm_answers ADD COLUMN choice INTEGER")
 
     conn.execute('CREATE INDEX IF NOT EXISTS idx_reviews_prenom_date ON reviews(prenom, created_at)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_qcm_prenom_ok ON qcm_answers(prenom, ok)')

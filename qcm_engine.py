@@ -383,7 +383,7 @@ class Game:
                 for player in self.joueurs:
                     answer = self.answers.get(player)
                     if answer is None:
-                        points, ok, elapsed = 0, False, None
+                        points, ok, elapsed, choice = 0, False, None, None
                     else:
                         choice, elapsed = answer
                         ok = choice == correct
@@ -400,7 +400,7 @@ class Game:
                                 question.get('theme', ''),
                                 question.get('chapitre', 'Autre'),
                                 question.get('question', ''),
-                                player, ok, elapsed,
+                                player, ok, elapsed, choice,
                             )
                         except Exception:
                             pass

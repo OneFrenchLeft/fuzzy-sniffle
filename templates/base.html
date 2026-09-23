@@ -17,7 +17,21 @@
     { left: '\\(', right: '\\)', display: false }
   ];
   </script>
-  <script src="{{ url_for('static', filename='js/app.js', v=21) }}" defer></script>
+  <script>
+  // MathJax : moteur principal (plus couvrant que KaTeX : environnements,
+  // chimie, etc.). KaTeX reste charge en secours si ce fichier manque.
+  window.MathJax = {
+    tex: {
+      inlineMath: [['\\(', '\\)'], ['$', '$']],
+      displayMath: [['\\[', '\\]'], ['$$', '$$']],
+      processEscapes: true
+    },
+    svg: { fontCache: 'global' },
+    options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+  };
+  </script>
+  <script defer src="{{ url_for('static', filename='mathjax/tex-svg.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js', v=22) }}" defer></script>
 </head>
 <body data-page="{{ active }}">
 <canvas id="confetti-canvas"></canvas>

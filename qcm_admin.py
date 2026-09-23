@@ -331,6 +331,15 @@ def admin_qcm_weak():
     sql += ' GROUP BY qid'
     conn = db()
     stats = {r['qid']: r for r in conn.execute(sql, params_sql).fetchall()}
+    # Distribution des reponses fausses par question (choice NULL = sans reponse).
+    wrong_sql = "SELECT qid, choice, COUNT(*) AS nb FROM qcm_answers WHERE ok = 0"
+    if clauses:
+        wrong_sql += ' AND ' + ' AND '.join(clauses)
+    wrong_sql += ' GROUP BY qid, choice'
+    wrong_by_qid = {}
+    for r in conn.execute(wrong_sql, params_sql).fetchall():
+        key = 'absent' if r['choice'] is None else str(r['choice'])
+        wrong_by_qid.setdefault(r['qid'], {})[key] = r['nb']
     conn.close()
     out, seen = [], set()
     for qid, q in catalog.items():
@@ -344,9 +353,11 @@ def admin_qcm_weak():
             'qid': qid, 'theme': q.get('theme', ''),
             'chapitre': q.get('chapitre', 'Autre'),
             'question': q.get('question', ''),
+            'options': [c.get('text', '') for c in q.get('choices', [])],
             'sorties': n,
             'taux_echec': round(100 * (n - bonnes) / n, 1) if n else 0,
             'derniere': s['derniere'] if s else None,
+            'wrong': wrong_by_qid.get(qid, {}),
             'absente': False,
         })
     retired_count = sum(1 for qid in stats if qid not in seen)
@@ -380,7 +391,7 @@ def record_qcm_game(gid, theme, nb_questions, nb_players, podium):
         # Eliot: Analytics can fail quietly; the game shouldn't.
         print(f'[qcm-games] enregistrement impossible: {exc!r}')
 
-def record_qcm_answer(qid, theme, chapitre, question, prenom, ok, elapsed):
+def record_qcm_answer(qid, theme, chapitre, question, prenom, ok, elapsed, choice=None):
     # Xiao: Ignore answers without a stable question ID.
     if not qid:
         return
@@ -388,8 +399,8 @@ def record_qcm_answer(qid, theme, chapitre, question, prenom, ok, elapsed):
         ensure_db()
         conn = db()
         conn.execute(
-            'INSERT INTO qcm_answers(qid, theme, chapitre, question, prenom, ok, elapsed, created_at) '
-            'VALUES(?,?,?,?,?,?,?,?)',
+            'INSERT INTO qcm_answers(qid, theme, chapitre, question, prenom, ok, choice, elapsed, created_at) '
+            'VALUES(?,?,?,?,?,?,?,?,?)',
             (
                 qid,
                 theme,
@@ -397,6 +408,7 @@ def record_qcm_answer(qid, theme, chapitre, question, prenom, ok, elapsed):
                 (question or '')[:300],
                 prenom,
                 1 if ok else 0,
+                choice,
                 elapsed,
                 now_paris().isoformat(),
             ),
