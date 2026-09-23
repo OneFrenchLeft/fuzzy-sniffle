@@ -56,8 +56,16 @@ def sr_today():
     conn = db()
     all_cards = conn.execute('SELECT numero FROM forgecards WHERE subject=? AND numero <= ? AND hors_serie = 0',
                              (subject, max_active)).fetchall()
-    for c in all_cards:
-        ensure_sr_row(conn, prenom, c['numero'], subject)
+    # Flying: One INSERT...SELECT instead of one SELECT per card on every page
+    # load. OR IGNORE keeps existing states untouched; new cards get today's
+    # date so they're due immediately, exactly like ensure_sr_row did.
+    # Scoped on the session subject like the rest of the SR loop.
+    conn.execute(
+        "INSERT OR IGNORE INTO sr_state_user (prenom, subject, numero, stability, difficulty, state, last_review, next_review, repetitions, lapses) "
+        "SELECT ?, ?, f.numero, NULL, NULL, 'new', NULL, ?, 0, 0 FROM forgecards f "
+        "WHERE f.subject = ? AND f.numero <= ? AND f.hors_serie = 0",
+        (prenom, subject, today, subject, max_active)
+    )
     conn.commit()
 
     try:

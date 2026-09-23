@@ -17,7 +17,7 @@
     { left: '\\(', right: '\\)', display: false }
   ];
   </script>
-  <script src="{{ url_for('static', filename='js/app.js', v=20) }}" defer></script>
+   <script src="{{ url_for('static', filename='js/app.js', v=21) }}" defer></script>
 </head>
 <body data-page="{{ active }}" {% block body_attrs %}{% endblock %}>
 <canvas id="confetti-canvas"></canvas>
@@ -46,5 +46,6 @@
 <footer class="site-footer">Made with ❤️ by Eliot &amp; XiaoXin</footer>
 {% block modals %}{% endblock %}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="toast toast-chrono" id="toast-chrono" role="status"></div>
 </body>
 </html>
