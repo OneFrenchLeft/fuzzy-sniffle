@@ -88,6 +88,9 @@ def add_security_headers(resp):
         "img-src 'self' data: https:; "
         "font-src 'self'; "
         "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'none'; "
+        "form-action 'self'; "
         "frame-src https://www.youtube.com; "
         "frame-ancestors 'none'"
     )

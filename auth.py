@@ -37,6 +37,12 @@ def rate_limited(key, max_attempts=RATE_LIMIT_MAX, window=RATE_LIMIT_WINDOW):
             del _login_attempts[k]
     return False
 
+def reset_rate_limit(key):
+    # Un login reussi ne doit pas compter comme une tentative : sinon 8
+    # connexions legitimes en 5 min verrouillaient l'utilisateur (partage
+    # d'IP en salle de cours, ca arrive vite).
+    _login_attempts.pop(key, None)
+
 def require_admin(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -69,6 +75,7 @@ def login():
     if not expected:
         return jsonify({'ok': False, 'error': 'login admin non configure'}), 503
     if hmac.compare_digest(candidate.encode('utf-8'), expected.encode('utf-8')):
+        reset_rate_limit('admin_login_' + ip)
         session['admin'] = True
         session.permanent = True
         return jsonify({'ok': True})
@@ -105,6 +112,7 @@ def sr_login():
     if not stored or not hmac.compare_digest(stored, EMOJI_SEP.join(emojis)):
         return jsonify({'ok': False, 'error': 'bad password'}), 403
 
+    reset_rate_limit('sr_login_' + ip + '_' + prenom)
     session['sr_user'] = prenom
     session.permanent = True
     conn = db()

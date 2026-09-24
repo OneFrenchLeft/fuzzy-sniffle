@@ -61,5 +61,31 @@ qcm_engine.register(socketio, DATA,
 
 init_db()
 
+
+def _streak_guard_loop():
+    """Gardien des streaks 100% cote site : clot la journee a 23h55 (Paris).
+
+    Le site doit fonctionner sans le bot Discord : la depense des jokers et la
+    validation des jours ne dependent d'aucun service externe. Le bot ne fait
+    que lire les resultats pour envoyer des DM. Idempotent, une fois par jour.
+    """
+    from streak import close_all_missed_days
+    last_run = {'day': None}
+    while True:
+        try:
+            now = now_paris()
+            today = now.date().isoformat()
+            if (now.hour, now.minute) >= (23, 55) and last_run['day'] != today:
+                last_run['day'] = today
+                results = close_all_missed_days(read_params(), reason='site_guard')
+                spent = [p for p, r in results.items() if 'joker_spent' in r['events']]
+                print(f'[streak-guard] cloture site {today}: {len(results)} eleves, jokers depenses: {spent}')
+        except Exception as exc:
+            print(f'[streak-guard] boucle site: {exc!r}')
+        socketio.sleep(30)
+
+
+socketio.start_background_task(_streak_guard_loop)
+
 if __name__ == '__main__':
     app.run(debug=False)

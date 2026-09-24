@@ -13,8 +13,8 @@ Regles metier :
   - chaque mouvement de stock est trace dans joker_ledger (append-only).
 """
 from datetime import datetime, timedelta
-from config import JOKER_CAP, JOKER_EVERY, now_paris
-from db import log_event, apply_joker_change
+from config import JOKER_CAP, JOKER_EVERY, now_paris, read_params
+from db import db, log_event, apply_joker_change
 
 
 def activity_days(conn, prenom):
@@ -130,6 +130,81 @@ def streak_verdict(conn, prenom, params, when=None, prediction=False):
         "SELECT 1 FROM events WHERE prenom=? AND substr(created_at,1,10)=? "
         "AND type IN ('sr_open','login','review') LIMIT 1", (prenom, today)).fetchone()
     return 'validated' if has_activity else 'inactive'
+
+
+def close_missed_days(conn, prenom, params, reason='guard_spend', max_back=62):
+    """Cloture TOUS les jours passes non clotures, pas seulement hier.
+
+    Le site doit rester autonome : si le bot Discord est coupe (ou supprime),
+    aucun jour ne doit passer entre les gouttes — sinon une absence couverte
+    par un joker est perdue definitivement. Idempotent : close_day renvoie
+    'already' pour les jours deja traites, relancer ne coute rien.
+    Retourne {day: outcome} pour les jours reellement traites.
+    """
+    today = now_paris().date()
+    row = conn.execute(
+        "SELECT MIN(d) AS first_day FROM ("
+        "  SELECT substr(created_at,1,10) AS d FROM reviews WHERE prenom=?"
+        "  UNION SELECT day AS d FROM sr_daily_streak WHERE prenom=?"
+        "  UNION SELECT substr(created_at,1,10) AS d FROM events WHERE prenom=?"
+        ")", (prenom, prenom, prenom)).fetchone()
+    first_day = row['first_day'] if row else None
+    if not first_day:
+        return {}
+    try:
+        start = datetime.strptime(first_day, '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        return {}
+    start = max(start, today - timedelta(days=max_back))
+    outcomes = {}
+    cursor = start
+    while cursor < today:
+        day = cursor.isoformat()
+        outcome = close_day(conn, prenom, day, params, reason=reason)
+        if outcome != 'already':
+            outcomes[day] = outcome
+        cursor += timedelta(days=1)
+    return outcomes
+
+
+def close_all_missed_days(params=None, reason='site_guard'):
+    """Cloture rattrapante pour tous les eleves + reconciliation des paliers.
+
+    C'est LE gardien des streaks cote site : il peut etre appele par la boucle
+    interne de l'app (23h55), par une route interne, ou manuellement. Le bot
+    Discord ne fait que lire les resultats pour envoyer les DM.
+    Retourne {prenom: {'streak': int, 'events': [...], 'jokers': int, 'closed': {...}}}.
+    """
+    params = params or read_params()
+    conn = db()
+    users = [r['prenom'] for r in conn.execute(
+        "SELECT prenom FROM users WHERE prenom != 'admin'").fetchall()]
+    results = {}
+    for prenom in users:
+        try:
+            events = []
+            outcomes = close_missed_days(conn, prenom, params, reason=reason)
+            if 'joker_spent' in outcomes.values():
+                events.append('joker_spent')
+            jk_before = conn.execute('SELECT count FROM user_jokers WHERE prenom=?',
+                                     (prenom,)).fetchone()
+            before = jk_before['count'] if jk_before else 0
+            streak = reconcile_streak(conn, prenom)
+            jk_after = conn.execute('SELECT count FROM user_jokers WHERE prenom=?',
+                                    (prenom,)).fetchone()
+            after = jk_after['count'] if jk_after else 0
+            if after > before:
+                events.append('joker_awarded')
+                log_event(conn, prenom, 'joker_awarded', f'streak={streak}')
+            results[prenom] = {'streak': streak, 'events': events, 'jokers': after,
+                               'closed': outcomes}
+        except Exception as exc:
+            print(f'[streak-guard] {prenom}: {exc!r}')
+            conn.rollback()
+            continue
+    conn.commit()
+    conn.close()
+    return results
 
 
 def reconcile_streak(conn, prenom):

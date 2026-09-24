@@ -8,7 +8,7 @@ from db import db, ensure_db, log_event, csv_safe, csv_response
 from helpers import card_label, card_exists, interleave_by_chapitre, parse_duration_seconds
 from replay import replay_reviews, get_user_weights
 from streak import (compute_streak, activity_days, compute_record,
-                     reconcile_streak, streak_verdict, close_day)
+                     reconcile_streak, streak_verdict, close_missed_days)
 from auth import require_admin, require_sr_user
 import qcm_engine
 import io, csv
@@ -61,8 +61,10 @@ def sr_today():
     conn.commit()
 
     try:
-        close_day(conn, prenom, (now_paris().date() - timedelta(days=1)).isoformat(),
-                  params, reason='sr_open_spend')
+        # Rattrapage complet : pas seulement hier. Si l'eleve n'a pas ouvert le
+        # site pendant plusieurs jours, chaque jour manquant est cloture (joker
+        # depense si necessaire) — la streak ne depend plus du bot Discord.
+        close_missed_days(conn, prenom, params, reason='sr_open_spend')
     except Exception:
         pass
 

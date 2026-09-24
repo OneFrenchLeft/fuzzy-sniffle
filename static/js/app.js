@@ -1851,6 +1851,9 @@ function loadSrToday() {
           // it STAYS visible in its own toast until "J'ai fini".
           if (!cardStartTimes[numero]) {
             cardStartTimes[numero] = Date.now();
+            // Annonce explicite du demarrage : le toast chrono persistant
+            // prend le relais une seconde plus tard.
+            showToast('⏱️ Minuteur lancé — fiche n°' + numero);
           }
           updateChrono();
         });

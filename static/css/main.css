@@ -175,16 +175,6 @@ textarea{font-weight:400;resize:vertical;min-height:80px}
 /* XiaoXin: confetti renders above modals on purpose */
 #confetti-canvas{position:fixed;inset:0;pointer-events:none;z-index:200}
 
-.draw-box { position: relative; }
-.hs-toggle {
-  position: absolute;
-  top: -12px;
-  right: calc(50% - 90px);
-  display: flex;
-  align-items: center;
-  gap: .45rem;
-  z-index: 2;
-}
 .hs-toggle-label {
   font-size: .62rem;
   text-transform: uppercase;
@@ -274,6 +264,8 @@ details.public-card[open] .card-chevron{transform:rotate(180deg)}
 .sr-actions .advance-row{margin-top:.5rem}
 .sr-actions .advance-row button{width:auto;padding:.55rem .8rem}
 .sr-name,.sr-help-title{font-weight:700}
+/* Titres longs et notes : jamais de debordement horizontal sur petit ecran */
+.sr-name,.admin-row .name,.note-item,.fiche-titre,.public-card .name{overflow-wrap:anywhere;min-width:0}
 .sr-meta,.forecast-badge{font-size:.85rem;color:var(--muted)}
 .sr-grade-row,.sr-help-grid{display:grid;gap:.4rem}
 .sr-grade-row{grid-template-columns:repeat(4,1fr)}
@@ -528,7 +520,10 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
   .sr-actions{margin-top:1rem}
   .sr-block{margin-top:1rem}
   .modal-overlay{padding:0}
-  .modal-box,.modal-box.narrow{width:100%;min-height:100dvh;margin:0;border-radius:0;border:none;padding:1rem}
+  .modal-box{width:100%;min-height:100dvh;margin:0;border-radius:0;border:none;padding:1rem}
+  /* Les petites boites (note de blocage, edition, confirmation) restent des
+     cartes flottantes : le plein ecran pour deux boutons, c'est brutal. */
+  .modal-box.narrow,#confirm-overlay .modal-box{width:min(460px,calc(100vw - 2rem));min-height:0;max-height:calc(100dvh - 2rem);overflow-y:auto;margin:1rem auto;border-radius:var(--radius-lg);border:1px solid var(--border)}
   .modal-topbar{position:sticky;top:0;background:var(--surface);padding-bottom:.75rem;z-index:2}
   .search-clear{min-height:0}
 
