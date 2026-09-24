@@ -481,6 +481,9 @@ function checkPw() {
     function () {
       document.getElementById('pw-gate').style.display = 'none';
       document.getElementById('admin-form').style.display = 'block';
+      // Plein ecran une fois connecte : la carte blanche disparait, le
+      // login (avant connexion) garde exactement son rendu d'origine.
+      document.getElementById('view-admin').classList.add('admin-on');
 
       loadChapitres().then(function () {
         loadParams();
@@ -1134,12 +1137,14 @@ function initProbaBox() {
       t = setTimeout(function () { if (probaLoaded) loadProbaSim(); }, 400);
     });
   }
-  box.addEventListener('toggle', function () {
-    if (box.open && !probaLoaded) {
-      probaLoaded = true;
-      loadProbaSim();
-    }
-  });
+  // Le volet n'est plus repliable : la simulation se lance a la premiere
+  // ouverture de l'onglet « Probabilites » (appele par le script de nav
+  // de admin.html), jamais au chargement de la page.
+  window.loadProbaSimOnce = function () {
+    if (probaLoaded) return;
+    probaLoaded = true;
+    loadProbaSim();
+  };
 }
 
 var MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
@@ -1616,6 +1621,13 @@ function renderFailureNotes() {
     box.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">Aucune note de blocage visible.</p>';
   }
   visibles.forEach(function (r) { box.appendChild(buildNoteItem(r, false)); });
+  // Badge de notification sur l'onglet « Notes de blocage » : visible
+  // uniquement tant qu'il reste des notes a traiter.
+  var badge = document.getElementById('notes-badge');
+  if (badge) {
+    badge.hidden = visibles.length === 0;
+    badge.textContent = visibles.length;
+  }
   var toggle = document.getElementById('notes-masked-toggle');
   var maskedBox = document.getElementById('failure-notes-masked');
   if (toggle) toggle.style.display = 'none';

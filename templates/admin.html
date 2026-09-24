@@ -1,6 +1,34 @@
 {% extends "base.html" %}
 {% block title %}Admin{% endblock %}
 {% block content %}
+<style>
+/* Interface admin seulement. Le formulaire de login est hors de ce conteneur. */
+/* Aucun sélecteur du panneau de connexion : seul #admin-form est restylisé. */
+.admin-workspace {color:var(--text);font-family:var(--font);}
+.admin-workspace .atelier-shell {display:grid;grid-template-columns:225px minmax(0,1fr);gap:1.3rem;align-items:start}
+.admin-workspace .atelier-nav {position:sticky;top:5rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:.85rem;max-height:calc(100vh - 6rem);overflow:auto}
+.admin-workspace .atelier-nav h2 {font-size:1rem;color:var(--primary);margin:.3rem .7rem 1rem}
+.admin-workspace .atelier-nav small {display:block;margin:1.1rem .7rem .4rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.admin-workspace .atelier-nav button {display:block;width:100%;text-align:left;border:0;border-radius:var(--radius);padding:.62rem .7rem;font:inherit;color:var(--text);background:transparent;cursor:pointer}
+.admin-workspace .atelier-nav button:hover {background:var(--bg)}
+.admin-workspace .atelier-nav button[aria-current=page] {background:color-mix(in srgb,var(--primary) 12%,var(--surface));color:var(--primary);font-weight:800}
+.admin-workspace .atelier-badge {display:inline-block;min-width:1.25em;padding:.05em .4em;margin-left:.4rem;border-radius:999px;background:#c0392b;color:#fff;font-size:.72rem;font-weight:700;text-align:center;vertical-align:middle}
+.admin-workspace .atelier-badge[hidden] {display:none}
+.admin-workspace .atelier-main {min-width:0}
+.admin-workspace .atelier-view[hidden] {display:none!important}
+.admin-workspace .atelier-heading {padding:.2rem 0 1rem;border-bottom:1px solid var(--border);margin-bottom:1rem}
+.admin-workspace .atelier-heading h2 {margin:0;color:var(--text);font-size:1.55rem}
+.admin-workspace .atelier-heading p {color:var(--muted);margin:.25rem 0 0;font-size:.86rem}
+.admin-workspace .import-box {background:var(--surface)}
+.admin-workspace .btn-save,.admin-workspace .btn-ghost {max-width:max-content}
+.admin-workspace .weak-table {width:100%}
+.admin-workspace :is(button,select,input,summary):focus-visible {outline:2px solid var(--primary);outline-offset:2px}
+/* Une fois connecte : plus d'effet carte, l'atelier prend presque tout
+   l'ecran (marges laterales conservees). Avant connexion, la vue garde
+   sa largeur normale : le login est strictement identique. */
+#view-admin.admin-on {max-width:1500px}
+#view-admin.admin-on .panel {background:transparent;border:none;box-shadow:none;border-radius:0;padding:0 1rem}
+</style>
   <section class="view active" id="view-admin">
     <div class="panel">
       <div id="pw-gate">
@@ -12,39 +40,7 @@
         </div>
         <button class="btn-save" onclick="checkPw()">Entrer <span id="login-spinner" class="spinner" style="display:none"></span></button>
       </div>
-      <div id="admin-form" style="display:none">
-        <h2>Parametres de l'opération MADec</h2>
-        <div class="fields-grid">
-          <div class="field"><label for="f-max-active">Numero max tirable</label><input type="number" id="f-max-active" min="1"></div>
-          <div class="field"><label for="f-max-kholle">Numero max kholle (mode colle)</label><input type="number" id="f-max-kholle" min="0"></div>
-          <div class="field"><label for="f-max-hs">Hors-série max tirable</label><input type="number" id="f-max-hs" min="0"></div>
-          <div class="field"><label for="f-fsrs-retention">Retention cible FSRS (%)</label><input type="number" id="f-fsrs-retention" step="1" min="70" max="97"></div>
-          <div class="field"><label for="f-daily-new">Nouvelles fiches / jour</label><input type="number" id="f-daily-new" step="1" min="0" max="50"></div>
-          <div class="field"><label for="f-daily-review">Revisions dues / jour</label><input type="number" id="f-daily-review" step="1" min="0" max="50"></div>
-        </div>
-        <button class="btn-save" onclick="saveParams()">Enregistrer</button>
-        <div class="saved-msg" id="saved-msg">Parametres enregistrés</div>
-
-        <details class="import-box fold" id="proba-box" style="margin-top:1rem">
-          <summary><h3>Probabilités de tirage (kholle)</h3></summary>
-          <p class="home-subtitle" style="text-align:left;margin:.5rem 0 1rem;font-size:.85rem">
-            Fréquences observées sur <strong id="proba-sims">10 000</strong> simulations du vrai algorithme de tirage
-            (mêmes filtres, mêmes poids, même échantillonnage sans remise). Seules les fiches incluses
-            dans la simulation de kholle apparaissent.
-          </p>
-          <div class="hs-toggle" id="proba-hs-toggle" style="margin-bottom:1rem">
-            <span class="hs-toggle-label">Inclure les hors-série</span>
-            <button type="button" class="hs-switch" id="proba-hs-switch" role="switch" aria-checked="false" aria-label="Inclure les forgecards hors-série"></button>
-          </div>
-          <div class="field" style="max-width:220px">
-            <label for="proba-count">Fiches tirées par simulation</label>
-            <input type="number" id="proba-count" min="1" max="10" value="1">
-          </div>
-          <div id="proba-status" class="hint" style="margin:.5rem 0">Ouvre le volet pour lancer la simulation.</div>
-          <div id="proba-chart" style="display:grid;gap:.35rem;margin-top:.75rem"></div>
-        </details>
-
-        <div class="import-box" style="margin-top:1.5rem">
+      <div id="admin-form" style="display:none"><div class="admin-workspace"><div class="atelier-shell"><nav class="atelier-nav" aria-label="Rubriques de l’administration"><h2>Atelier admin</h2><small>Fiches</small><button type="button" data-atelier="cards" aria-current="page">Fiches &amp; import</button><button type="button" data-atelier="proba">Probabilités</button><button type="button" data-atelier="settings">Paramètres</button><small>QCM</small><button type="button" data-atelier="qcm">Éditeur &amp; aperçu</button><button type="button" data-atelier="qcmstats">Résultats &amp; parties</button><small>Suivi</small><button type="button" data-atelier="students">Élèves</button><button type="button" data-atelier="notes">Notes de blocage<span class="atelier-badge" id="notes-badge" hidden></span></button><button type="button" data-atelier="class">Statistiques de classe</button><button type="button" data-atelier="exports">Exports</button></nav><div class="atelier-main"><section class="atelier-view" id="atelier-cards"><div class="atelier-heading"><h2>Forgecards</h2><p>Importer, consulter et gérer les fiches.</p></div><div class="import-box" style="margin-top:1.5rem">
           <h3>Importer une fiche</h3>
           <div class="fields-grid">
             <div class="field"><label for="up-numero">Numero</label><input type="number" id="up-numero" min="1"></div>
@@ -59,9 +55,7 @@
           <div class="field"><label for="up-bareme">Bareme PDF (optionnel)</label><input type="file" id="up-bareme" accept=".pdf"></div>
           <button class="btn-save" onclick="uploadFiche()">Importer <span id="upload-spinner" class="spinner" style="display:none"></span></button>
           <div id="upload-status" style="margin-top:.5rem;font-size:.85rem"></div>
-        </div>
-
-        <div class="import-box">
+        </div><div class="import-box">
           <h3>Fiches importées</h3>
           <div class="fiche-picker">
             <button class="picker-nav" id="fiche-prev" title="Fiche précédente" aria-label="Fiche précédente">←</button>
@@ -69,28 +63,36 @@
             <button class="picker-nav" id="fiche-next" title="Fiche suivante" aria-label="Fiche suivante">→</button>
           </div>
           <div id="admin-list"></div>
-        </div>
-
-        <details class="import-box fold" id="eleves-box">
-          <summary><h3>Élèves et suivi</h3></summary>
-          <div class="fields-grid">
-            <div class="field" style="grid-column:1/-1"><label for="new-prenom">Ajouter un élève</label><input type="text" id="new-prenom" placeholder="Ex: Lea"></div>
+        </div></section><section class="atelier-view" id="atelier-proba" hidden><div class="atelier-heading"><h2>Probabilités de tirage</h2><p>Simulation de khôlle ; le calcul se lance à l’ouverture de cet onglet.</p></div><div class="import-box" id="proba-box">
+          <p class="home-subtitle" style="text-align:left;margin:.5rem 0 1rem;font-size:.85rem">
+            Fréquences observées sur <strong id="proba-sims">10 000</strong> simulations du vrai algorithme de tirage
+            (mêmes filtres, mêmes poids, même échantillonnage sans remise). Seules les fiches incluses
+            dans la simulation de kholle apparaissent.
+          </p>
+          <div class="hs-toggle" id="proba-hs-toggle" style="margin-bottom:1rem">
+            <span class="hs-toggle-label">Inclure les hors-série</span>
+            <button type="button" class="hs-switch" id="proba-hs-switch" role="switch" aria-checked="false" aria-label="Inclure les forgecards hors-série"></button>
           </div>
-          <button class="btn-save" onclick="addPrenom()">Ajouter</button>
-          <div id="inactive-alert" style="margin-top:1rem"></div>
-          <div class="admin-list" id="stats-list"></div>
-        </details>
-
-        
-        <div class="import-box">
-          <h3>Notes de blocage des eleves</h3>
-          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">Commentaires laisses par les eleves quand ils cliquent "Pas reussi", les plus recents en premier.</p>
-          <div id="failure-notes-list"></div>
-          <button type="button" class="toggle-btn" id="notes-masked-toggle" style="display:none;margin-top:.5rem"></button>
-          <div id="failure-notes-masked"></div>
+          <div class="field" style="max-width:220px">
+            <label for="proba-count">Fiches tirées par simulation</label>
+            <input type="number" id="proba-count" min="1" max="10" value="1">
+          </div>
+          <div id="proba-status" class="hint" style="margin:.5rem 0">La simulation se lance à l'ouverture de cet onglet.</div>
+          <div id="proba-chart" style="display:grid;gap:.35rem;margin-top:.75rem"></div>
+        </div></section><section class="atelier-view" id="atelier-settings" hidden><div class="atelier-heading"><h2>Paramètres</h2><p>Réglages du tirage et de la répétition espacée.</p></div><div class="import-box">
+        <div class="fields-grid">
+          <div class="field"><label for="f-max-active">Numero max tirable</label><input type="number" id="f-max-active" min="1"></div>
+          <div class="field"><label for="f-max-kholle">Numero max kholle (mode colle)</label><input type="number" id="f-max-kholle" min="0"></div>
+          <div class="field"><label for="f-max-hs">Hors-série max tirable</label><input type="number" id="f-max-hs" min="0"></div>
+          <div class="field"><label for="f-fsrs-retention">Retention cible FSRS (%)</label><input type="number" id="f-fsrs-retention" step="1" min="70" max="97"></div>
+          <div class="field"><label for="f-daily-new">Nouvelles fiches / jour</label><input type="number" id="f-daily-new" step="1" min="0" max="50"></div>
+          <div class="field"><label for="f-daily-review">Revisions dues / jour</label><input type="number" id="f-daily-review" step="1" min="0" max="50"></div>
+        </div>
+        <button class="btn-save" onclick="saveParams()">Enregistrer</button>
+        <div class="saved-msg" id="saved-msg">Parametres enregistrés</div>
         </div>
 
-        <div class="import-box" id="qcm-editor-box">
+        </section><section class="atelier-view" id="atelier-qcm" hidden><div class="atelier-heading"><h2>Éditeur QCM</h2><p>Éditer puis tester les questions sans quitter l’atelier.</p></div><div class="import-box" id="qcm-editor-box">
           <div class="modal-topbar">
             <div>
               <h3>Éditeur QCM web</h3>
@@ -152,9 +154,7 @@
           </div>
 
           <div id="qcm-editor-status" class="saved-msg" role="status" aria-live="polite"></div>
-        </div>
-
-    <div class="import-box" id="qcm-preview-box">
+        </div><div class="import-box" id="qcm-preview-box">
       <div class="modal-topbar">
         <div>
           <h3>Tester une question QCM</h3>
@@ -213,10 +213,8 @@
           </p>
         </div>
       </div>
-    </div>
-
-        <details class="import-box fold" id="qcm-weak-box">
-          <summary><h3>Questions QCM les plus ratées</h3></summary>
+    </div></section><section class="atelier-view" id="atelier-qcmstats" hidden><div class="atelier-heading"><h2>Résultats QCM</h2><p>Analyser les questions et retrouver les parties.</p></div><div class="import-box" id="qcm-weak-box">
+          <h3>Questions QCM les plus ratées</h3>
           <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">
             Statistiques cumulées de toutes les QCM (tous élèves confondus).
             Le taux d'échec compte les réponses fausses ET les absences de réponse (temps écoulé).
@@ -239,24 +237,28 @@
           </div>
           <button type="button" class="btn-ghost btn-small" onclick="loadWeakQcm()">⟳ Recharger</button>
           <div id="qcm-weak-table" style="margin-top:.75rem"></div>
-        </details>
-
-        <details class="import-box fold" id="qcm-games-box">
-          <summary><h3>Dernières parties QCM</h3></summary>
+        </div><div class="import-box" id="qcm-games-box">
+          <h3>Dernières parties QCM</h3>
           <div id="qcm-games-table" style="margin-top:.5rem"></div>
-        </details>
-
-        <details class="import-box fold" id="stats-overview-box">
-          <summary><h3>Statistiques de la classe</h3></summary>
+        </div></section><section class="atelier-view" id="atelier-students" hidden><div class="atelier-heading"><h2>Élèves &amp; suivi</h2><p>Comptes, decks individuels, jokers et activité.</p></div><div class="import-box" id="eleves-box">
+          <div class="fields-grid">
+            <div class="field" style="grid-column:1/-1"><label for="new-prenom">Ajouter un élève</label><input type="text" id="new-prenom" placeholder="Ex: Lea"></div>
+          </div>
+          <button class="btn-save" onclick="addPrenom()">Ajouter</button>
+          <div id="inactive-alert" style="margin-top:1rem"></div>
+          <div class="admin-list" id="stats-list"></div>
+        </div></section><section class="atelier-view" id="atelier-notes" hidden><div class="atelier-heading"><h2>Notes de blocage</h2><p>Consulter les commentaires laissés après un échec.</p></div><div class="import-box">
+          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">Commentaires laisses par les eleves quand ils cliquent "Pas reussi", les plus recents en premier.</p>
+          <div id="failure-notes-list"></div>
+          <button type="button" class="toggle-btn" id="notes-masked-toggle" style="display:none;margin-top:.5rem"></button>
+          <div id="failure-notes-masked"></div>
+        </div></section><section class="atelier-view" id="atelier-class" hidden><div class="atelier-heading"><h2>Statistiques de classe</h2><p>Calculer les indicateurs à la demande.</p></div><div class="import-box" id="stats-overview-box">
           <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">
             Calculées à la demande à partir du journal brut (rien n'est pré-agrégé, tout est recalculé).
           </p>
           <button type="button" class="btn-ghost btn-small" onclick="loadStatsOverview()">⟳ Calculer / Rafraîchir</button>
           <div id="stats-overview" style="margin-top:.75rem"></div>
-        </details>
-
-        <div class="import-box">
-          <h3>Export</h3>
+        </div></section><section class="atelier-view" id="atelier-exports" hidden><div class="atelier-heading"><h2>Exports</h2><p>Télécharger les données et rapports existants.</p></div><div class="import-box">
           <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">Exports pour regarder en fin d'année.</p>
           <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem">
             <button class="btn-ghost btn-small" onclick="exportCsv('activite-quotidienne')">Activité quotidienne (élève × jour)</button>
@@ -268,9 +270,17 @@
           <button class="btn-ghost" onclick="exportCSV()">Exporter data FSRS (CSV)</button>
           <p class="home-subtitle" style="text-align:left;margin:.75rem 0;font-size:.8rem">Export par fiche : une ligne par fiche avec les stats moyennes de tous les eleves pour chaque fiche.</p>
           <button class="btn-ghost" onclick="exportStatsByCard()">Exporter stats des fiche (CSV)</button>
-        </div>
-
-      </div>
+        </div></section></div></div></div><script>(function(){
+var root=document.querySelector('#admin-form .admin-workspace');if(!root)return;
+var buttons=Array.from(root.querySelectorAll('[data-atelier]'));
+function open(key){
+  buttons.forEach(function(b){if(b.dataset.atelier===key)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
+  root.querySelectorAll('.atelier-view').forEach(function(v){v.hidden=v.id!=='atelier-'+key;});
+  var h=root.querySelector('#atelier-'+key+' .atelier-heading h2');if(h){h.tabIndex=-1;h.focus();}
+  if(key==='proba'&&window.loadProbaSimOnce)window.loadProbaSimOnce();
+}
+buttons.forEach(function(b){b.addEventListener('click',function(){open(b.dataset.atelier);});});
+})();</script></div>
     </div>
   </section>
 {% endblock %}

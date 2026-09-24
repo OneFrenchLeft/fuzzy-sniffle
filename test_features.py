@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests de non-regression des 5 fonctionnalites :
 
-1. Page /probabilites publique + simulation Monte Carlo du tirage kholle.
+1. Volet « Probabilites » dans /admin + simulation Monte Carlo du tirage kholle.
 2. Colonne kholle_enabled : migration, filtre du tirage kholle, route admin.
 3. Panneau admin « weak QCM » : questions jamais abordees exclues.
 4. Encart jokers sur /compte.
@@ -97,16 +97,18 @@ r = client.post('/api/forgecards/4/kholle', json={'enabled': False})
 assert r.get_json()['kholle_enabled'] == 0
 print('TEST 3 OK : route /api/forgecards/<n>/kholle protegee et fonctionnelle')
 
-# ---------- Feature 1 : page /probabilites ----------
-r = client.get('/probabilites')  # sans login
+# ---------- Feature 1 : volet Probabilites dans la page admin ----------
+# (Refonte amont : la page dediee /probabilites a ete remplacee par un volet
+# integre a /admin, branche sur la meme API ; l'atelier le montre sans pli.)
+r = client.get('/admin')
 assert r.status_code == 200, r.status_code
-# Aucun lien public : ni la nav, ni la page compte ne mentionnent la route.
+admin_html = r.get_data(as_text=True)
+assert 'id="proba-box"' in admin_html and 'proba-chart' in admin_html
+# Aucun lien public : ni la nav, ni la page compte ne mentionnent la simulation.
 base = (config.TEMPLATES / 'base.html').read_text(encoding='utf-8')
 compte = (config.TEMPLATES / 'compte.html').read_text(encoding='utf-8')
-assert '/probabilites' not in base and '/probabilites' not in compte
-admin_tpl = (config.TEMPLATES / 'admin.html').read_text(encoding='utf-8')
-assert '/probabilites' in admin_tpl, 'le seul lien doit etre dans admin.html'
-print('TEST 4 OK : /probabilites publique, lien uniquement dans admin.html')
+assert 'proba' not in base.lower() and 'proba' not in compte.lower()
+print('TEST 4 OK : volet Probabilites present dans /admin, aucun lien public')
 
 r = client.get('/api/probabilites/data?count=1&sims=1000')
 d = r.get_json()
