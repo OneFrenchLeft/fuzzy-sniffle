@@ -1039,6 +1039,41 @@ async def daily_reminder():
     bots.close()
 
 
+DROP_ANNOUNCE_HOUR = 6
+DROP_ANNOUNCE_MINUTE = 7
+# Au-dela de cette heure le soir, un drop est retenu jusqu'au 6h07 suivant :
+# un message a 23h passe inapercu (Eliot a incremente N a 23h, personne n'a
+# vu l'annonce). Aligné sur l'heure du rappel quotidien.
+DROP_HOLD_FROM_HOUR = 21
+
+
+def plan_drop_announcement(nums, last, pending_str, now):
+    """Decide ce que watch_new_cards fait d'un lot de fiches tirables.
+
+    Retourne (action, announce, new_pending, new_last) :
+      'init'     -> premier demarrage : tout l'existant est considere connu
+      'sync'     -> rien de neuf ; new_last suit max(nums) (aussi les
+                    reductions, pour re-annoncer si on re-elargit apres)
+      'hold'     -> drops detectes mais avant 6h07 (ou apres 21h le soir) :
+                    on les retient pour le prochain 6h07
+      'announce' -> envoyer `announce` maintenant
+    """
+    if last is None:
+        return 'init', [], '', max(nums) if nums else 0
+    new = {n for n in nums if n > int(last)}
+    pending = set()
+    if pending_str:
+        pending = {int(x) for x in pending_str.split(',') if x.strip()}
+    pending |= new
+    if not pending:
+        return 'sync', [], '', max(nums) if nums else 0
+    hm = (now.hour, now.minute)
+    if hm < (DROP_ANNOUNCE_HOUR, DROP_ANNOUNCE_MINUTE) or hm >= (DROP_HOLD_FROM_HOUR, 0):
+        return 'hold', [], ','.join(str(n) for n in sorted(pending)), int(last)
+    announce = sorted(n for n in pending if n in set(nums))
+    return 'announce', announce, '', max(nums) if nums else 0
+
+
 @tasks.loop(minutes=2)
 async def watch_new_cards():
     ch_id = get_setting('channel_id')
@@ -1052,19 +1087,23 @@ async def watch_new_cards():
     conn.close()
     nums = [r[0] for r in rows]
 
-    last = get_setting('last_announced_num')
-    if last is None:
-        # premier demarrage : tout ce qui est deja tirable est considere connu
-        set_setting('last_announced_num', max(nums) if nums else 0)
+    # Eliot: le drop s'annonce au passage de 6h07, pas a l'heure de
+    # l'increment : les nouvelles fiches ne deviennent dues que le
+    # lendemain (sr.py), l'annonce suit le meme rythme. Un increment a
+    # 23h attend donc le matin au lieu de passer inapercu.
+    action, announce, new_pending, new_last = plan_drop_announcement(
+        nums, get_setting('last_announced_num'),
+        get_setting('pending_drop_nums') or '', datetime.now(TZ_PARIS))
+    if action in ('init', 'sync'):
+        set_setting('last_announced_num', new_last)
         return
-
-    new = [n for n in nums if n > int(last)]
-    if not new:
-        # Suit AUSSI les réductions du max tirable : si tu ré-élargis ensuite,
-        # les fiches redevenues disponibles seront annoncées comme un drop.
-        set_setting('last_announced_num', max(nums) if nums else 0)
+    if action == 'hold':
+        set_setting('pending_drop_nums', new_pending)
         return
-    set_setting('last_announced_num', max(new))
+    set_setting('pending_drop_nums', '')
+    set_setting('last_announced_num', new_last)
+    if not announce:
+        return
 
     channel = client.get_channel(int(ch_id))
     if channel is None:
@@ -1074,15 +1113,15 @@ async def watch_new_cards():
             return
     role = discord.utils.get(channel.guild.roles, name=NOTIF_ROLE_NAME)
     mention = f'{role.mention} ' if role else ''
-    if len(new) <= 5:
-        detail = ', '.join(f'n°{n}' for n in new)
+    if len(announce) <= 5:
+        detail = ', '.join(f'n°{n}' for n in announce)
         await channel.send(
-            f"📦 {mention}**Drop de forgecards** : {plural(len(new), 'nouvelle forgecard')} "
+            f"📦 {mention}**Drop de forgecards** : {plural(len(announce), 'nouvelle forgecard')} "
             f"maintenant tirables ({detail}) !")
     else:
         await channel.send(
-            f"📦 {mention}**Gros drop** : {plural(len(new), 'nouvelle forgecard')} "
-            f"maintenant tirables (jusqu'à la n°{max(new)}) !")
+            f"📦 {mention}**Gros drop** : {plural(len(announce), 'nouvelle forgecard')} "
+            f"maintenant tirables (jusqu'à la n°{max(announce)}) !")
 
 
 @tasks.loop(seconds=15)

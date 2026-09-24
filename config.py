@@ -134,15 +134,43 @@ def read_params():
                 out[k] = float(data.get(k, default))
         except (TypeError, ValueError):
             out[k] = default
+    # Marqueur prive : date et ancienne valeur du dernier increment de
+    # max_active_num. sr.py s'en sert pour ne rendre les nouvelles fiches
+    # dues que le lendemain de l'increment (sinon le garde de streak de
+    # 23h55 les compte et crame des jokers). Cle '_' : jamais exposee a
+    # l'admin, jamais dans DEFAULT_PARAMS.
+    inc = data.get('_max_active_increment')
+    if isinstance(inc, dict):
+        try:
+            out['_max_active_increment'] = {
+                'date': str(inc.get('date', '')),
+                'from': int(inc.get('from', 0)),
+            }
+        except (TypeError, ValueError):
+            pass
     if not PARAMS_PATH.exists():
         PARAMS_PATH.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding='utf-8')
     return out
 
 def write_params(data):
     merged = read_params()
+    prev_max = int(merged.get('max_active_num', 0) or 0)
     for k in DEFAULT_PARAMS:
         if k in data:
             merged[k] = data[k]
+    try:
+        new_max = int(merged.get('max_active_num', 0) or 0)
+    except (TypeError, ValueError):
+        new_max = prev_max
+    if new_max > prev_max:
+        # Increment : les fiches au-dela de l'ancien max ne deviennent dues
+        # que demain (consomme par sr.py, annonce drop du bot a 6h07).
+        merged['_max_active_increment'] = {
+            'date': now_paris().date().isoformat(),
+            'from': prev_max,
+        }
+    elif new_max < prev_max:
+        merged.pop('_max_active_increment', None)
     PARAMS_PATH.write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding='utf-8')
 
     return read_params()

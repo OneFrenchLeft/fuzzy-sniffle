@@ -52,11 +52,23 @@ def sr_today():
     # Flying: One INSERT...SELECT instead of one SELECT per card on every page
     # load. OR IGNORE keeps existing states untouched; new cards get today's
     # date so they're due immediately, exactly like ensure_sr_row did.
+    # Eliot: sauf les fiches rendues tirable par un increment de max_active
+    # aujourd'hui — elles ne deviennent dues que DEMAIN. Sinon un increment
+    # a 23h surprend les eleves connectes et le garde de streak de 23h55
+    # compte ces cartes dans les dues, faisant cramer des jokers.
+    increment = params.get('_max_active_increment') or {}
+    inc_date = str(increment.get('date', ''))
+    try:
+        inc_from = int(increment.get('from', max_active))
+    except (TypeError, ValueError):
+        inc_from = max_active
+    tomorrow = (now_paris().date() + timedelta(days=1)).isoformat()
     conn.execute(
         "INSERT OR IGNORE INTO sr_state_user (prenom, numero, stability, difficulty, state, last_review, next_review, repetitions, lapses) "
-        "SELECT ?, f.numero, NULL, NULL, 'new', NULL, ?, 0, 0 FROM forgecards f "
+        "SELECT ?, f.numero, NULL, NULL, 'new', NULL, "
+        "CASE WHEN f.numero > ? AND ? >= ? THEN ? ELSE ? END, 0, 0 FROM forgecards f "
         "WHERE f.numero <= ? AND f.hors_serie = 0",
-        (prenom, today, max_active)
+        (prenom, inc_from, inc_date, today, tomorrow, today, max_active)
     )
     conn.commit()
 
