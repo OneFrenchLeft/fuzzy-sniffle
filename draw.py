@@ -205,7 +205,8 @@ def api_probabilites_data():
     echantillonnage sans remise (weighted_sample_without_replacement).
     Seul le filtre anti-repetition d'historique est ignore : il depend de la
     session, pas de la probabilite de base qu'on veut visualiser.
-    Publique (la page /probabilites est accessible par URL, sans login).
+    Consomme par le volet « Probabilites de tirage » de la page admin
+    (lazy-load a la premiere ouverture). Rate-limitee par IP.
     """
     ip = request.remote_addr or 'unknown'
     if rate_limited('proba_' + ip, max_attempts=60, window=DRAW_RATE_WINDOW):

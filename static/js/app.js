@@ -504,6 +504,7 @@ function checkPw() {
 
       loadWeakQcm();
       loadQcmGames();
+      initProbaBox();
       var soBox = document.getElementById('stats-overview-box');
       if (soBox && !soBox.dataset.bound) {
         soBox.dataset.bound = '1';
@@ -1027,6 +1028,118 @@ function renderWeakQcm() {
   }
   box.innerHTML = html;
   typesetMath(box);
+}
+
+// --- Boite « Probabilités de tirage » (admin) ---
+// La simulation (10 000 tirages) ne tourne qu'à la première ouverture du
+// volet, pas à chaque chargement de la page admin.
+var probaHsOn = false;
+var probaLoaded = false;
+
+function loadProbaSim() {
+  var chart = document.getElementById('proba-chart');
+  var status = document.getElementById('proba-status');
+  var countInput = document.getElementById('proba-count');
+  if (!chart || !status || !countInput) return;
+  var count = Math.max(1, Math.min(10, parseInt(countInput.value, 10) || 1));
+  countInput.value = count;
+  status.textContent = 'Simulation en cours…';
+  chart.innerHTML = '';
+  fetchJson('/api/probabilites/data?hors_serie=' + (probaHsOn ? '1' : '0') + '&count=' + count)
+    .then(function (d) {
+      if (!d || d.ok === false) {
+        status.textContent = (d && d.error) || 'Simulation impossible.';
+        return;
+      }
+      document.getElementById('proba-sims').textContent = d.sims.toLocaleString('fr-FR');
+      if (!d.rows.length) {
+        status.textContent = 'Aucune fiche éligible à la simulation de kholle.';
+        return;
+      }
+      var max = d.rows[0].pct || 1;
+
+      // Médiane du tirage : la fiche où le cumul des probabilités dépasse
+      // 50 %. Au-dessus = une moitié des chances, en dessous = l'autre.
+      var cum = 0;
+      var crossedAt = -1;
+      var beforeCross = 0;
+      d.rows.forEach(function (r, i) {
+        if (crossedAt === -1 && cum < 50 && cum + r.pct >= 50) {
+          crossedAt = i;
+          beforeCross = cum;
+        }
+        cum += r.pct;
+      });
+
+      var markerPctInTrack = crossedAt >= 0
+        ? Math.min(100, Math.max(0, 100 * (50 - beforeCross) / max))
+        : 0;
+
+      var cumRender = 0;
+      d.rows.forEach(function (r, i) {
+        cumRender += r.pct;
+        var w = Math.max(1.5, 100 * r.pct / max);
+        var belowMedian = crossedAt >= 0 && i > crossedAt;
+        var fillColor = r.hors_serie ? '#e67e22' : 'var(--primary)';
+        var fillOpacity = belowMedian ? 'opacity:.38' : '';
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:.5rem;font-size:.82rem';
+        var marker = '';
+        if (i === crossedAt) {
+          marker = '<span title="50 % cumulés ici" style="position:absolute;top:-3px;bottom:-3px;left:' +
+            markerPctInTrack.toFixed(2) + '%;border-left:2px dashed #c0392b"></span>';
+        }
+        row.innerHTML =
+          '<span style="flex:none;width:3.2rem;font-weight:700;text-align:right">' + esc(r.label) + '</span>' +
+          '<span style="flex:1;min-width:0;position:relative;background:var(--border);border-radius:999px;height:1.05rem;overflow:visible">' +
+            '<span style="display:block;height:100%;width:' + w.toFixed(1) + '%;background:' + fillColor + ';border-radius:999px;' + fillOpacity + '"></span>' +
+            marker +
+          '</span>' +
+          '<span style="flex:none;width:4.6rem;font-variant-numeric:tabular-nums;color:var(--muted)">' + r.pct.toFixed(2).replace('.', ',') + ' %</span>';
+        row.title = esc(r.chapitre) + ' — cumul ' + cumRender.toFixed(1).replace('.', ',') + ' %';
+        chart.appendChild(row);
+        if (i === crossedAt) {
+          var caption = document.createElement('div');
+          caption.style.cssText = 'font-size:.72rem;color:var(--muted);margin:-.1rem 0 .1rem 3.7rem';
+          caption.innerHTML = '↖ <strong>50 % cumulés</strong> : autant de chances de tomber sur une fiche au-dessus que sur les ' +
+            (d.rows.length - i) + ' en dessous';
+          chart.appendChild(caption);
+        }
+      });
+      status.innerHTML = d.rows.length + ' fiches éligibles — probabilité d’apparaître dans un tirage de ' +
+        d.count + ' fiche' + (d.count > 1 ? 's' : '') +
+        (crossedAt >= 0 ? ' (barres estompées = l’autre moitié du tirage)' : '') + ' :';
+    })
+    .catch(function () { status.textContent = 'Erreur réseau.'; });
+}
+
+function initProbaBox() {
+  var box = document.getElementById('proba-box');
+  if (!box || box.dataset.bound) return;
+  box.dataset.bound = '1';
+  var sw = document.getElementById('proba-hs-switch');
+  if (sw) {
+    sw.addEventListener('click', function () {
+      probaHsOn = !probaHsOn;
+      sw.classList.toggle('on', probaHsOn);
+      sw.setAttribute('aria-checked', String(probaHsOn));
+      if (probaLoaded) loadProbaSim();
+    });
+  }
+  var countInput = document.getElementById('proba-count');
+  var t = null;
+  if (countInput) {
+    countInput.addEventListener('input', function () {
+      clearTimeout(t);
+      t = setTimeout(function () { if (probaLoaded) loadProbaSim(); }, 400);
+    });
+  }
+  box.addEventListener('toggle', function () {
+    if (box.open && !probaLoaded) {
+      probaLoaded = true;
+      loadProbaSim();
+    }
+  });
 }
 
 var MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
