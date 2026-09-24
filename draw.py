@@ -82,9 +82,15 @@ def compute_weights(cards, pool, params):
     DIFF_MID = 2.5
     DIFF_HALF_RANGE = 2.5
 
-    last_chapter = cards[-1]["chapitre"]
+    # Ethan: Le « dernier chapitre » suit la progression du cours, donc les
+    # fiches normales uniquement. draw_candidates append les hors-serie a la
+    # fin de la liste : sans ce garde, inclure H1 faisait basculer le bonus
+    # « dernier chapitre » sur le chapitre de H1 (souvent celui de la fiche 1,
+    # p. ex. « Introduction »), au lieu de juste diluer les probabilités.
+    sequence = [c for c in cards if not c.get("hors_serie")] or cards
+    last_chapter = sequence[-1]["chapitre"]
     previous_chapter = None
-    for c in reversed(cards):
+    for c in reversed(sequence):
         if c["chapitre"] != last_chapter:
             previous_chapter = c["chapitre"]
             break
