@@ -114,3 +114,9 @@ def get_chapitres():
 def page_papayou():
     return render_template('papayou.html', active='papayou')
 
+@bp.route('/probabilites')
+def page_probabilites():
+    # Page « cachee » : accessible par URL sans login, aucun lien public n'y
+    # mene (le seul lien est dans la page admin). Ne pas l'ajouter a la nav.
+    return render_template('probabilites.html', active='probabilites')
+

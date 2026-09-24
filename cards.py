@@ -21,7 +21,7 @@ bp = Blueprint('cards', __name__)
 def list_forgecards():
     ensure_db()
     conn = db()
-    rows = conn.execute('SELECT numero, code, fiche_file, correction_file, bareme_file, titre, indices, chapitre, teacher_difficulty, hors_serie, created_at FROM forgecards ORDER BY numero ASC').fetchall()
+    rows = conn.execute('SELECT numero, code, fiche_file, correction_file, bareme_file, titre, indices, chapitre, teacher_difficulty, hors_serie, kholle_enabled, created_at FROM forgecards ORDER BY numero ASC').fetchall()
     conn.close()
     out = [dict(r) for r in rows]
     for c in out:
@@ -254,6 +254,26 @@ def edit_forgecard(numero):
     finally:
         conn.close()
     return jsonify({'ok': True, 'numero': numero, 'code': code, 'label': card_label(code, hors_serie_edit)})
+
+@bp.route('/api/forgecards/<int:numero>/kholle', methods=['POST'])
+@require_admin
+def set_kholle_enabled(numero):
+    """Inclut/exclut une fiche de la simulation de kholle UNIQUEMENT.
+
+    La repetition espacee n'est pas touchee : deck SR, revisions et FSRS
+    continuent comme avant pour cette carte.
+    """
+    ensure_db()
+    data = request.get_json(silent=True) or {}
+    enabled = 1 if data.get('enabled', True) else 0
+    conn = db()
+    cur = conn.execute('UPDATE forgecards SET kholle_enabled=? WHERE numero=?', (enabled, numero))
+    conn.commit()
+    conn.close()
+    if cur.rowcount != 1:
+        return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
+    return jsonify({'ok': True, 'numero': numero, 'kholle_enabled': enabled})
+
 
 @bp.route("/api/forgecards/<int:numero>/reset-stats", methods=["POST"])
 @require_admin

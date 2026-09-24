@@ -41,6 +41,74 @@ def weighted_sample_without_replacement(pool, weights, k):
     return chosen
 
 
+def draw_candidates(conn, params, kholle_mode=False, hs_mode=False):
+    """Pool de cartes tirables, avec les memes filtres que le vrai tirage.
+
+    En mode kholle, les fiches marquees kholle_enabled = 0 sont exclues de la
+    simulation (ca ne change rien a la repetition espacee, qui lit sr_state_user).
+    """
+    max_active = int(params.get("max_active_num", 36))
+    max_hs = int(params.get("max_hors_serie_num", 0))
+    max_kholle = int(params.get("max_kholle_num", 0))
+    plafond = max_kholle if (kholle_mode and max_kholle > 0) else max_active
+    kholle_filter = " AND kholle_enabled = 1" if kholle_mode else ""
+
+    rows = conn.execute(
+        "SELECT numero, code, titre, chapitre, fiche_file, correction_file, bareme_file, indices, teacher_difficulty, hors_serie "
+        "FROM forgecards WHERE numero <= ? AND hors_serie = 0" + kholle_filter + " ORDER BY numero ASC",
+        (plafond,)
+    ).fetchall()
+
+    if hs_mode and max_hs > 0:
+        rows += conn.execute(
+            "SELECT numero, code, titre, chapitre, fiche_file, correction_file, bareme_file, indices, teacher_difficulty, hors_serie "
+            "FROM forgecards WHERE hors_serie = 1" + kholle_filter + " ORDER BY numero ASC LIMIT ?",
+            (max_hs,)
+        ).fetchall()
+
+    cards = [dict(r) for r in rows]
+    for c in cards:
+        c['label'] = card_label(c.get('code'), c['hors_serie'])
+    return cards
+
+
+def compute_weights(cards, pool, params):
+    """Poids du tirage pondere : bonus chapitre precedent / dernier chapitre,
+    influence de la difficulte professeur. Meme regle que le tirage reel."""
+    previous_bonus = float(params.get("previous_chapter_bonus", 0.2))
+    last_bonus = float(params.get("last_chapter_bonus", 0.4))
+    diff_weight_param = float(params.get("teacher_difficulty_weight", 0.15))
+
+    DIFF_MID = 2.5
+    DIFF_HALF_RANGE = 2.5
+
+    last_chapter = cards[-1]["chapitre"]
+    previous_chapter = None
+    for c in reversed(cards):
+        if c["chapitre"] != last_chapter:
+            previous_chapter = c["chapitre"]
+            break
+
+    weights = []
+    for c in pool:
+        if c.get("hors_serie"):
+            # Steph: Hors-série gets the same baseline as a difficulty-5 card.
+            normalized = (5.0 - DIFF_MID) / DIFF_HALF_RANGE
+            weights.append(max(0.1, 1 + diff_weight_param * normalized))
+            continue
+        weight = 1.0
+        if previous_chapter is not None and c["chapitre"] == previous_chapter:
+            weight += previous_bonus
+        if c["chapitre"] == last_chapter:
+            weight += last_bonus
+        td = c.get("teacher_difficulty")
+        if td is not None and diff_weight_param:
+            normalized = (float(td) - DIFF_MID) / DIFF_HALF_RANGE
+            weight *= max(0.1, 1 + diff_weight_param * normalized)
+        weights.append(weight)
+    return weights
+
+
 @bp.route('/api/draw', methods=['GET'])
 def api_draw():
     ip = request.remote_addr or 'unknown'
@@ -49,47 +117,17 @@ def api_draw():
     ensure_db()
     params = read_params()
 
-    max_active = int(params.get("max_active_num", 36))
-
     try:
         n = max(1, min(10, int(request.args.get("count", 8))))
     except (TypeError, ValueError):
         # Small: Invalid count? Eight it is. No need to start a crisis.
         n = 8
 
-    previous_bonus = float(params.get("previous_chapter_bonus", 0.2))
-    last_bonus = float(params.get("last_chapter_bonus", 0.4))
-    diff_weight_param = float(params.get("teacher_difficulty_weight", 0.15))
-
-    DIFF_MID = 2.5
-    DIFF_HALF_RANGE = 2.5
-
     hs_mode = request.args.get("hors_serie") == "1"
     kholle_mode = request.args.get("kholle") == "1"
-    max_hs = int(params.get("max_hors_serie_num", 0))
-    max_kholle = int(params.get("max_kholle_num", 0))
 
     conn = db()
-
-    plafond = max_kholle if (kholle_mode and max_kholle > 0) else max_active
-
-    rows = conn.execute(
-        "SELECT numero, code, titre, chapitre, fiche_file, correction_file, bareme_file, indices, teacher_difficulty, hors_serie "
-        "FROM forgecards WHERE numero <= ? AND hors_serie = 0 ORDER BY numero ASC",
-        (plafond,)
-    ).fetchall()
-
-    if hs_mode and max_hs > 0:
-        rows += conn.execute(
-            "SELECT numero, code, titre, chapitre, fiche_file, correction_file, bareme_file, indices, teacher_difficulty, hors_serie "
-            "FROM forgecards WHERE hors_serie = 1 ORDER BY numero ASC LIMIT ?",
-            (max_hs,)
-        ).fetchall()
-
-    cards = [dict(r) for r in rows]
-
-    for c in cards:
-        c['label'] = card_label(c.get('code'), c['hors_serie'])
+    cards = draw_candidates(conn, params, kholle_mode=kholle_mode, hs_mode=hs_mode)
 
     if not cards:
         conn.close()
@@ -113,38 +151,7 @@ def api_draw():
         # Flying: Not enough cards left? Reuse the full pool rather than return nothing.
         pool = cards
 
-    last_chapter = cards[-1]["chapitre"]
-    previous_chapter = None
-
-    for c in reversed(cards):
-        if c["chapitre"] != last_chapter:
-            previous_chapter = c["chapitre"]
-            break
-
-    weights = []
-
-    for c in pool:
-        if c.get("hors_serie"):
-            # Steph: Hors-série gets the same baseline as a difficulty-5 card.
-            normalized = (5.0 - DIFF_MID) / DIFF_HALF_RANGE
-            weights.append(max(0.1, 1 + diff_weight_param * normalized))
-            continue
-
-        weight = 1.0
-
-        if previous_chapter is not None and c["chapitre"] == previous_chapter:
-            weight += previous_bonus
-
-        if c["chapitre"] == last_chapter:
-            weight += last_bonus
-
-        td = c.get("teacher_difficulty")
-
-        if td is not None and diff_weight_param:
-            normalized = (float(td) - DIFF_MID) / DIFF_HALF_RANGE
-            weight *= max(0.1, 1 + diff_weight_param * normalized)
-
-        weights.append(weight)
+    weights = compute_weights(cards, pool, params)
 
     k = min(n, len(pool))
     chosen = weighted_sample_without_replacement(pool, weights, k)
@@ -176,3 +183,58 @@ def api_draw():
     conn.close()
 
     return jsonify(reordered)
+
+
+# ---------- Page « Probabilites » (simulation Monte Carlo du tirage kholle) ----------
+
+SIM_DEFAULT = 10000
+SIM_MIN, SIM_MAX = 1000, 50000
+
+
+@bp.route('/api/probabilites/data', methods=['GET'])
+def api_probabilites_data():
+    """Frequences observees sur N simulations du VRAI tirage kholle.
+
+    Meme pool (kholle_enabled = 1), memes poids (compute_weights), meme
+    echantillonnage sans remise (weighted_sample_without_replacement).
+    Seul le filtre anti-repetition d'historique est ignore : il depend de la
+    session, pas de la probabilite de base qu'on veut visualiser.
+    Publique (la page /probabilites est accessible par URL, sans login).
+    """
+    ip = request.remote_addr or 'unknown'
+    if rate_limited('proba_' + ip, max_attempts=60, window=DRAW_RATE_WINDOW):
+        return jsonify({'ok': False, 'error': 'trop de simulations, patiente un peu'}), 429
+    ensure_db()
+    params = read_params()
+    hs_mode = request.args.get('hors_serie') == '1'
+    try:
+        count = max(1, min(10, int(request.args.get('count', 1))))
+    except (TypeError, ValueError):
+        count = 1
+    try:
+        n_sims = max(SIM_MIN, min(SIM_MAX, int(request.args.get('sims', SIM_DEFAULT))))
+    except (TypeError, ValueError):
+        n_sims = SIM_DEFAULT
+
+    conn = db()
+    cards = draw_candidates(conn, params, kholle_mode=True, hs_mode=hs_mode)
+    conn.close()
+    if not cards:
+        return jsonify({'ok': True, 'sims': n_sims, 'count': count, 'rows': []})
+
+    weights = compute_weights(cards, cards, params)
+    k = min(count, len(cards))
+    hits = {c['numero']: 0 for c in cards}
+    for _ in range(n_sims):
+        for c in weighted_sample_without_replacement(cards, weights, k):
+            hits[c['numero']] += 1
+
+    rows = [{
+        'numero': c['numero'],
+        'label': c['label'],
+        'chapitre': c.get('chapitre') or 'Autre',
+        'hors_serie': bool(c.get('hors_serie')),
+        'pct': round(100.0 * hits[c['numero']] / n_sims, 2),
+    } for c in cards]
+    rows.sort(key=lambda r: -r['pct'])
+    return jsonify({'ok': True, 'sims': n_sims, 'count': count, 'rows': rows})

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Probabilités{% endblock %}
+{% block content %}
+  <section class="view active" id="view-probabilites">
+    <div class="panel">
+      <div class="section-title">Probabilités de tirage (mode kholle)</div>
+      <p class="home-subtitle" style="text-align:left;margin-bottom:1rem;font-size:.85rem">
+        Fréquences observées sur <strong id="proba-sims">10 000</strong> simulations du vrai algorithme de tirage
+        (mêmes filtres, mêmes poids, même échantillonnage sans remise). Seules les fiches incluses
+        dans la simulation de kholle apparaissent.
+      </p>
+
+      <div class="hs-toggle" id="proba-hs-toggle" style="margin-bottom:1rem">
+        <span class="hs-toggle-label">Inclure les hors-série</span>
+        <button type="button" class="hs-switch" id="proba-hs-switch" role="switch" aria-checked="false" aria-label="Inclure les forgecards hors-série"></button>
+      </div>
+
+      <div class="field" style="max-width:220px">
+        <label for="proba-count">Fiches tirées par simulation</label>
+        <input type="number" id="proba-count" min="1" max="10" value="1">
+      </div>
+
+      <div id="proba-status" class="hint" style="margin:.5rem 0">Chargement…</div>
+      <div id="proba-chart" style="display:grid;gap:.35rem;margin-top:.75rem"></div>
+    </div>
+  </section>
+{% endblock %}
+{% block modals %}
+<script>
+(function () {
+  var hsOn = false;
+  var chart = document.getElementById('proba-chart');
+  var status = document.getElementById('proba-status');
+  var sw = document.getElementById('proba-hs-switch');
+  var countInput = document.getElementById('proba-count');
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function load() {
+    var count = Math.max(1, Math.min(10, parseInt(countInput.value, 10) || 1));
+    countInput.value = count;
+    status.textContent = 'Simulation en cours…';
+    chart.innerHTML = '';
+    fetch('/api/probabilites/data?hors_serie=' + (hsOn ? '1' : '0') + '&count=' + count)
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || d.ok === false) {
+          status.textContent = (d && d.error) || 'Simulation impossible.';
+          return;
+        }
+        document.getElementById('proba-sims').textContent = d.sims.toLocaleString('fr-FR');
+        if (!d.rows.length) {
+          status.textContent = 'Aucune fiche éligible à la simulation de kholle.';
+          return;
+        }
+        status.textContent = d.rows.length + ' fiches éligibles — probabilité d’apparaître dans un tirage de ' + d.count + ' fiche' + (d.count > 1 ? 's' : '') + ' :';
+        var max = d.rows[0].pct || 1;
+        d.rows.forEach(function (r) {
+          var w = Math.max(1.5, 100 * r.pct / max);
+          var row = document.createElement('div');
+          row.style.cssText = 'display:flex;align-items:center;gap:.5rem;font-size:.82rem';
+          row.innerHTML =
+            '<span style="flex:none;width:3.2rem;font-weight:700;text-align:right">' + esc(r.label) + '</span>' +
+            '<span style="flex:1;min-width:0;background:var(--border);border-radius:999px;height:1.05rem;overflow:hidden">' +
+              '<span style="display:block;height:100%;width:' + w.toFixed(1) + '%;background:' + (r.hors_serie ? '#e67e22' : 'var(--primary)') + ';border-radius:999px"></span>' +
+            '</span>' +
+            '<span style="flex:none;width:4.6rem;font-variant-numeric:tabular-nums;color:var(--muted)">' + r.pct.toFixed(2).replace('.', ',') + ' %</span>';
+          row.title = esc(r.chapitre);
+          chart.appendChild(row);
+        });
+      })
+      .catch(function () { status.textContent = 'Erreur réseau.'; });
+  }
+
+  sw.addEventListener('click', function () {
+    hsOn = !hsOn;
+    sw.classList.toggle('on', hsOn);
+    sw.setAttribute('aria-checked', String(hsOn));
+    load();
+  });
+  var t = null;
+  countInput.addEventListener('input', function () {
+    clearTimeout(t);
+    t = setTimeout(load, 400);
+  });
+  load();
+})();
+</script>
+{% endblock %}

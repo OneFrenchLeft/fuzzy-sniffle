@@ -316,26 +316,33 @@ def admin_qcm_weak():
             chapitres_disponibles.add(q.get('chapitre', 'Autre'))
             if q.get('qid'):
                 catalog[q['qid']] = q
-    sql = ("SELECT qid, theme, chapitre, question, COUNT(*) AS n, "
-           "SUM(ok) AS bonnes, MAX(created_at) AS derniere "
-           "FROM qcm_answers")
+    # Vue ADMIN uniquement : on ne compte que les reponses posterieures au
+    # dernier reset_at (qcm_stats_reset). Les vues eleves ignorent ce marqueur
+    # et lisent tout qcm_answers — leur historique est intact.
+    sql = ("SELECT a.qid, a.theme, a.chapitre, a.question, COUNT(*) AS n, "
+           "SUM(a.ok) AS bonnes, MAX(a.created_at) AS derniere "
+           "FROM qcm_answers a "
+           "LEFT JOIN qcm_stats_reset r ON r.qid = a.qid AND r.theme = a.theme "
+           "WHERE a.created_at > COALESCE(r.reset_at, '')")
     clauses, params_sql = [], []
     if theme in QCM_FILES:
-        clauses.append('theme = ?')
+        clauses.append('a.theme = ?')
         params_sql.append(theme)
     if chapitre:
-        clauses.append('chapitre = ?')
+        clauses.append('a.chapitre = ?')
         params_sql.append(chapitre)
     if clauses:
-        sql += ' WHERE ' + ' AND '.join(clauses)
-    sql += ' GROUP BY qid'
+        sql += ' AND ' + ' AND '.join(clauses)
+    sql += ' GROUP BY a.qid'
     conn = db()
     stats = {r['qid']: r for r in conn.execute(sql, params_sql).fetchall()}
     # Distribution des reponses fausses par question (choice NULL = sans reponse).
-    wrong_sql = "SELECT qid, choice, COUNT(*) AS nb FROM qcm_answers WHERE ok = 0"
+    wrong_sql = ("SELECT a.qid, a.choice, COUNT(*) AS nb FROM qcm_answers a "
+                 "LEFT JOIN qcm_stats_reset r ON r.qid = a.qid AND r.theme = a.theme "
+                 "WHERE a.ok = 0 AND a.created_at > COALESCE(r.reset_at, '')")
     if clauses:
         wrong_sql += ' AND ' + ' AND '.join(clauses)
-    wrong_sql += ' GROUP BY qid, choice'
+    wrong_sql += ' GROUP BY a.qid, a.choice'
     wrong_by_qid = {}
     for r in conn.execute(wrong_sql, params_sql).fetchall():
         key = 'absent' if r['choice'] is None else str(r['choice'])
@@ -348,6 +355,10 @@ def admin_qcm_weak():
         seen.add(qid)
         s = stats.get(qid)
         n = s['n'] if s else 0
+        # Feature « non abordees » : aucune reponse prise en compte cote admin
+        # (jamais repondue, ou rien depuis le dernier reset) => hors de la liste.
+        if n == 0:
+            continue
         bonnes = (s['bonnes'] or 0) if s else 0
         out.append({
             'qid': qid, 'theme': q.get('theme', ''),
@@ -369,6 +380,43 @@ def admin_qcm_weak():
         'rows': out,
         'retired_count': retired_count,
     })
+
+
+@bp.route('/api/admin/qcm/questions/reset-stats', methods=['POST'])
+@require_admin
+def admin_qcm_reset_question_stats():
+    """Reinitialise les stats ADMIN de questions (les eleves gardent tout).
+
+    On ne supprime JAMAIS qcm_answers : on pose un marqueur reset_at et les
+    requetes admin ne comptent que les reponses posterieures. Chaque question
+    est ciblee par sa cle unique (qid, theme) — pas par son texte.
+    """
+    ensure_db()
+    data = request.get_json(silent=True) or {}
+    questions = data.get('questions')
+    if not isinstance(questions, list) or not questions:
+        return jsonify({'ok': False, 'error': 'liste questions requise'}), 400
+    if len(questions) > 500:
+        return jsonify({'ok': False, 'error': 'trop de questions d\'un coup'}), 400
+    now = now_paris().isoformat()
+    rows = []
+    for item in questions:
+        if not isinstance(item, dict):
+            return jsonify({'ok': False, 'error': 'format attendu : {qid, theme}'}), 400
+        qid = str(item.get('qid') or '').strip()
+        theme = str(item.get('theme') or '').strip()
+        if not qid or theme not in QCM_FILES:
+            return jsonify({'ok': False, 'error': 'qid ou theme invalide'}), 400
+        rows.append((qid, theme, now))
+    conn = db()
+    conn.executemany(
+        'INSERT OR REPLACE INTO qcm_stats_reset(qid, theme, reset_at) VALUES(?,?,?)',
+        rows)
+    for qid, theme, _ in rows:
+        log_event(conn, 'admin', 'qcm_stats_reset', f'{theme}:{qid}')
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'reset': len(rows)})
 
 def record_qcm_game(gid, theme, nb_questions, nb_players, podium):
     # Flying: Stats logging must never break the actual QCM flow.

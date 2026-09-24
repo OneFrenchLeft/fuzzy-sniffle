@@ -28,6 +28,7 @@ def init_db():
         "indices TEXT DEFAULT '',"
         "chapitre TEXT DEFAULT 'Autre',"
         "teacher_difficulty REAL,"
+        "kholle_enabled INTEGER NOT NULL DEFAULT 1,"
         "created_at TEXT DEFAULT CURRENT_TIMESTAMP"
         ")"
     )
@@ -149,6 +150,18 @@ def init_db():
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_prenom ON events(prenom, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(type, created_at)")
 
+    # Marqueur de reinitialisation ADMIN des stats QCM : les vues admin ne
+    # comptent que les reponses posterieures a reset_at. qcm_answers n'est
+    # JAMAIS vide — les vues eleves ignorent cette table et lisent tout.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS qcm_stats_reset ("
+        "qid TEXT NOT NULL,"
+        "theme TEXT NOT NULL,"
+        "reset_at TEXT NOT NULL,"
+        "PRIMARY KEY (qid, theme)"
+        ")"
+    )
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS qcm_games ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -195,6 +208,10 @@ def init_db():
         conn.execute("ALTER TABLE forgecards ADD COLUMN hors_serie INTEGER DEFAULT 0")
     if 'code' not in cols:
         conn.execute("ALTER TABLE forgecards ADD COLUMN code TEXT DEFAULT ''")
+    # Exclusion de la simulation de kholle uniquement — la repetition espacee
+    # (deck SR, FSRS) n'est pas touchee. 1 = incluse (defaut), 0 = hors simulation.
+    if 'kholle_enabled' not in cols:
+        conn.execute("ALTER TABLE forgecards ADD COLUMN kholle_enabled INTEGER NOT NULL DEFAULT 1")
     # backfill du code public : numero pour le pool normal, h1/h2... pour les hors-serie
     hs_idx = 0
     for row in conn.execute("SELECT numero, hors_serie, code, fiche_file, correction_file, bareme_file FROM forgecards ORDER BY numero ASC").fetchall():

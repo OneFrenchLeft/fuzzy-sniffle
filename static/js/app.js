@@ -977,7 +977,7 @@ function renderWeakQcm() {
   }
   var html = '<table class="weak-table">' +
     '<thead><tr><th>Question</th><th title="Nombre de fois où la carte a été posée (tous joueurs confondus)">Sorties</th>' +
-    '<th>Taux d\'échec</th><th title="Dernière fois où la carte est tombée">Dernière</th></tr></thead><tbody>';
+    '<th>Taux d\'échec</th><th title="Remet les compteurs admin a zero (l\'historique eleve est conserve)">Réinitialiser</th></tr></thead><tbody>';
   weakQcmRows.forEach(function (r) {
     var color = r.taux_echec >= 40 ? '#c0392b' : (r.taux_echec >= 20 ? '#e67e22' : '#27ae60');
     var label = r.question.length > 90 ? r.question.slice(0, 90) + '…' : r.question;
@@ -1013,10 +1013,11 @@ function renderWeakQcm() {
       wrongHtml + '</td>' +
       '<td>' + r.sorties + '</td>' +
       '<td><span class="weak-badge" style="background:' + color + '">' + r.taux_echec + ' %</span></td>' +
-      '<td>' + fmtDateShort(r.derniere) + '</td>' +
+      '<td><input type="checkbox" class="qcm-reset-cb" data-qid="' + esc(String(r.qid)) + '" data-theme="' + esc(r.theme) + '" title="Sélectionner pour réinitialiser les stats admin"></td>' +
       '</tr>';
   });
   html += '</tbody></table>';
+  html += '<p style="margin-top:.4rem"><button class="btn-ghost btn-small" onclick="resetQcmSelection()">Réinitialiser la sélection</button></p>';
   if (weakQcmRows.every(function (r) { return r.sorties === 0; })) {
     html += '<p class="hint" style="margin-top:.4rem">Aucune partie enregistrée pour l\'instant : les compteurs démarrent à la prochaine partie.</p>';
   }
@@ -1151,13 +1152,43 @@ function renderAdminDetail() {
     wstats = '<div class="meta" style="margin-top:.4rem"><span class="weak-badge" style="background:' + wcol + '">' + esc(w.taux_echec_pct) + ' % echec</span>' +
       ' ' + esc(w.nb_eleves + ' eleves - ' + w.total_revisions + ' revisions - duree moy. ' + (w.avg_duration_seconds != null ? fmtDuree(w.avg_duration_seconds) : '-')) + '</div>';
   }
+  var kholleOn = c.kholle_enabled !== 0;
+  var kholleLine = '<label style="display:flex;align-items:center;gap:.5rem;margin-top:.5rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text)">' +
+    '<input type="checkbox" data-action="kholle-toggle" style="width:auto"' + (kholleOn ? ' checked' : '') + '> Inclure dans la simulation de kholle' +
+    (kholleOn ? '' : ' <span class="chip-chapitre" style="background:rgba(192,57,43,.12);color:#c0392b">hors simulation</span>') +
+    '</label>';
   var row = adminRow(
     cardTitleHtml(c) +
-    '<div class="meta">' + esc(c.fiche_file) + (c.bareme_file ? (' | bareme: ' + esc(c.bareme_file)) : ' | pas de bareme') + ' | difficulté : ' + esc(c.teacher_difficulty != null ? c.teacher_difficulty : (c.difficulty != null ? c.difficulty : '-')) + '</div>' + wstats,
+    '<div class="meta">' + esc(c.fiche_file) + (c.bareme_file ? (' | bareme: ' + esc(c.bareme_file)) : ' | pas de bareme') + ' | difficulté : ' + esc(c.teacher_difficulty != null ? c.teacher_difficulty : (c.difficulty != null ? c.difficulty : '-')) + '</div>' + wstats + kholleLine,
     '<button class="btn-ghost btn-small" data-action="edit">Modifier</button>' +
     '<button class="btn-ghost btn-small" data-action="reset-stats">Reinitialiser stats</button>' +
     '<button class="btn-danger btn-small" data-action="delete">Supprimer</button>'
   );
+  if (!kholleOn) row.style.opacity = '.55';
+  row.querySelector('[data-action="kholle-toggle"]').onchange = function () {
+    var cb = this;
+    cb.disabled = true;
+    fetchJson('/api/forgecards/' + c.numero + '/kholle', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: cb.checked })
+    }).then(function (res) {
+      cb.disabled = false;
+      if (res && res.ok) {
+        c.kholle_enabled = res.kholle_enabled;
+        renderAdminDetail();
+        showToast(res.kholle_enabled
+          ? 'Fiche ' + (c.label || c.numero) + ' incluse dans la simulation de kholle.'
+          : 'Fiche ' + (c.label || c.numero) + ' exclue de la simulation (elle reste en repetition espacee).');
+      } else {
+        cb.checked = !cb.checked;
+        showToast('Erreur : ' + ((res && res.error) || 'action impossible'));
+      }
+    }).catch(function (err) {
+      cb.disabled = false;
+      cb.checked = !cb.checked;
+      showToast(err && err.status === 401 ? 'Session admin expiree, reconnecte-toi.' : 'Erreur reseau.');
+    });
+  };
   row.querySelector('[data-action="edit"]').onclick = function () { openEditModal(c); };
   row.querySelector('[data-action="delete"]').onclick = function () {
     askConfirm('Supprimer definitivement la fiche ' + c.numero + ' ?', function () { deleteFiche(c.numero); });
@@ -1512,6 +1543,29 @@ function purgeQcmRetired() {
       loadWeakQcm();
       showToast('Purge : ' + (res.deleted || 0) + ' reponses supprimees (' + (res.questions || 0) + ' questions).');
     }, 'purge impossible');
+  });
+}
+
+function resetQcmSelection() {
+  var cbs = document.querySelectorAll('.qcm-reset-cb:checked');
+  if (!cbs.length) { showToast('Coche au moins une question.'); return; }
+  var questions = [];
+  cbs.forEach(function (cb) {
+    questions.push({ qid: cb.getAttribute('data-qid'), theme: cb.getAttribute('data-theme') });
+  });
+  askConfirm('Réinitialiser les stats admin de ' + questions.length + ' question(s) ? L\'historique élève est conservé.', function () {
+    fetchJson('/api/admin/qcm/questions/reset-stats', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questions: questions })
+    }).then(function (res) {
+      if (!res || res.ok === false) { showToast((res && res.error) || 'Réinitialisation impossible.'); return; }
+      loadWeakQcm();
+      showToast('Stats admin réinitialisées pour ' + (res.reset || questions.length) + ' question(s).');
+    }).catch(function (err) {
+      if (err && err.status === 401) { showToast('Session admin expirée, reconnecte-toi.'); return; }
+      showToast('Réinitialisation impossible.');
+    });
   });
 }
 
