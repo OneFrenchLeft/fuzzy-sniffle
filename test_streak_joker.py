@@ -151,4 +151,21 @@ FAKE['now'] = at(1, 12, 0)
 assert streak_of('Eve') == 0, streak_of('Eve')
 print('TEST E OK : sans joker, la streak casse proprement')
 
+# ---------- Cas Amir : le joker doit sauver le jour le plus recent ----------
+# Chaine ancienne morte (trou a J-5 et avant sauf une review), 1 joker accorde
+# recemment, trous J-4..J. Le rattrapage (23h55, inclut aujourd'hui) doit
+# depenser le joker sur J — le jour le plus recent — pas sur J-4.
+setup_eleve('Frank', jokers=1, review_days=(-5,))
+FAKE['now'] = at(0, 23, 55)
+res = streak.close_all_missed_days(config.read_params(), reason='site_guard')
+closed = res['Frank']['closed']
+assert jokers_of('Frank') == 0, f"jokers Frank: {jokers_of('Frank')}"
+assert closed.get(iso(at(0, 12))) == 'joker_spent', closed   # aujourd'hui sauve
+assert closed.get(iso(at(-1, 12))) == 'missed', closed       # hier : plus de joker
+# J-2 et plus anciens : jamais clotes (la serie actuelle est deja morte a J-1)
+assert iso(at(-2, 12)) not in closed, closed
+assert iso(at(-4, 12)) not in closed, closed
+assert streak_of('Frank') == 1, f"streak Frank: {streak_of('Frank')}"
+print('TEST F OK : joker depense sur le jour le plus recent, arret au premier trou')
+
 print('TOUS LES TESTS STREAK SONT PASSES')

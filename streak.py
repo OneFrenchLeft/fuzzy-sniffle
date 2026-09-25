@@ -173,14 +173,22 @@ def close_missed_days(conn, prenom, params, reason='guard_spend', max_back=62, i
         return {}
     start = max(start, today - timedelta(days=max_back))
     outcomes = {}
-    cursor = start
-    last_day = today if include_today else today - timedelta(days=1)
-    while cursor <= last_day:
+    cursor = today if include_today else today - timedelta(days=1)
+    # Du plus recent au plus ancien : un joker depense sauve le jour le plus
+    # recent possible — celui qui prolonge la serie ACTUELLE. Clore dans
+    # l'ordre chronologique gaspillait les jokers sur des trous anciens deja
+    # compenses par une cassure ulterieure (ex. joker brule sur un trou de
+    # il y a 3 semaines alors que hier etait sauvable). Des qu'un jour est
+    # definitivement manque ('missed', plus de joker), les jours plus anciens
+    # ne peuvent plus rien changer a la serie en cours : on arrete.
+    while cursor >= start:
         day = cursor.isoformat()
         outcome = close_day(conn, prenom, day, params, reason=reason)
         if outcome != 'already':
             outcomes[day] = outcome
-        cursor += timedelta(days=1)
+        if outcome == 'missed':
+            break
+        cursor -= timedelta(days=1)
     return outcomes
 
 
