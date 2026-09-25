@@ -334,10 +334,16 @@ def apply_joker_change(conn, prenom, delta, reason, day=None):
     Retourne le solde apres operation.
     """
     from config import JOKER_CAP
-    conn.execute(
-        "INSERT INTO user_jokers (prenom, count) VALUES (?, max(0, min(?, ?))) "
-        "ON CONFLICT(prenom) DO UPDATE SET count = max(0, min(count + ?, ?))",
-        (prenom, delta, JOKER_CAP, delta, JOKER_CAP))
+    # UPDATE puis INSERT si absent : schema-agnostique. La base du serveur de
+    # test a ete migree par feat/multi-matieres, ou la PK est (prenom, subject)
+    # — ON CONFLICT(prenom) y leve "does not match any PRIMARY KEY".
+    cur = conn.execute(
+        "UPDATE user_jokers SET count = max(0, min(count + ?, ?)) WHERE prenom=?",
+        (delta, JOKER_CAP, prenom))
+    if cur.rowcount == 0:
+        conn.execute(
+            "INSERT INTO user_jokers (prenom, count) VALUES (?, max(0, min(?, ?)))",
+            (prenom, delta, JOKER_CAP))
     bal = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()['count']
     conn.execute(
         "INSERT INTO joker_ledger(prenom, day, delta, reason, balance_after, created_at) "

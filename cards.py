@@ -129,14 +129,22 @@ def upload_forgecard():
             final_bareme_name = bareme_name
         elif existing and existing['bareme_file']:
             final_bareme_name = existing['bareme_file']
-        conn.execute(
-            'INSERT INTO forgecards(numero, code, fiche_file, correction_file, bareme_file, titre, indices, chapitre, teacher_difficulty, hors_serie) '
-            'VALUES(?,?,?,?,?,?,?,?,?,?) '
-            'ON CONFLICT(numero) DO UPDATE SET '
-            'code=excluded.code, fiche_file=excluded.fiche_file, correction_file=excluded.correction_file, '
-            'bareme_file=excluded.bareme_file, titre=excluded.titre, indices=excluded.indices, chapitre=excluded.chapitre, teacher_difficulty=excluded.teacher_difficulty, hors_serie=excluded.hors_serie',
-            (numero, code, fiche_name, corr_name, final_bareme_name, titre, indices, chapitre, teacher_difficulty, hors_serie)
+        # UPDATE puis INSERT si absent : schema-agnostique. La base du serveur
+        # de test a ete migree par feat/multi-matieres, ou la PK de forgecards
+        # est (subject, numero) — ON CONFLICT(numero) y leve
+        # "does not match any PRIMARY KEY or unique index".
+        cur = conn.execute(
+            'UPDATE forgecards SET code=?, fiche_file=?, correction_file=?, bareme_file=?, '
+            'titre=?, indices=?, chapitre=?, teacher_difficulty=?, hors_serie=? WHERE numero=?',
+            (code, fiche_name, corr_name, final_bareme_name, titre, indices, chapitre,
+             teacher_difficulty, hors_serie, numero)
         )
+        if cur.rowcount == 0:
+            conn.execute(
+                'INSERT INTO forgecards(numero, code, fiche_file, correction_file, bareme_file, titre, indices, chapitre, teacher_difficulty, hors_serie) '
+                'VALUES(?,?,?,?,?,?,?,?,?,?)',
+                (numero, code, fiche_name, corr_name, final_bareme_name, titre, indices, chapitre, teacher_difficulty, hors_serie)
+            )
         conn.commit()
     finally:
         conn.close()

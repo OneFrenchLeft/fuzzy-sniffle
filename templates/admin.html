@@ -41,6 +41,14 @@
         <button class="btn-save" onclick="checkPw()">Entrer <span id="login-spinner" class="spinner" style="display:none"></span></button>
       </div>
       <div id="admin-form" style="display:none"><div class="admin-workspace"><div class="atelier-shell"><nav class="atelier-nav" aria-label="Rubriques de l’administration"><h2>Atelier admin</h2><small>Fiches</small><button type="button" data-atelier="cards" aria-current="page">Fiches &amp; import</button><button type="button" data-atelier="proba">Probabilités</button><button type="button" data-atelier="settings">Paramètres</button><small>QCM</small><button type="button" data-atelier="qcm">Éditeur &amp; aperçu</button><button type="button" data-atelier="qcmstats">Résultats &amp; parties</button><small>Suivi</small><button type="button" data-atelier="students">Élèves</button><button type="button" data-atelier="notes">Notes de blocage<span class="atelier-badge" id="notes-badge" hidden></span></button><button type="button" data-atelier="class">Statistiques de classe</button><button type="button" data-atelier="exports">Exports</button></nav><div class="atelier-main"><section class="atelier-view" id="atelier-cards"><div class="atelier-heading"><h2>Forgecards</h2><p>Importer, consulter et gérer les fiches.</p></div><div class="import-box" style="margin-top:1.5rem">
+          <h3>Fiches importées</h3>
+          <div class="fiche-picker">
+            <button class="picker-nav" id="fiche-prev" title="Fiche précédente" aria-label="Fiche précédente">←</button>
+            <select id="fiche-picker" aria-label="Choisir une fiche"></select>
+            <button class="picker-nav" id="fiche-next" title="Fiche suivante" aria-label="Fiche suivante">→</button>
+          </div>
+          <div id="admin-list"></div>
+        </div><div class="import-box">
           <h3>Importer une fiche</h3>
           <div class="fields-grid">
             <div class="field"><label for="up-numero">Numero</label><input type="number" id="up-numero" min="1"></div>
@@ -55,14 +63,6 @@
           <div class="field"><label for="up-bareme">Bareme PDF (optionnel)</label><input type="file" id="up-bareme" accept=".pdf"></div>
           <button class="btn-save" onclick="uploadFiche()">Importer <span id="upload-spinner" class="spinner" style="display:none"></span></button>
           <div id="upload-status" style="margin-top:.5rem;font-size:.85rem"></div>
-        </div><div class="import-box">
-          <h3>Fiches importées</h3>
-          <div class="fiche-picker">
-            <button class="picker-nav" id="fiche-prev" title="Fiche précédente" aria-label="Fiche précédente">←</button>
-            <select id="fiche-picker" aria-label="Choisir une fiche"></select>
-            <button class="picker-nav" id="fiche-next" title="Fiche suivante" aria-label="Fiche suivante">→</button>
-          </div>
-          <div id="admin-list"></div>
         </div></section><section class="atelier-view" id="atelier-proba" hidden><div class="atelier-heading"><h2>Probabilités de tirage</h2><p>Simulation de khôlle ; le calcul se lance à l’ouverture de cet onglet.</p></div><div class="import-box" id="proba-box">
           <p class="home-subtitle" style="text-align:left;margin:.5rem 0 1rem;font-size:.85rem">
             Fréquences observées sur <strong id="proba-sims">10 000</strong> simulations du vrai algorithme de tirage
