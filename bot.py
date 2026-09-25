@@ -109,9 +109,21 @@ def read_params():
     except Exception:
         data = {}
     out = DEFAULT_PARAMS.copy()
-    for k in out:
+    for k in list(out):
         try:
             out[k] = int(data.get(k, out[k]))
+        except (TypeError, ValueError):
+            pass
+    # Marqueur d'increment de max_active : les fiches au-dela de 'from' ne
+    # deviennent dues que le lendemain de 'date'. Sans lui, le bot compterait
+    # les nouvelles fiches comme dues le soir meme de l'increment.
+    inc = data.get('_max_active_increment')
+    if isinstance(inc, dict):
+        try:
+            out['_max_active_increment'] = {
+                'date': str(inc.get('date', '')),
+                'from': int(inc.get('from', 0)),
+            }
         except (TypeError, ValueError):
             pass
     return out
@@ -125,11 +137,20 @@ def compute_daily(conn, prenom, params):
     """Decompose la journee : dues, faites, total (capte par quota), restantes."""
     today = today_paris()
     max_active = params['max_active_num']
+    # Meme definition de "du" que le site (streak._due_count) : hors serie
+    # exclus, et les fiches d'un increment du jour ne sont dues que demain.
+    increment = params.get('_max_active_increment') or {}
+    inc_date = str(increment.get('date', ''))
+    try:
+        inc_from = int(increment.get('from', max_active))
+    except (TypeError, ValueError):
+        inc_from = max_active
     rows = conn.execute(
         'SELECT s.repetitions, s.next_review FROM forgecards f '
         'LEFT JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? '
-        'WHERE f.numero <= ?',
-        (prenom, max_active)
+        'WHERE f.numero <= ? AND f.hors_serie = 0 '
+        'AND NOT (f.numero > ? AND ? >= ?)',
+        (prenom, max_active, inc_from, inc_date, today)
     ).fetchall()
     due_new = due_review = 0
     for reps, next_review in rows:
