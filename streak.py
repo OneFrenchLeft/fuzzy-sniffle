@@ -22,7 +22,7 @@ def activity_days(conn, prenom):
     days = {r[0] for r in conn.execute(
         'SELECT DISTINCT substr(created_at,1,10) FROM reviews WHERE prenom=?', (prenom,)).fetchall()}
     days |= {r[0] for r in conn.execute(
-        'SELECT day FROM sr_daily_streak WHERE prenom=? AND validated=1', (prenom,)).fetchall()}
+        'SELECT day FROM sr_daily_streak WHERE prenom=? AND validated>=1', (prenom,)).fetchall()}
     return days
 
 
@@ -77,7 +77,7 @@ def _due_count(conn, prenom, day, params):
 
 
 def close_day(conn, prenom, day, params, reason='guard_spend'):
-    if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=? AND validated=1',
+    if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=? AND validated>=1',
                     (prenom, day)).fetchone():
         return 'already'
     if conn.execute('SELECT 1 FROM reviews WHERE prenom=? AND substr(created_at,1,10)=? LIMIT 1',
@@ -126,7 +126,7 @@ def streak_verdict(conn, prenom, params, when=None, prediction=False):
     today = when.date().isoformat()
     if prediction and when.hour == 23 and when.minute >= 55:
         return 'too_late'
-    if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=? AND validated=1',
+    if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=? AND validated>=1',
                     (prenom, today)).fetchone():
         return 'done'
     if conn.execute('SELECT 1 FROM reviews WHERE prenom=? AND substr(created_at,1,10)=? LIMIT 1',
