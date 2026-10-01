@@ -258,17 +258,32 @@ def reconcile_streak(conn, prenom):
     while cursor.isoformat() in days:
         streak += 1
         cursor -= timedelta(days=1)
-    if streak >= JOKER_EVERY:
-        milestone = streak // JOKER_EVERY
-        jrow = conn.execute('SELECT count, last_milestone FROM user_jokers WHERE prenom=?',
-                            (prenom,)).fetchone()
-        current = jrow['count'] if jrow else 0
-        last_ms = jrow['last_milestone'] if jrow else 0
-        if milestone > last_ms:
-            gained = max(0, min(milestone - last_ms, JOKER_CAP - current))
-            if gained > 0:
-                apply_joker_change(conn, prenom, gained, 'milestone_award')
-            conn.execute("UPDATE user_jokers SET last_milestone=? WHERE prenom=?",
-                         (milestone, prenom))
-            conn.commit()
+    if streak < JOKER_EVERY:
+        return streak
+    milestone = streak // JOKER_EVERY
+    chain_start = (cursor + timedelta(days=1)).isoformat()
+    jrow = conn.execute('SELECT count, last_milestone FROM user_jokers WHERE prenom=?',
+                        (prenom,)).fetchone()
+    current = jrow['count'] if jrow else 0
+    last_ms = jrow['last_milestone'] if jrow else 0
+    # last_milestone peut etre le reste d'une ANCIENNE chaine (la remise a 0 ne
+    # se faisait que sur deux jours d'absence consecutifs) : le palier 4 d'une
+    # chaine reconstruite n'etait alors jamais paye. Source de verite : le
+    # ledger — on compte les paliers payes PENDANT la chaine courante.
+    # Exception : les chaines commencees avant l'existence du ledger gardent
+    # last_milestone comme reference, sinon on les paierait une 2e fois.
+    first_ledger = conn.execute(
+        "SELECT MIN(substr(created_at,1,10)) AS d FROM joker_ledger").fetchone()['d']
+    if first_ledger and chain_start >= first_ledger:
+        paid = conn.execute(
+            "SELECT COUNT(*) AS c FROM joker_ledger WHERE prenom=? AND reason='milestone_award' "
+            "AND substr(created_at,1,10) >= ?", (prenom, chain_start)).fetchone()['c']
+    else:
+        paid = last_ms
+    if milestone > paid:
+        gained = max(0, min(milestone - paid, JOKER_CAP - current))
+        if gained > 0:
+            apply_joker_change(conn, prenom, gained, 'milestone_award')
+    conn.execute("UPDATE user_jokers SET last_milestone=? WHERE prenom=?", (milestone, prenom))
+    conn.commit()
     return streak

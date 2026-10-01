@@ -107,6 +107,18 @@ def sr_today():
     new_due = [c for c in due if c.get('repetitions', 0) == 0]
     review_due = [c for c in due if c.get('repetitions', 0) > 0]
 
+    # Les fiches du DERNIER drop passent devant le backlog de nouvelles :
+    # sinon une fiche fraiche (ex. energie potentielle) attend que tout le
+    # stock non vu soit ecoule (3/jour), et les eleves vont la chercher dans
+    # l'outil forgecards au lieu du mode repetition espacee. Ordre croissant
+    # conserve a l'interieur de chaque groupe.
+    increment = params.get('_max_active_increment') or {}
+    try:
+        inc_from = int(increment.get('from', 0)) if increment else 0
+    except (TypeError, ValueError):
+        inc_from = 0
+    new_due.sort(key=lambda c: (c['numero'] <= inc_from, c['numero']))
+
     selected_new = new_due[:new_slots_left]
     selected_review = review_due[:review_slots_left]
     selected = selected_review + selected_new

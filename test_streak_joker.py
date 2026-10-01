@@ -168,4 +168,28 @@ assert iso(at(-4, 12)) not in closed, closed
 assert streak_of('Frank') == 1, f"streak Frank: {streak_of('Frank')}"
 print('TEST F OK : joker depense sur le jour le plus recent, arret au premier trou')
 
+# ---------- BUG G : palier 4 jamais paye sur une chaine reconstruite ----------
+# Henri : chaine J-8..J-5 (palier 4 paye, +1 joker, last_milestone=1).
+# J-4 absent -> joker universel depense (stock 0). J-3 absent -> cassure.
+# Nouvelle chaine J-2..J+1 : au guard de J+1 23h55 le palier 4 doit payer +1.
+# Bug : last_milestone etait reste a 1 -> 1 > 1 faux -> jamais paye.
+setup_eleve('Henri', jokers=0, review_days=(-8, -7, -6, -5))
+FAKE['now'] = at(-5, 23, 55)
+streak.close_all_missed_days(config.read_params(), reason='site_guard')
+assert jokers_of('Henri') == 1, f"palier 4 non paye: {jokers_of('Henri')}"
+FAKE['now'] = at(-4, 23, 55)
+streak.close_all_missed_days(config.read_params(), reason='site_guard')
+assert jokers_of('Henri') == 0, f"joker non depense J-4: {jokers_of('Henri')}"
+FAKE['now'] = at(-3, 23, 55)
+streak.close_all_missed_days(config.read_params(), reason='site_guard')
+conn = dbmod.db()
+for d in (-2, -1, 0, 1):
+    conn.execute('INSERT INTO reviews(numero, prenom, result, was_new, created_at) VALUES (1,?,?,0,?)',
+                 ('Henri', 'good', at(d, 18).isoformat()))
+conn.commit(); conn.close()
+FAKE['now'] = at(1, 23, 55)
+streak.close_all_missed_days(config.read_params(), reason='site_guard')
+assert jokers_of('Henri') == 1, f"palier 4 de la nouvelle chaine non paye: {jokers_of('Henri')}"
+print('TEST G OK : palier paye sur une chaine reconstruite apres cassure')
+
 print('TOUS LES TESTS STREAK SONT PASSES')
