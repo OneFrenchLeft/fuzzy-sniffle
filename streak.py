@@ -76,7 +76,7 @@ def _due_count(conn, prenom, day, params):
         (prenom, max_active, day, inc_from, inc_date, day)).fetchone()['c']
 
 
-def close_day(conn, prenom, day, params, reason='guard_spend'):
+def close_day(conn, prenom, day, params, reason='guard_spend', allow_joker=True):
     if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=? AND validated>=1',
                     (prenom, day)).fetchone():
         return 'already'
@@ -99,7 +99,13 @@ def close_day(conn, prenom, day, params, reason='guard_spend'):
         return 'validated_free'
     # Jour manque : le joker sauve la serie, qu'il y ait des cartes dues ou
     # non (un eleve a jour qui ne se connecte pas ne doit pas perdre sa
-    # streak alors qu'il a un joker — c'est precisement son role).
+    # streak alors qu'il a un joker — c'est precisement son role). Mais un
+    # joker ne sauve JAMAIS un jour ancien (allow_joker=False) : les trous
+    # d'il y a plus d'un jour restent manques definitivement, sinon un joker
+    # fraichement gagne part reparer une cassure passee au lieu de proteger
+    # la journee en cours.
+    if not allow_joker:
+        return 'missed'
     conn.execute('BEGIN IMMEDIATE')
     try:
         jk = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
@@ -183,7 +189,12 @@ def close_missed_days(conn, prenom, params, reason='guard_spend', max_back=62, i
     # ne peuvent plus rien changer a la serie en cours : on arrete.
     while cursor >= start:
         day = cursor.isoformat()
-        outcome = close_day(conn, prenom, day, params, reason=reason)
+        # Depense autorisee seulement pour aujourd'hui et hier : hier couvre
+        # une nuit ou le guard de 23h55 n'aurait pas tourne ; au-dela, le
+        # trou est definitif et le joker est conserve.
+        allow_joker = cursor >= today - timedelta(days=1)
+        outcome = close_day(conn, prenom, day, params, reason=reason,
+                            allow_joker=allow_joker)
         if outcome != 'already':
             outcomes[day] = outcome
         if outcome == 'missed':

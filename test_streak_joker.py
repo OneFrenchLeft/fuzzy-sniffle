@@ -192,4 +192,16 @@ streak.close_all_missed_days(config.read_params(), reason='site_guard')
 assert jokers_of('Henri') == 1, f"palier 4 de la nouvelle chaine non paye: {jokers_of('Henri')}"
 print('TEST G OK : palier paye sur une chaine reconstruite apres cassure')
 
+# ---------- REGLE : un joker ne sauve jamais un jour ancien ----------
+# Gus : reviews J-5, J-4, trou a J-3, reviews J-2..J. 1 joker en stock.
+# Guard de J 23h55 : le trou de J-3 (il y a 3 jours) ne doit PAS etre sauve —
+# le joker reste en stock et la streak vaut 3 (J-2..J), pas 6.
+setup_eleve('Gus', jokers=1, review_days=(-5, -4, -2, -1, 0))
+FAKE['now'] = at(0, 23, 55)
+res = streak.close_all_missed_days(config.read_params(), reason='site_guard')
+assert res['Gus']['closed'].get(iso(at(-3, 12))) == 'missed', res['Gus']
+assert jokers_of('Gus') == 1, f"joker depense sur le passe: {jokers_of('Gus')}"
+assert streak_of('Gus') == 3, f"streak Gus: {streak_of('Gus')}"
+print('TEST H OK : trou ancien jamais sauve, joker conserve')
+
 print('TOUS LES TESTS STREAK SONT PASSES')
