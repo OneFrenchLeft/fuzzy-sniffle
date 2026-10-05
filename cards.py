@@ -21,7 +21,7 @@ bp = Blueprint('cards', __name__)
 def list_forgecards():
     ensure_db()
     conn = db()
-    rows = conn.execute('SELECT numero, code, fiche_file, correction_file, bareme_file, titre, indices, chapitre, teacher_difficulty, hors_serie, kholle_enabled, created_at FROM forgecards ORDER BY numero ASC').fetchall()
+    rows = conn.execute('SELECT numero, code, fiche_file, correction_file, bareme_file, titre, indices, chapitre, teacher_difficulty, hors_serie, kholle_enabled, sr_enabled, created_at FROM forgecards ORDER BY numero ASC').fetchall()
     conn.close()
     out = [dict(r) for r in rows]
     for c in out:
@@ -281,6 +281,31 @@ def set_kholle_enabled(numero):
     if cur.rowcount != 1:
         return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
     return jsonify({'ok': True, 'numero': numero, 'kholle_enabled': enabled})
+
+
+@bp.route('/api/forgecards/<int:numero>/sr', methods=['POST'])
+@require_admin
+def set_sr_enabled(numero):
+    """Active/desactive un HORS-SERIE dans la repetition espacee.
+
+    Les fiches normales sont toujours en SR : ce toggle ne concerne que les
+    HS, qui apparaissent alors en section bonus (hors quotas, hors streak).
+    """
+    ensure_db()
+    data = request.get_json(silent=True) or {}
+    enabled = 1 if data.get('enabled', True) else 0
+    conn = db()
+    row = conn.execute('SELECT hors_serie FROM forgecards WHERE numero=?', (numero,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
+    if not row['hors_serie']:
+        conn.close()
+        return jsonify({'ok': False, 'error': 'reserve aux hors-serie (les fiches normales sont toujours en SR)'}), 400
+    conn.execute('UPDATE forgecards SET sr_enabled=? WHERE numero=?', (enabled, numero))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'numero': numero, 'sr_enabled': enabled})
 
 
 @bp.route("/api/forgecards/<int:numero>/reset-stats", methods=["POST"])

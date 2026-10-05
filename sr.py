@@ -70,6 +70,14 @@ def sr_today():
         "WHERE f.numero <= ? AND f.hors_serie = 0",
         (prenom, inc_from, inc_date, today, tomorrow, today, max_active)
     )
+    # Eliot: les hors-series ACTIVES entrent dans la SR en section bonus,
+    # hors quotas et hors streak. Une HS active est due des sa mise en service.
+    conn.execute(
+        "INSERT OR IGNORE INTO sr_state_user (prenom, numero, stability, difficulty, state, last_review, next_review, repetitions, lapses) "
+        "SELECT ?, f.numero, NULL, NULL, 'new', NULL, ?, 0, 0 FROM forgecards f "
+        "WHERE f.hors_serie = 1 AND f.sr_enabled = 1",
+        (prenom, today)
+    )
     conn.commit()
 
     try:
@@ -80,8 +88,11 @@ def sr_today():
     except Exception:
         pass
 
+    # Eliot: les reviews de hors-serie ne comptent PAS dans les quotas du jour.
     done_today = conn.execute(
-        "SELECT numero, was_new FROM reviews WHERE prenom=? AND substr(created_at,1,10)=?",
+        "SELECT r.numero, r.was_new FROM reviews r "
+        "JOIN forgecards f ON f.numero = r.numero "
+        "WHERE r.prenom=? AND substr(r.created_at,1,10)=? AND f.hors_serie=0",
         (prenom, today)
     ).fetchall()
     new_done_today = sum(1 for r in done_today if r['was_new'])
@@ -98,6 +109,16 @@ def sr_today():
         'ORDER BY f.numero ASC',
         (prenom, max_active)
     ).fetchall()
+    # Hors-series actives : section bonus, jamais dans les quotas. Requete
+    # executee maintenant : la connexion est fermee juste apres.
+    hs_rows = conn.execute(
+        'SELECT f.numero, f.code, f.fiche_file, f.correction_file, f.bareme_file, f.titre, f.indices, f.chapitre, '
+        's.difficulty, s.stability, s.next_review, s.last_review, s.repetitions '
+        'FROM forgecards f '
+        'JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? '
+        'WHERE f.hors_serie = 1 AND f.sr_enabled = 1',
+        (prenom,)
+    ).fetchall()
     streak = compute_streak(conn, prenom)
     conn.close()
 
@@ -106,6 +127,12 @@ def sr_today():
 
     new_due = [c for c in due if c.get('repetitions', 0) == 0]
     review_due = [c for c in due if c.get('repetitions', 0) > 0]
+
+    hs_cards = [dict(r) for r in hs_rows if (r['next_review'] is None or r['next_review'] <= today)]
+    hs_cards.sort(key=lambda c: (c.get('next_review') or '', -(c.get('difficulty') or 5)))
+    for c in hs_cards:
+        c['label'] = card_label(c.get('code') or '', True)
+        c['was_new'] = (c.get('repetitions') or 0) == 0
 
     # Les fiches du DERNIER drop passent devant le backlog de nouvelles :
     # sinon une fiche fraiche (ex. energie potentielle) attend que tout le
@@ -146,6 +173,7 @@ def sr_today():
 
     return jsonify({
         'cards': interleaved,
+        'hs_cards': hs_cards,
         'streak': streak,
         'new_done_today': new_done_today,
         'new_limit': new_limit,

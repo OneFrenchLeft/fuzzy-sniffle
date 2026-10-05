@@ -19,8 +19,12 @@ from db import db, log_event, apply_joker_change
 
 def activity_days(conn, prenom):
     # Small: Don't forget validated days; reviews aren't the only source.
+    # Eliot: les reviews de hors-serie sont exclues — une journee de HS seules
+    # ne valide pas la serie (les HS sont du bonus, pas l'obligation quotidienne).
     days = {r[0] for r in conn.execute(
-        'SELECT DISTINCT substr(created_at,1,10) FROM reviews WHERE prenom=?', (prenom,)).fetchall()}
+        'SELECT DISTINCT substr(r.created_at,1,10) FROM reviews r '
+        'JOIN forgecards f ON f.numero = r.numero '
+        'WHERE r.prenom=? AND f.hors_serie=0', (prenom,)).fetchall()}
     days |= {r[0] for r in conn.execute(
         'SELECT day FROM sr_daily_streak WHERE prenom=? AND validated>=1', (prenom,)).fetchall()}
     return days
@@ -80,7 +84,8 @@ def close_day(conn, prenom, day, params, reason='guard_spend', allow_joker=True)
     if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=? AND validated>=1',
                     (prenom, day)).fetchone():
         return 'already'
-    if conn.execute('SELECT 1 FROM reviews WHERE prenom=? AND substr(created_at,1,10)=? LIMIT 1',
+    if conn.execute('SELECT 1 FROM reviews r JOIN forgecards f ON f.numero=r.numero '
+                    'WHERE r.prenom=? AND substr(r.created_at,1,10)=? AND f.hors_serie=0 LIMIT 1',
                     (prenom, day)).fetchone():
         conn.execute('INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) VALUES(?,?,1)',
                      (prenom, day))
@@ -135,7 +140,8 @@ def streak_verdict(conn, prenom, params, when=None, prediction=False):
     if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=? AND validated>=1',
                     (prenom, today)).fetchone():
         return 'done'
-    if conn.execute('SELECT 1 FROM reviews WHERE prenom=? AND substr(created_at,1,10)=? LIMIT 1',
+    if conn.execute('SELECT 1 FROM reviews r JOIN forgecards f ON f.numero=r.numero '
+                    'WHERE r.prenom=? AND substr(r.created_at,1,10)=? AND f.hors_serie=0 LIMIT 1',
                     (prenom, today)).fetchone():
         return 'done'
     deck = conn.execute('SELECT COUNT(*) AS c FROM sr_state_user WHERE prenom=?',

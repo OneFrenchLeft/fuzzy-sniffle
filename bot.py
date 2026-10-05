@@ -160,8 +160,11 @@ def compute_daily(conn, prenom, params):
                 due_new += 1
             else:
                 due_review += 1
+    # Eliot: les reviews de hors-serie ne comptent pas dans les quotas du jour.
     done = conn.execute(
-        'SELECT was_new, COUNT(*) FROM reviews WHERE prenom=? AND substr(created_at,1,10)=? GROUP BY was_new',
+        'SELECT r.was_new, COUNT(*) FROM reviews r '
+        'JOIN forgecards f ON f.numero = r.numero '
+        'WHERE r.prenom=? AND substr(r.created_at,1,10)=? AND f.hors_serie=0 GROUP BY r.was_new',
         (prenom, today)
     ).fetchall()
     new_done = sum(c for w, c in done if w)
@@ -179,9 +182,14 @@ def compute_remaining(conn, prenom, params):
 
 
 def compute_streak(conn, prenom):
-    """Jours consecutifs avec >= 1 review OU jour valide (sr_daily_streak)."""
+    """Jours consecutifs avec >= 1 review OU jour valide (sr_daily_streak).
+
+    Les reviews de hors-serie ne valident pas un jour : elles sont du bonus.
+    """
     rows = conn.execute(
-        'SELECT DISTINCT substr(created_at,1,10) FROM reviews WHERE prenom=?', (prenom,)
+        'SELECT DISTINCT substr(r.created_at,1,10) FROM reviews r '
+        'JOIN forgecards f ON f.numero = r.numero '
+        'WHERE r.prenom=? AND f.hors_serie=0', (prenom,)
     ).fetchall()
     days = {r[0] for r in rows}
     rows = conn.execute(

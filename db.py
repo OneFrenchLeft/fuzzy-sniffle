@@ -212,6 +212,11 @@ def init_db():
     # (deck SR, FSRS) n'est pas touchee. 1 = incluse (defaut), 0 = hors simulation.
     if 'kholle_enabled' not in cols:
         conn.execute("ALTER TABLE forgecards ADD COLUMN kholle_enabled INTEGER NOT NULL DEFAULT 1")
+    # Eliot: un hors-serie peut etre active dans la SR (section bonus, hors
+    # quotas et hors streak). Defaut 0 : rien ne change tant que l'admin
+    # n'a pas bascule la carte une par une.
+    if 'sr_enabled' not in cols:
+        conn.execute("ALTER TABLE forgecards ADD COLUMN sr_enabled INTEGER NOT NULL DEFAULT 0")
     # backfill du code public : numero pour le pool normal, h1/h2... pour les hors-serie
     hs_idx = 0
     for row in conn.execute("SELECT numero, hors_serie, code, fiche_file, correction_file, bareme_file FROM forgecards ORDER BY numero ASC").fetchall():
