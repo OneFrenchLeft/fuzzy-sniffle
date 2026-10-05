@@ -595,3 +595,7 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
 
 
 
+/* Bouton "rajouter une forgecard" en fin de file (issue #4) */
+.sr-extra-box{margin-top:1rem;padding:1rem;border:1.5px dashed var(--border);border-radius:12px;text-align:center;background:var(--surface)}
+.sr-extra-box .btn-ghost{font-weight:700}
+.sr-extra-hint{margin:.5rem 0 0;font-size:.8rem;color:var(--muted)}
