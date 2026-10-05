@@ -170,8 +170,13 @@ def compute_daily(conn, prenom, params):
     new_done = sum(c for w, c in done if w)
     review_done = sum(c for w, c in done if not w)
     total = min(params['daily_new_limit'], due_new) + min(params['daily_review_limit'], due_review)
-    remaining = (max(0, min(params['daily_new_limit'], due_new) - new_done)
-                 + max(0, min(params['daily_review_limit'], due_review) - review_done))
+    # Eliot: le reste = le quota pas encore consomme, borne par ce qui est
+    # encore du. L'ancienne formule min(limit, du) - fait soustrayait les
+    # reviews faites du compte de cartes dues : un eleve qui avait fait 1
+    # review sur 1 due voyait "0 restante" alors que son quota en autorisait
+    # 2 autres (cas Eddie). Aligne sur la logique du site (sr.py).
+    remaining = (min(max(0, params['daily_new_limit'] - new_done), due_new)
+                 + min(max(0, params['daily_review_limit'] - review_done), due_review))
     return {'due_new': due_new, 'due_review': due_review, 'new_done': new_done,
             'review_done': review_done, 'total': total, 'done': new_done + review_done,
             'remaining': remaining}
@@ -251,13 +256,16 @@ def get_jokers(conn, prenom):
 
 
 async def dm_user(discord_id, text):
+    """Envoie un DM. Retourne True si envoye, False sinon (au lieu d'avaler
+    l'erreur en silence — l'appelant peut la loguer)."""
     if not discord_id:
-        return
+        return False
     try:
         u = await client.fetch_user(int(discord_id))
         await u.send(text)
+        return True
     except Exception:
-        pass
+        return False
 
 
 # ---------- Bot ----------
@@ -1048,17 +1056,24 @@ async def daily_reminder():
     params = read_params()
     conn = fc_db()
     bots = bot_db()
-    for prenom, discord_id in bots.execute(
+    links = bots.execute(
         'SELECT prenom, discord_id FROM links WHERE notifications=1 AND prenom != \'admin\''
-    ).fetchall():
+    ).fetchall()
+    print(f'[reminder] {len(links)} eleve(s) avec notifications actives')
+    for prenom, discord_id in links:
         try:
             remaining = compute_remaining(conn, prenom, params)
-        except Exception:
+        except Exception as e:
+            print(f'[reminder] erreur de calcul pour {prenom}: {e!r}')
             continue
         if remaining <= 0:
             continue
-        await dm_user(discord_id,
-                      f"⏰ Il te reste **{plural(remaining, 'carte')}** Forgecards aujourd'hui.\n{SITE_URL}")
+        ok = await dm_user(discord_id,
+                           f"⏰ Il te reste **{plural(remaining, 'carte')}** Forgecards aujourd'hui.\n{SITE_URL}")
+        if not ok:
+            print(f'[reminder] ECHEC DM pour {prenom} (discord_id={discord_id})')
+            continue
+        print(f'[reminder] DM envoye a {prenom} (reste {remaining})')
         try:
             await _post('/api/internal/log-event',
                         {'prenom': prenom, 'type': 'reminder', 'payload': 'daily'})
@@ -1277,6 +1292,23 @@ async def weekly_recap():
 
 
 # ---------- Demarrage ----------
+
+def _resilient(loop):
+    """Une iteration qui leve ne doit jamais tuer la boucle pour de bon
+    (tasks.Loop s'arrete silencieusement apres une exception). On log et on
+    relance : le rappel quotidien, la garde de streak 23h55 et le recap
+    hebdo tournent quoi qu'il arrive."""
+    @loop.error
+    async def _on_loop_error(error):
+        print(f'[bot] boucle {loop.coro.__name__} en erreur: {error!r} — redemarrage')
+        loop.restart()
+    return loop
+
+
+for _t in (daily_reminder, watch_new_cards, rotate_status,
+           nightly_streak_guard, weekly_recap):
+    _resilient(_t)
+
 
 @client.event
 async def on_ready():
