@@ -52,6 +52,7 @@ DEFAULT_PARAMS = {
     'fsrs_retention': 0.90,
     'daily_new_limit': 3,
     'daily_review_limit': 3,
+    'qcm_daily_new_limit': 10,
     "previous_chapter_bonus": 0.2,
     "last_chapter_bonus": 0.9,
     "teacher_difficulty_weight": 0.15
@@ -126,7 +127,7 @@ def read_params():
     out = DEFAULT_PARAMS.copy()
     for k, default in DEFAULT_PARAMS.items():
         try:
-            if k in ('max_active_num', 'daily_new_limit', 'daily_review_limit', 'max_hors_serie_num', 'max_kholle_num'):
+            if k in ('max_active_num', 'daily_new_limit', 'daily_review_limit', 'max_hors_serie_num', 'max_kholle_num', 'qcm_daily_new_limit'):
                 out[k] = max(0, int(data.get(k, default)))
             elif k == 'fsrs_retention':
                 out[k] = min(max(float(data.get(k, default)), 0.80), 0.97)

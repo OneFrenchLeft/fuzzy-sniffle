@@ -35,7 +35,14 @@ def favicon():
 def qcm_page():
     if not session.get('sr_user'):
         return render_template('index.html')
-    return render_template('qcm.html', prenom=session['sr_user'])
+    return render_template('qcm.html', prenom=session['sr_user'], active='qcm')
+
+
+@bp.route('/ankimie')
+def page_ankimie():
+    if not session.get('sr_user'):
+        return render_template('index.html')
+    return render_template('ankimie.html', active='ankimie')
 
 @bp.route('/qcm-images/<path:filename>')
 def qcm_image(filename):

@@ -7,7 +7,7 @@ from flask_socketio import SocketIO
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import TEMPLATES, STATIC, DATA
-import views, auth, cards, sr as sr_routes, qcm_admin, qcm_invites, internal as internal_routes, draw
+import views, auth, cards, sr as sr_routes, qcm_admin, qcm_invites, internal as internal_routes, draw, ankimie
 from db import init_db, ensure_db, db
 from streak import streak_verdict
 from config import read_params, now_paris
@@ -32,7 +32,7 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 from views import add_security_headers
 app.after_request(add_security_headers)
 
-for module in (views, auth, cards, sr_routes, qcm_admin, qcm_invites, internal_routes, draw):
+for module in (views, auth, cards, sr_routes, qcm_admin, qcm_invites, internal_routes, draw, ankimie):
     app.register_blueprint(module.bp)
 
 # Small: Same-origin only. The default ('*') lets any random site open a

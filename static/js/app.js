@@ -2371,6 +2371,171 @@ document.addEventListener('keydown', function (e) {
   }
 });
 
+/* --- Ankimie : SR sur le deck QCM chimie (independant de la SR Forgecards) --- */
+var ankTotal = 0;
+var ankDone = 0;
+
+function openAnkimieInfoModal() { om('ank-info-overlay'); }
+function closeAnkimieInfoModal() { cm('ank-info-overlay'); }
+
+function loadAnkimieToday() {
+  var list = document.getElementById('ank-list');
+  if (!list) return;
+  list.innerHTML = '<p>Chargement de tes cartes…</p>';
+  fetchJson('/api/ankimie/today').then(function (data) {
+    var status = document.getElementById('ank-daily-status');
+    if (status) {
+      status.style.display = 'block';
+      var q = document.getElementById('ank-quota-badge');
+      if (q) {
+        q.textContent = 'Nouvelles: ' + data.new_done_today + '/' + data.new_limit +
+          (data.new_remaining_pool > 0 ? ' (' + data.new_remaining_pool + ' en reserve)' : '');
+      }
+    }
+    var cards = data.cards || [];
+    list.innerHTML = '';
+    ankTotal = cards.length;
+    ankDone = 0;
+    updateAnkProgress();
+    if (!cards.length) {
+      list.innerHTML = '<p>Rien a faire aujourd\'hui dans ce deck. Reviens demain.</p>';
+      return;
+    }
+    cards.forEach(function (c) { list.appendChild(buildAnkCard(c)); });
+  }).catch(function (err) {
+    if (err && err.status === 401) { openNameGate(); return; }
+    list.innerHTML = '<p>Impossible de charger tes cartes.</p><button class="btn-ghost btn-small" onclick="loadAnkimieToday()">Réessayer</button>';
+  });
+}
+
+function buildAnkCard(c) {
+  var div = document.createElement('div');
+  div.className = 'sr-item';
+  div.setAttribute('data-qid', c.qid);
+  var html = '<div class="sr-top"><div class="sr-name">Question' +
+    (c.was_new ? ' <span class="chip-chapitre" style="background:rgba(230,126,34,.12);color:#e67e22">Nouvelle</span>' : '') +
+    ' <span class="chip-chapitre">' + esc(c.chapitre || 'Autre') + '</span></div></div>';
+  html += '<div class="ank-question">' + esc(c.question) + '</div>';
+  if (c.image) {
+    html += '<div class="ank-image"><img src="' + esc(c.image) + '" alt="Illustration de la question" loading="lazy"></div>';
+  }
+  html += '<div class="ank-choices">';
+  c.choices.forEach(function (ch, i) {
+    html += '<button class="ank-choice" data-i="' + i + '" type="button">' + esc(ch.text || '(image)') + '</button>';
+  });
+  html += '</div>';
+  html += '<div class="ank-reveal" style="display:none"></div>';
+  html += '<div class="sr-actions" style="display:none">' +
+    '<div class="sr-block-title" style="margin-bottom:.4rem">Autoévaluation</div>' +
+    '<div class="sr-grade-row">' +
+    '<button class="btn-rate btn-again" data-result="again">Pas réussi</button>' +
+    '<button class="btn-rate btn-hard" data-result="hard">Difficile</button>' +
+    '<button class="btn-rate btn-good" data-result="good">Réussi</button>' +
+    '<button class="btn-rate btn-easy" data-result="easy">Automatique</button>' +
+    '</div></div>';
+  div.innerHTML = html;
+
+  var chosen = null;
+  div.querySelectorAll('.ank-choice').forEach(function (b) {
+    b.onclick = function () {
+      if (chosen !== null) return;
+      chosen = parseInt(b.getAttribute('data-i'), 10);
+      div.querySelectorAll('.ank-choice').forEach(function (x) { x.disabled = true; });
+      b.classList.add('ank-chosen');
+      fetchJson('/api/ankimie/' + encodeURIComponent(c.qid) + '/answer').then(function (a) {
+        if (!a || !a.ok) { showToast('Impossible de révéler la réponse.'); return; }
+        var choices = div.querySelectorAll('.ank-choice');
+        var good = a.answer === chosen;
+        if (choices[a.answer]) choices[a.answer].classList.add('ank-correct');
+        if (!good && choices[chosen]) choices[chosen].classList.add('ank-wrong');
+        var reveal = div.querySelector('.ank-reveal');
+        reveal.innerHTML = '<div class="ank-verdict ' + (good ? 'good' : 'bad') + '">' +
+          (good ? '✅ Bonne réponse !'
+                : '❌ Raté — la bonne réponse était : <strong>' + esc(c.choices[a.answer] ? (c.choices[a.answer].text || '') : '') + '</strong>') +
+          '</div>' +
+          (a.explication ? '<div class="ank-explication">' + esc(a.explication) + '</div>' : '');
+        reveal.style.display = 'block';
+        div.querySelector('.sr-actions').style.display = 'block';
+        typesetMath(div);
+      }).catch(function () { showToast('Impossible de révéler la réponse.'); });
+    };
+  });
+  div.querySelectorAll('.btn-rate').forEach(function (b) {
+    b.onclick = function () {
+      if (b.disabled) return;
+      div.querySelectorAll('.btn-rate').forEach(function (x) { x.disabled = true; });
+      fetchJson('/api/ankimie/' + encodeURIComponent(c.qid) + '/review', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ result: b.getAttribute('data-result'), chosen: chosen })
+      }).then(function (res) {
+        if (res && res.ok) {
+          showToast('Carte enregistree.');
+          removeAnkCard(c.qid);
+        } else {
+          div.querySelectorAll('.btn-rate').forEach(function (x) { x.disabled = false; });
+          showToast('Erreur : ' + ((res && res.error) || 'enregistrement impossible'));
+        }
+      }).catch(function (err) {
+        if (err && err.status === 401) { openNameGate(); return; }
+        div.querySelectorAll('.btn-rate').forEach(function (x) { x.disabled = false; });
+        showToast('Erreur reseau, la carte n\'a pas ete enregistree.');
+      });
+    };
+  });
+  typesetMath(div);
+  return div;
+}
+
+function removeAnkCard(qid) {
+  var div = document.querySelector('#ank-list .sr-item[data-qid="' + qid + '"]');
+  if (!div) return;
+  div.style.transition = 'opacity .3s, transform .3s';
+  div.style.opacity = '0';
+  div.style.transform = 'scale(0.95)';
+  setTimeout(function () {
+    div.remove(); ankDone++; updateAnkProgress();
+    var list = document.getElementById('ank-list');
+    if (list && list.children.length === 0) {
+      list.innerHTML = '<p>Bravo, deck du jour termine ! Reviens demain.</p>';
+      fireConfetti();
+    }
+  }, 300);
+}
+
+function updateAnkProgress() {
+  var el = document.getElementById('ank-progress');
+  if (!el) return;
+  if (ankTotal > 0) {
+    el.style.display = 'block';
+    el.textContent = 'Progression : ' + ankDone + ' / ' + ankTotal;
+  } else {
+    el.style.display = 'none';
+    el.textContent = '';
+  }
+}
+
+function loadAnkimieStats() {
+  var box = document.getElementById('ankimie-stats');
+  if (!box) return;
+  adminAction('/api/ankimie/stats', 'GET', function (d) {
+    var html = '<h3>Élèves (deck ' + esc(d.deck || '') + ')</h3>';
+    html += '<table class="weak-table"><thead><tr><th>Élève</th><th>Vues</th><th>Aujourd\'hui</th><th>Réussite</th><th>Dues</th></tr></thead><tbody>';
+    (d.students || []).forEach(function (s) {
+      html += '<tr><td>' + esc(s.prenom) + '</td><td>' + s.vues + '</td><td>' + s.aujourd_hui + '</td><td>' +
+        (s.taux != null ? s.taux + ' %' : '-') + '</td><td>' + s.dues + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    html += '<h3 style="margin-top:1rem">Par chapitre</h3>';
+    html += '<table class="weak-table"><thead><tr><th>Chapitre</th><th>Réponses</th><th>Réussite</th></tr></thead><tbody>';
+    (d.chapters || []).forEach(function (ch) {
+      html += '<tr><td>' + esc(ch.chapitre) + '</td><td>' + ch.questions + '</td><td>' +
+        (ch.taux != null ? ch.taux + ' %' : '-') + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    box.innerHTML = html;
+  }, 'Stats Ankimie indisponibles.');
+}
+
 document.addEventListener('DOMContentLoaded', function () {
   applyTheme(localStorage.getItem('mdc-theme') || 'light');
   if (PAGE === 'compte') loadCompteDashboard();
@@ -2439,10 +2604,15 @@ document.addEventListener('DOMContentLoaded', function () {
         if (currentSrUser) loadSrToday();
         else openNameGate();
       }
+      if (PAGE === 'ankimie') {
+        if (currentSrUser) loadAnkimieToday();
+        else openNameGate();
+      }
     })
     .catch(function () {
       refreshAuthUI();
       if (PAGE === 'sr') openNameGate();
+      if (PAGE === 'ankimie') openNameGate();
     });
 });
 (function () {

@@ -601,3 +601,19 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
 .sr-extra-hint{margin:.5rem 0 0;font-size:.8rem;color:var(--muted)}
 /* Section hors-series de la SR (bonus, hors quota — issue #5) */
 #sr-hs-wrap .section-title{font-size:1rem}
+
+/* Ankimie — SR sur les QCM chimie (issue #6) */
+.ank-question{font-size:1.02rem;font-weight:600;margin:.25rem 0 .75rem}
+.ank-choices{display:flex;flex-direction:column;gap:.5rem;margin-bottom:.75rem}
+.ank-choice{display:block;width:100%;text-align:left;padding:.65rem .9rem;border:1.5px solid var(--border);border-radius:.75rem;background:var(--surface);cursor:pointer;font:inherit;transition:border-color .15s,background .15s}
+.ank-choice:hover{border-color:var(--primary)}
+.ank-choice.ank-chosen{border-color:var(--primary);background:color-mix(in srgb,var(--primary) 8%,var(--surface))}
+.ank-choice.ank-correct{border-color:#27ae60;background:color-mix(in srgb,#27ae60 12%,var(--surface));color:#1e8449;font-weight:700}
+.ank-choice.ank-wrong{border-color:#c0392b;background:color-mix(in srgb,#c0392b 10%,var(--surface));color:#922b21}
+.ank-choice:disabled{cursor:default}
+.ank-reveal{margin:.25rem 0 .5rem}
+.ank-verdict{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.5rem 0;font-size:.85rem}
+.ank-verdict.good{color:#1e8449;font-weight:700}
+.ank-verdict.bad{color:#922b21;font-weight:700}
+.ank-explication{margin-top:.5rem;padding:.75rem;border-left:3px solid var(--border);background:var(--surface);border-radius:0 .5rem .5rem 0;font-size:.9rem}
+.ank-image img{max-width:100%;border-radius:.5rem;margin-top:.5rem}
