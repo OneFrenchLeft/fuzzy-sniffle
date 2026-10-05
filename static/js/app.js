@@ -1280,9 +1280,18 @@ function renderAdminDetail() {
     '<input type="checkbox" data-action="kholle-toggle" style="width:auto"' + (kholleOn ? ' checked' : '') + '> Inclure dans la simulation de kholle' +
     (kholleOn ? '' : ' <span class="chip-chapitre" style="background:rgba(192,57,43,.12);color:#c0392b">hors simulation</span>') +
     '</label>';
+  // Eliot: les hors-series peuvent etre actives dans la SR (bonus, hors quota).
+  var srLine = '';
+  if (c.hors_serie) {
+    var srOn = c.sr_enabled !== 0;
+    srLine = '<label style="display:flex;align-items:center;gap:.5rem;margin-top:.5rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text)">' +
+      '<input type="checkbox" data-action="sr-toggle" style="width:auto"' + (srOn ? ' checked' : '') + '> Activer dans la repetition espacee (bonus, hors quota)' +
+      (srOn ? '' : ' <span class="chip-chapitre" style="background:rgba(192,57,43,.12);color:#c0392b">hors SR</span>') +
+      '</label>';
+  }
   var row = adminRow(
     cardTitleHtml(c) +
-    '<div class="meta">' + esc(c.fiche_file) + (c.bareme_file ? (' | bareme: ' + esc(c.bareme_file)) : ' | pas de bareme') + ' | difficulté : ' + esc(c.teacher_difficulty != null ? c.teacher_difficulty : (c.difficulty != null ? c.difficulty : '-')) + '</div>' + wstats + kholleLine,
+    '<div class="meta">' + esc(c.fiche_file) + (c.bareme_file ? (' | bareme: ' + esc(c.bareme_file)) : ' | pas de bareme') + ' | difficulté : ' + esc(c.teacher_difficulty != null ? c.teacher_difficulty : (c.difficulty != null ? c.difficulty : '-')) + '</div>' + wstats + kholleLine + srLine,
     '<button class="btn-ghost btn-small" data-action="edit">Modifier</button>' +
     '<button class="btn-ghost btn-small" data-action="reset-stats">Reinitialiser stats</button>' +
     '<button class="btn-danger btn-small" data-action="delete">Supprimer</button>'
@@ -1312,6 +1321,32 @@ function renderAdminDetail() {
       showToast(err && err.status === 401 ? 'Session admin expiree, reconnecte-toi.' : 'Erreur reseau.');
     });
   };
+  if (c.hors_serie) {
+    row.querySelector('[data-action="sr-toggle"]').onchange = function () {
+      var cb = this;
+      cb.disabled = true;
+      fetchJson('/api/forgecards/' + c.numero + '/sr', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: cb.checked })
+      }).then(function (res) {
+        cb.disabled = false;
+        if (res && res.ok) {
+          c.sr_enabled = res.sr_enabled;
+          renderAdminDetail();
+          showToast(res.sr_enabled
+            ? (c.label || c.numero) + ' activee dans la repetition espacee (bonus, hors quota).'
+            : (c.label || c.numero) + ' retiree de la repetition espacee.');
+        } else {
+          cb.checked = !cb.checked;
+          showToast('Erreur : ' + ((res && res.error) || 'action impossible'));
+        }
+      }).catch(function (err) {
+        cb.disabled = false;
+        cb.checked = !cb.checked;
+        showToast(err && err.status === 401 ? 'Session admin expiree, reconnecte-toi.' : 'Erreur reseau.');
+      });
+    };
+  }
   row.querySelector('[data-action="edit"]').onclick = function () { openEditModal(c); };
   row.querySelector('[data-action="delete"]').onclick = function () {
     askConfirm('Supprimer definitivement la fiche ' + c.numero + ' ?', function () { deleteFiche(c.numero); });
@@ -1939,8 +1974,12 @@ function updateDailyStatusOnly() {
 }
 function checkSrListEmpty() {
   var list = document.getElementById('sr-list');
+  var hsList = document.getElementById('sr-hs-list');
+  var hsRemaining = hsList ? hsList.querySelectorAll('.sr-item').length : 0;
   if (list && list.children.length === 0) {
-    list.innerHTML = '<p>Bravo, tu as termine toutes tes cartes du jour ! Reviens demain.</p>';
+    list.innerHTML = hsRemaining > 0
+      ? '<p>Bravo, quota du jour termine ! Il te reste les hors-series ci-dessous.</p>'
+      : '<p>Bravo, tu as termine toutes tes cartes du jour ! Reviens demain.</p>';
     fireConfetti();
     updateExtraSlot();
   }
@@ -1999,7 +2038,13 @@ function removeCardFromList(numero) {
     div.style.transition = 'opacity .3s, transform .3s';
     div.style.opacity = '0';
     div.style.transform = 'scale(0.95)';
-    setTimeout(function () { div.remove(); delete cardStartTimes[numero]; delete chronoDone[numero]; updateChrono(); srDoneToday++; updateSrProgress(); checkSrListEmpty(); }, 300);
+    var isHs = div.getAttribute('data-hs') === '1';
+    setTimeout(function () {
+      div.remove(); delete cardStartTimes[numero]; delete chronoDone[numero]; updateChrono();
+      // Eliot: les HS sont hors quota — elles ne bougent pas la progression.
+      if (!isHs) { srDoneToday++; updateSrProgress(); }
+      checkSrListEmpty();
+    }, 300);
   } else {
     checkSrListEmpty();
   }
@@ -2051,6 +2096,18 @@ function loadSrToday() {
       return;
     }
     cards.forEach(function (c) { list.appendChild(buildSrCard(c)); });
+    var hsCards = data.hs_cards || [];
+    var hsWrap = document.getElementById('sr-hs-wrap');
+    var hsList = document.getElementById('sr-hs-list');
+    if (hsWrap && hsList) {
+      hsList.innerHTML = '';
+      hsWrap.style.display = hsCards.length ? 'block' : 'none';
+      hsCards.forEach(function (c) {
+        var div = buildSrCard(c);
+        div.setAttribute('data-hs', '1');
+        hsList.appendChild(div);
+      });
+    }
   }).catch(function (err) {
     if (err && err.status === 401) { openNameGate(); return; }
     list.innerHTML = '<p>Impossible de charger tes cartes.</p><button class="btn-ghost btn-small" onclick="loadSrToday()">Réessayer</button>';
@@ -2062,7 +2119,8 @@ function buildSrCard(c) {
   div.className = 'sr-item';
   div.setAttribute('data-numero', c.numero);
   if (c.was_new) div.setAttribute('data-was-new', '1');
-      var html = '<div class="sr-top"><div class="sr-name">Fiche ' + esc(c.numero) + (c.titre ? (' - ' + esc(c.titre)) : '') + '<span class="chip-chapitre">' + esc(c.chapitre || 'Autre') + '</span>' + (c.was_new ? '<span class="chip-chapitre" style="background:rgba(230,126,34,.12);color:#e67e22">Nouvelle</span>' : '') + '</div></div>';
+      var cardName = c.label ? esc(c.label) : ('Fiche ' + esc(c.numero));
+  var html = '<div class="sr-top"><div class="sr-name">' + cardName + (c.titre ? (' - ' + esc(c.titre)) : '') + '<span class="chip-chapitre">' + esc(c.chapitre || 'Autre') + '</span>' + (c.was_new ? '<span class="chip-chapitre" style="background:rgba(230,126,34,.12);color:#e67e22">Nouvelle</span>' : '') + '</div></div>';
       html += '<div class="sr-block sr-toolbar">';
       html += '<a class="sr-chip" data-action="open-enonce" data-numero="' + esc(c.numero) + '" href="/uploads/fiche/' + encodeURIComponent(c.fiche_file || (c.numero + '.pdf')) + '" target="_blank">📄 Énoncé</a>';
       if (c.indices) {
