@@ -176,9 +176,27 @@ class _Group:
         return _deco_factory
 
 
+class _LoopStub:
+    """Imite discord.ext.tasks.Loop (decorateur .error, restart, start...)."""
+    def __init__(self, fn):
+        self.coro = fn
+
+    def error(self, f):
+        return f
+
+    def start(self):
+        pass
+
+    def is_running(self):
+        return False
+
+    def restart(self):
+        pass
+
+
 def _loop(*a, **k):
     def deco(fn):
-        return fn
+        return _LoopStub(fn)
     return deco
 
 
