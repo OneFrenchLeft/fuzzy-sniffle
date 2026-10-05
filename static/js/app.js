@@ -13,6 +13,11 @@ var pendingAgainCard = null;
 var currentEditNumero = null;
 var srTotalToday = 0;
 var srDoneToday = 0;
+// Pool de cartes dues au-dela du quota (bouton "rajouter une forgecard") et
+// numeros deja servis/faits cette session, pour ne jamais resservir la meme.
+var srPoolNew = 0;
+var srPoolReview = 0;
+var srSeenToday = [];
 var EMOJI_KEYPAD = [];
 var EMOJI_PW_LENGTH = 4;
 var currentEmojiPw = [];
@@ -1937,10 +1942,59 @@ function checkSrListEmpty() {
   if (list && list.children.length === 0) {
     list.innerHTML = '<p>Bravo, tu as termine toutes tes cartes du jour ! Reviens demain.</p>';
     fireConfetti();
+    updateExtraSlot();
   }
+}
+function updateExtraSlot() {
+  var slot = document.getElementById('sr-extra-slot');
+  if (!slot) return;
+  if (srPoolNew + srPoolReview <= 0) { slot.innerHTML = ''; return; }
+  slot.innerHTML = '<div class="sr-extra-box">' +
+    '<button class="btn-ghost" id="sr-extra-btn" type="button">＋ Rajouter une forgecard</button>' +
+    '<p class="sr-extra-hint">Uniquement si tu as le temps et que tu as assez travaille les autres matieres !</p>' +
+    '</div>';
+  var btn = document.getElementById('sr-extra-btn');
+  if (btn) btn.onclick = loadExtraCard;
+}
+function loadExtraCard() {
+  var slot = document.getElementById('sr-extra-slot');
+  var btn = document.getElementById('sr-extra-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Recherche d\'une carte…'; }
+  var exclude = srSeenToday.slice();
+  document.querySelectorAll('.sr-item[data-numero]').forEach(function (el) {
+    var n = parseInt(el.getAttribute('data-numero'), 10);
+    if (!isNaN(n) && exclude.indexOf(n) === -1) exclude.push(n);
+  });
+  fetchJson('/api/sr/extra' + (exclude.length ? ('?exclude=' + exclude.join(',')) : '')).then(function (data) {
+    if (!data || !data.card) {
+      srPoolNew = 0; srPoolReview = 0;
+      if (slot) slot.innerHTML = '<p class="sr-extra-hint">Plus de carte en queue, c\'est fini pour aujourd\'hui.</p>';
+      return;
+    }
+    if (data.pool) { srPoolNew = data.pool.new; srPoolReview = data.pool.review; }
+    var list = document.getElementById('sr-list');
+    if (list) list.innerHTML = '';
+    if (slot) slot.innerHTML = '';
+    var div = buildSrCard(data.card);
+    div.setAttribute('data-extra', '1');
+    if (list) list.appendChild(div);
+    srTotalToday++;
+    updateSrProgress();
+    showToast('Une carte de plus. C\'est toi qui decides.');
+  }).catch(function (err) {
+    if (err && err.status === 401) { openNameGate(); return; }
+    if (slot) slot.innerHTML = '';
+    updateExtraSlot();
+    showToast('Impossible de charger une carte supplementaire.');
+  });
 }
 function removeCardFromList(numero) {
   var div = document.querySelector('.sr-item[data-numero="' + numero + '"]');
+  if (srSeenToday.indexOf(numero) === -1) srSeenToday.push(numero);
+  if (div && div.getAttribute('data-extra') === '1') {
+    if (div.getAttribute('data-was-new') === '1') srPoolNew = Math.max(0, srPoolNew - 1);
+    else srPoolReview = Math.max(0, srPoolReview - 1);
+  }
   if (div) {
     div.style.transition = 'opacity .3s, transform .3s';
     div.style.opacity = '0';
@@ -1977,6 +2031,11 @@ function loadSrToday() {
   list.innerHTML = '<p>Chargement de tes cartes…</p>';
   fetchJson('/api/sr/today').then(function (data) {
     renderDailyStatus(data);
+    srPoolNew = data.new_remaining_pool || 0;
+    srPoolReview = data.review_remaining_pool || 0;
+    srSeenToday = [];
+    var slot = document.getElementById('sr-extra-slot');
+    if (slot) slot.innerHTML = '';
     var cards = data.cards || [];
     list.innerHTML = '';
     srTotalToday = cards.length;
@@ -1988,12 +2047,21 @@ function loadSrToday() {
         var forecastEl = document.getElementById('sr-forecast-badge');
         if (forecastEl) forecastEl.textContent = 'Jour validé (Bravo tu as fait toutes les cartes du jour).';
       }
+      updateExtraSlot();
       return;
     }
-    cards.forEach(function (c) {
-      var div = document.createElement('div');
-      div.className = 'sr-item';
-      div.setAttribute('data-numero', c.numero);
+    cards.forEach(function (c) { list.appendChild(buildSrCard(c)); });
+  }).catch(function (err) {
+    if (err && err.status === 401) { openNameGate(); return; }
+    list.innerHTML = '<p>Impossible de charger tes cartes.</p><button class="btn-ghost btn-small" onclick="loadSrToday()">Réessayer</button>';
+  });
+}
+
+function buildSrCard(c) {
+  var div = document.createElement('div');
+  div.className = 'sr-item';
+  div.setAttribute('data-numero', c.numero);
+  if (c.was_new) div.setAttribute('data-was-new', '1');
       var html = '<div class="sr-top"><div class="sr-name">Fiche ' + esc(c.numero) + (c.titre ? (' - ' + esc(c.titre)) : '') + '<span class="chip-chapitre">' + esc(c.chapitre || 'Autre') + '</span>' + (c.was_new ? '<span class="chip-chapitre" style="background:rgba(230,126,34,.12);color:#e67e22">Nouvelle</span>' : '') + '</div></div>';
       html += '<div class="sr-block sr-toolbar">';
       html += '<a class="sr-chip" data-action="open-enonce" data-numero="' + esc(c.numero) + '" href="/uploads/fiche/' + encodeURIComponent(c.fiche_file || (c.numero + '.pdf')) + '" target="_blank">📄 Énoncé</a>';
@@ -2082,13 +2150,9 @@ function loadSrToday() {
           indicesToggle.setAttribute('aria-expanded', String(isHidden));
         };
       }
-      list.appendChild(div);
-      queuePreview(c.numero, div);
-    });
-  }).catch(function (err) {
-    if (err && err.status === 401) { openNameGate(); return; }
-    list.innerHTML = '<p>Impossible de charger tes cartes.</p><button class="btn-ghost btn-small" onclick="loadSrToday()">Réessayer</button>';
-  });
+  list.appendChild(div);
+  queuePreview(c.numero, div);
+  return div;
 }
 
 function loadPreview(numero) {

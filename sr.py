@@ -158,6 +158,66 @@ def sr_today():
         'jokers': jokers,
     })
 
+def _due_cards(conn, prenom, params):
+    """Cartes dues aujourd'hui (hors serie exclues), triees comme sr_today.
+
+    Meme clause d'increment que le bot : les fiches rendues tirable par un
+    increment de max_active aujourd'hui ne sont dues que demain.
+    """
+    today = now_paris().date().isoformat()
+    max_active = int(params.get('max_active_num', 36))
+    increment = params.get('_max_active_increment') or {}
+    inc_date = str(increment.get('date', ''))
+    try:
+        inc_from = int(increment.get('from', max_active))
+    except (TypeError, ValueError):
+        inc_from = max_active
+    rows = conn.execute(
+        'SELECT f.numero, f.fiche_file, f.correction_file, f.bareme_file, f.titre, f.indices, f.chapitre, '
+        's.difficulty, s.stability, s.next_review, s.last_review, s.repetitions '
+        'FROM forgecards f '
+        'JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? '
+        'WHERE f.numero <= ? AND f.hors_serie = 0 '
+        'AND NOT (f.numero > ? AND ? >= ?) '
+        'ORDER BY f.numero ASC',
+        (prenom, max_active, inc_from, inc_date, today)
+    ).fetchall()
+    due = [dict(r) for r in rows if (r['next_review'] is None or r['next_review'] <= today)]
+    due.sort(key=lambda c: (c.get('next_review') or '', -(c.get('difficulty') or 5)))
+    return due
+
+
+@bp.route('/api/sr/extra', methods=['GET'])
+@require_sr_user
+def sr_extra():
+    """Prochaine carte due au-dela du quota (bouton 'rajouter une forgecard').
+
+    Le client envoie la liste des numeros deja servis cette session pour
+    qu'on ne lui rende pas une carte qu'il a deja sous les yeux.
+    """
+    ensure_db()
+    prenom = session['sr_user']
+    params = read_params()
+    exclude = set()
+    for chunk in (request.args.get('exclude') or '').split(','):
+        chunk = chunk.strip()
+        if chunk.isdigit():
+            exclude.add(int(chunk))
+    conn = db()
+    due = [c for c in _due_cards(conn, prenom, params) if c['numero'] not in exclude]
+    conn.close()
+    new_due = [c for c in due if c.get('repetitions', 0) == 0]
+    review_due = [c for c in due if c.get('repetitions', 0) > 0]
+    if not due:
+        return jsonify({'ok': True, 'card': None, 'pool': {'new': 0, 'review': 0}})
+    card = interleave_by_chapitre(review_due + new_due)[0]
+    card['was_new'] = card.get('repetitions', 0) == 0
+    return jsonify({'ok': True, 'card': card, 'pool': {
+        'new': len(new_due) - (1 if card['was_new'] else 0),
+        'review': len(review_due) - (0 if card['was_new'] else 1),
+    }})
+
+
 @bp.route('/api/sr/dashboard', methods=['GET'])
 @require_sr_user
 def sr_dashboard():
