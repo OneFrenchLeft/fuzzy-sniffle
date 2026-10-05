@@ -617,3 +617,4 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
 .ank-verdict.bad{color:#922b21;font-weight:700}
 .ank-explication{margin-top:.5rem;padding:.75rem;border-left:3px solid var(--border);background:var(--surface);border-radius:0 .5rem .5rem 0;font-size:.9rem}
 .ank-image img{max-width:100%;border-radius:.5rem;margin-top:.5rem}
+.ank-choice img{display:block;max-width:100%;max-height:120px;margin:.35rem auto 0;border-radius:.4rem}

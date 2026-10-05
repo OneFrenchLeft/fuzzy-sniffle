@@ -250,7 +250,7 @@ function logoutSr() {
   setupExportButton();
   refreshAuthUI();
   showToast('Déconnecté. À bientôt !');
-  if (PAGE === 'sr') location.href = '/';
+  if (PAGE === 'sr' || PAGE === 'ankimie' || PAGE === 'qcm') location.href = '/';
 }
 
 function chapitreOptionsHtml(list) {
@@ -373,7 +373,7 @@ function goToPwStep(prenom) {
 
 function cancelGate() {
   cm('name-gate-overlay');
-  if (PAGE === 'sr' && !currentSrUser) location.href = '/';
+  if ((PAGE === 'sr' || PAGE === 'ankimie' || PAGE === 'qcm') && !currentSrUser) location.href = '/';
 }
 
 function loadEmojiKeypad() {
@@ -432,6 +432,8 @@ function validateGatePw() {
     setupExportButton();
     refreshAuthUI();
     if (PAGE === 'sr') loadSrToday();
+    if (PAGE === 'ankimie') loadAnkimieToday();
+    if (PAGE === 'qcm') location.reload();
   }, function () {
     resetEmojiPw();
     var errEl = document.getElementById('gate-pw-error');
@@ -2374,9 +2376,19 @@ document.addEventListener('keydown', function (e) {
 /* --- Ankimie : SR sur le deck QCM chimie (independant de la SR Forgecards) --- */
 var ankTotal = 0;
 var ankDone = 0;
+var ankNewDone = 0;     // nouvelles cartes faites aujourd'hui (badge quota)
+var ankNewLimit = 10;
+var ankPool = 0;        // nouvelles encore en reserve dans le deck
 
 function openAnkimieInfoModal() { om('ank-info-overlay'); }
 function closeAnkimieInfoModal() { cm('ank-info-overlay'); }
+
+function updateAnkQuota() {
+  var q = document.getElementById('ank-quota-badge');
+  if (!q) return;
+  q.textContent = 'Nouvelles: ' + ankNewDone + '/' + ankNewLimit +
+    (ankPool > 0 ? ' (' + ankPool + ' en reserve)' : '');
+}
 
 function loadAnkimieToday() {
   var list = document.getElementById('ank-list');
@@ -2384,14 +2396,11 @@ function loadAnkimieToday() {
   list.innerHTML = '<p>Chargement de tes cartes…</p>';
   fetchJson('/api/ankimie/today').then(function (data) {
     var status = document.getElementById('ank-daily-status');
-    if (status) {
-      status.style.display = 'block';
-      var q = document.getElementById('ank-quota-badge');
-      if (q) {
-        q.textContent = 'Nouvelles: ' + data.new_done_today + '/' + data.new_limit +
-          (data.new_remaining_pool > 0 ? ' (' + data.new_remaining_pool + ' en reserve)' : '');
-      }
-    }
+    if (status) status.style.display = 'block';
+    ankNewDone = data.new_done_today || 0;
+    ankNewLimit = data.new_limit || 10;
+    ankPool = data.new_remaining_pool || 0;
+    updateAnkQuota();
     var cards = data.cards || [];
     list.innerHTML = '';
     ankTotal = cards.length;
@@ -2412,6 +2421,7 @@ function buildAnkCard(c) {
   var div = document.createElement('div');
   div.className = 'sr-item';
   div.setAttribute('data-qid', c.qid);
+  div.setAttribute('data-was-new', c.was_new ? '1' : '0');
   var html = '<div class="sr-top"><div class="sr-name">Question' +
     (c.was_new ? ' <span class="chip-chapitre" style="background:rgba(230,126,34,.12);color:#e67e22">Nouvelle</span>' : '') +
     ' <span class="chip-chapitre">' + esc(c.chapitre || 'Autre') + '</span></div></div>';
@@ -2421,7 +2431,10 @@ function buildAnkCard(c) {
   }
   html += '<div class="ank-choices">';
   c.choices.forEach(function (ch, i) {
-    html += '<button class="ank-choice" data-i="' + i + '" type="button">' + esc(ch.text || '(image)') + '</button>';
+    var inner = (ch.text ? esc(ch.text) : '') +
+      (ch.image ? '<img src="' + esc(ch.image) + '" alt="Choix ' + (i + 1) + '" loading="lazy">' : '');
+    html += '<button class="ank-choice" data-i="' + i + '" type="button">' +
+      (inner || '(choix vide)') + '</button>';
   });
   html += '</div>';
   html += '<div class="ank-reveal" style="display:none"></div>';
@@ -2449,9 +2462,11 @@ function buildAnkCard(c) {
         if (choices[a.answer]) choices[a.answer].classList.add('ank-correct');
         if (!good && choices[chosen]) choices[chosen].classList.add('ank-wrong');
         var reveal = div.querySelector('.ank-reveal');
+        var goodChoice = c.choices[a.answer];
+        var goodLabel = goodChoice ? (goodChoice.text || (goodChoice.image ? '(image)' : '')) : '';
         reveal.innerHTML = '<div class="ank-verdict ' + (good ? 'good' : 'bad') + '">' +
           (good ? '✅ Bonne réponse !'
-                : '❌ Raté — la bonne réponse était : <strong>' + esc(c.choices[a.answer] ? (c.choices[a.answer].text || '') : '') + '</strong>') +
+                : '❌ Raté — la bonne réponse était : <strong>' + esc(goodLabel) + '</strong>') +
           '</div>' +
           (a.explication ? '<div class="ank-explication">' + esc(a.explication) + '</div>' : '');
         reveal.style.display = 'block';
@@ -2494,6 +2509,7 @@ function removeAnkCard(qid) {
   div.style.transform = 'scale(0.95)';
   setTimeout(function () {
     div.remove(); ankDone++; updateAnkProgress();
+    if (div.getAttribute('data-was-new') === '1') { ankNewDone++; updateAnkQuota(); }
     var list = document.getElementById('ank-list');
     if (list && list.children.length === 0) {
       list.innerHTML = '<p>Bravo, deck du jour termine ! Reviens demain.</p>';
