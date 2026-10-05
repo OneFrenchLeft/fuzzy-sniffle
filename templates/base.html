@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}Forgecard{% endblock %}</title>
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css', v=25) }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css', v=26) }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='katex/katex.min.css') }}">
   <script defer src="{{ url_for('static', filename='katex/katex.min.js') }}"></script>
   <script defer src="{{ url_for('static', filename='katex/contrib/auto-render.min.js') }}"></script>
@@ -31,7 +31,7 @@
   };
   </script>
   <script defer src="{{ url_for('static', filename='mathjax/tex-svg.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/app.js', v=26) }}" defer></script>
+  <script src="{{ url_for('static', filename='js/app.js', v=27) }}" defer></script>
 </head>
 <body data-page="{{ active }}">
 <canvas id="confetti-canvas"></canvas>
@@ -45,6 +45,7 @@
 <a class="nav-btn {{ 'active' if active == 'tirage' }}" href="/" {{ 'aria-current=page' if active == 'tirage' }}>Simulation de kholle</a>
 <a class="nav-btn {{ 'active' if active == 'liste' }}" href="/liste" {{ 'aria-current=page' if active == 'liste' }}>Forgecards</a>
 <a class="nav-btn auth-only {{ 'active' if active == 'sr' }}" href="/sr" {{ 'aria-current=page' if active == 'sr' }} hidden>Répétition espacée</a>
+<a class="nav-btn auth-only {{ 'active' if active == 'ankimie' }}" href="/ankimie" {{ 'aria-current=page' if active == 'ankimie' }} hidden>Ankimie</a>
 <a class="nav-btn auth-only" href="/qcm" hidden>QCM</a>
 <div class="nav-separator"></div>
 <a class="nav-btn {{ 'active' if active == 'compte' }}" data-view="compte" href="/compte" {{ 'aria-current=page' if active == 'compte' }}>Espace compte</a>

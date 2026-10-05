@@ -69,6 +69,37 @@ def init_db():
         "PRIMARY KEY (prenom, numero)"
         ")"
     )
+    # Ankimie : SR (FSRS) sur les questions QCM — etats et reviews propres,
+    # independants de la SR Forgecards (seule la retention cible est partagee).
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS qcm_sr_state ("
+        "prenom TEXT NOT NULL,"
+        "qid TEXT NOT NULL,"
+        "stability REAL,"
+        "difficulty REAL,"
+        "state TEXT DEFAULT 'new',"
+        "last_review TEXT,"
+        "next_review TEXT,"
+        "repetitions INTEGER DEFAULT 0,"
+        "lapses INTEGER DEFAULT 0,"
+        "last_retrievability REAL,"
+        "PRIMARY KEY (prenom, qid)"
+        ")"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_qcm_sr_state_next_review ON qcm_sr_state(next_review)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS qcm_sr_reviews ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "qid TEXT NOT NULL,"
+        "prenom TEXT NOT NULL,"
+        "chapitre TEXT DEFAULT '',"
+        "result TEXT NOT NULL,"
+        "grade INTEGER NOT NULL,"
+        "correct INTEGER NOT NULL DEFAULT 0,"
+        "was_new INTEGER NOT NULL DEFAULT 0,"
+        "created_at TEXT DEFAULT CURRENT_TIMESTAMP"
+        ")"
+    )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS reviews ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"

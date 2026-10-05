@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Ankimie{% endblock %}
+{% block content %}
+  <section class="view active" id="view-ankimie">
+    <div class="panel">
+      <div class="sr-view-header">
+        <div class="section-title">Ankimie</div>
+        <div class="sr-view-actions">
+          <button class="info-btn" type="button" onclick="openAnkimieInfoModal()" aria-label="Aide Ankimie">i</button>
+        </div>
+      </div>
+
+      <p class="home-subtitle" style="text-align:left;margin-bottom:1rem">Chimie en répétition espacée — 10 nouvelles cartes par jour maximum.</p>
+
+      <div id="ank-daily-status" class="import-box" style="display:none">
+        <div id="ank-quota-badge" style="font-size:.85rem;color:var(--muted)"></div>
+      </div>
+
+      <div class="sr-progress" id="ank-progress" role="status" aria-live="polite" style="display:none"></div>
+      <div class="sr-list" id="ank-list" aria-live="polite"><p>Connexion…</p></div>
+    </div>
+  </section>
+{% endblock %}
+{% block modals %}
+<div class="modal-overlay" id="ank-info-overlay">
+  <div class="modal-box">
+    <div class="modal-topbar">
+      <h3>Comment utiliser Ankimie ?</h3>
+      <button class="btn-ghost btn-small" onclick="closeAnkimieInfoModal()">Fermer</button>
+    </div>
+
+    <p style="margin-bottom:1rem;line-height:1.55">
+      Réponds à la question, compare avec la bonne réponse et l'explication, puis évalue
+      honnêtement ta réussite : la carte reviendra au moment où tu risques de l'oublier.
+    </p>
+
+    <div class="sr-help-grid">
+      <div class="sr-help-item bad">
+        <div class="sr-help-title">🔴 Pas réussi</div>
+        <div>La bonne réponse était inconnue, ou tu as hésité entre plusieurs choix sans savoir.</div>
+      </div>
+      <div class="sr-help-item hard">
+        <div class="sr-help-title">🟠 Difficile</div>
+        <div>Bonne réponse, mais avec hésitation ou un raisonnement incertain.</div>
+      </div>
+      <div class="sr-help-item good">
+        <div class="sr-help-title">🔵 Réussi</div>
+        <div>Bonne réponse trouvée de façon fiable, sans hésitation majeure.</div>
+      </div>
+      <div class="sr-help-item easy">
+        <div class="sr-help-title">🟢 Automatique</div>
+        <div>Réponse immédiate, comme un réflexe. La carte ne reviendra que rarement.</div>
+      </div>
+    </div>
+
+    <p style="margin-top:1rem;line-height:1.55">
+      <strong>Attention</strong> : se surestimer décale la carte trop loin et favorise l'oubli.
+      Le bouton « Automatique » est à réserver aux questions vraiment maîtrisées.
+    </p>
+  </div>
+</div>
+{% endblock %}
