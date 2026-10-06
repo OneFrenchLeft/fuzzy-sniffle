@@ -2371,20 +2371,20 @@ document.addEventListener('keydown', function (e) {
     document.querySelectorAll('.modal-overlay.open').forEach(function (o) { o.classList.remove('open'); });
     closeMobileNav();
   }
-  // Ankimie, style Anki : 1-4 choisit une reponse, puis 1-4 note la carte.
-  if (PAGE === 'ankimie' && ['1', '2', '3', '4'].indexOf(e.key) !== -1 &&
-      !e.ctrlKey && !e.metaKey && !e.altKey &&
+  // Ankimie, style Anki : Espace/Entree revele la reponse, 1-4 note la carte.
+  if (PAGE === 'ankimie' && !e.ctrlKey && !e.metaKey && !e.altKey &&
       !(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) {
     var card = document.querySelector('#ank-list .ank-card');
     if (!card) return;
-    var idx = parseInt(e.key, 10) - 1;
     var grades = card.querySelector('.ank-grade');
-    if (grades && grades.style.display !== 'none') {
+    var gradesVisible = grades && grades.style.display !== 'none';
+    if ((e.key === ' ' || e.key === 'Enter') && !gradesVisible) {
+      var showBtn = card.querySelector('.ank-show-answer');
+      if (showBtn && !showBtn.disabled) { e.preventDefault(); showBtn.click(); }
+    } else if (gradesVisible && ['1', '2', '3', '4'].indexOf(e.key) !== -1) {
       var rates = card.querySelectorAll('.btn-rate');
+      var idx = parseInt(e.key, 10) - 1;
       if (rates[idx] && !rates[idx].disabled) rates[idx].click();
-    } else {
-      var choices = card.querySelectorAll('.ank-choice');
-      if (choices[idx] && !choices[idx].disabled) choices[idx].click();
     }
   }
 });
@@ -2468,14 +2468,9 @@ function buildAnkCard(c) {
   if (c.image) {
     html += '<div class="ank-image"><img src="' + esc(c.image) + '" alt="Illustration de la question" loading="lazy"></div>';
   }
-  html += '<div class="ank-choices">';
-  c.choices.forEach(function (ch, i) {
-    var inner = (ch.text ? esc(ch.text) : '') +
-      (ch.image ? '<img src="' + esc(ch.image) + '" alt="Choix ' + (i + 1) + '" loading="lazy">' : '');
-    html += '<button class="ank-choice" data-i="' + i + '" type="button">' +
-      (inner || '(choix vide)') + '</button>';
-  });
-  html += '</div>';
+  // Pas de QCM : l'eleve repond dans sa tete, revele la bonne reponse, puis
+  // s'auto-evalue — exactement le flux recto/verso d'Anki.
+  html += '<button class="ank-show-answer" type="button">Afficher la réponse</button>';
   html += '<div class="ank-reveal" style="display:none"></div>';
   html += '<div class="sr-actions ank-grade" style="display:none">' +
     '<div class="sr-block-title" style="margin-bottom:.4rem">Autoévaluation</div>' +
@@ -2487,36 +2482,29 @@ function buildAnkCard(c) {
     '</div></div>';
   div.innerHTML = html;
 
-  var chosen = null;
-  div.querySelectorAll('.ank-choice').forEach(function (b) {
-    b.onclick = function () {
-      if (chosen !== null) return;
-      chosen = parseInt(b.getAttribute('data-i'), 10);
-      div.querySelectorAll('.ank-choice').forEach(function (x) { x.disabled = true; });
-      b.classList.add('ank-chosen');
-      fetchJson('/api/ankimie/' + encodeURIComponent(c.qid) + '/answer').then(function (a) {
-        if (!a || !a.ok) { showToast('Impossible de révéler la réponse.'); return; }
-        var choices = div.querySelectorAll('.ank-choice');
-        var good = a.answer === chosen;
-        if (choices[a.answer]) choices[a.answer].classList.add('ank-correct');
-        if (!good && choices[chosen]) choices[chosen].classList.add('ank-wrong');
-        var reveal = div.querySelector('.ank-reveal');
-        var goodChoice = c.choices[a.answer];
-        var goodLabel = goodChoice && goodChoice.text ? esc(goodChoice.text) : '';
-        var goodImg = goodChoice && goodChoice.image
-          ? '<img class="ank-verdict-img" src="' + esc(goodChoice.image) + '" alt="Bonne réponse">' : '';
-        reveal.innerHTML = '<div class="ank-verdict ' + (good ? 'good' : 'bad') + '">' +
-          (good ? '✅ Bonne réponse !'
-                : '❌ Raté — la bonne réponse était :' + (goodLabel ? ' <strong>' + goodLabel + '</strong>' : '')) +
-          goodImg + '</div>' +
-          (a.explication ? '<div class="ank-explication">' + esc(a.explication) + '</div>' : '');
-        reveal.style.display = 'block';
-        div.querySelector('.sr-actions').style.display = 'block';
-        typesetMath(div);
-        div.querySelector('.sr-actions').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }).catch(function () { showToast('Impossible de révéler la réponse.'); });
-    };
-  });
+  var revealed = false;
+  var showBtn = div.querySelector('.ank-show-answer');
+  showBtn.onclick = function () {
+    if (revealed) return;
+    revealed = true;
+    showBtn.disabled = true;
+    fetchJson('/api/ankimie/' + encodeURIComponent(c.qid) + '/answer').then(function (a) {
+      if (!a || !a.ok) { showToast('Impossible de révéler la réponse.'); showBtn.disabled = false; revealed = false; return; }
+      var goodChoice = c.choices[a.answer];
+      var goodLabel = goodChoice && goodChoice.text ? '<div class="ank-answer-text">' + esc(goodChoice.text) + '</div>' : '';
+      var goodImg = goodChoice && goodChoice.image
+        ? '<img class="ank-verdict-img" src="' + esc(goodChoice.image) + '" alt="Bonne réponse">' : '';
+      var reveal = div.querySelector('.ank-reveal');
+      reveal.innerHTML = '<div class="ank-answer">' +
+        '<div class="ank-answer-label">Bonne réponse</div>' + goodLabel + goodImg + '</div>' +
+        (a.explication ? '<div class="ank-explication">' + esc(a.explication) + '</div>' : '');
+      reveal.style.display = 'block';
+      showBtn.style.display = 'none';
+      div.querySelector('.sr-actions').style.display = 'block';
+      typesetMath(div);
+      div.querySelector('.sr-actions').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }).catch(function () { showToast('Impossible de révéler la réponse.'); showBtn.disabled = false; revealed = false; });
+  };
   div.querySelectorAll('.btn-rate').forEach(function (b) {
     b.onclick = function () {
       if (b.disabled) return;
@@ -2524,7 +2512,7 @@ function buildAnkCard(c) {
       div.querySelectorAll('.btn-rate').forEach(function (x) { x.disabled = true; });
       fetchJson('/api/ankimie/' + encodeURIComponent(c.qid) + '/review', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ result: result, chosen: chosen })
+        body: JSON.stringify({ result: result })
       }).then(function (res) {
         if (res && res.ok) {
           finishAnkCard(c, result);

@@ -134,7 +134,12 @@ def ankimie_review(qid):
         chosen = None
     if chosen is not None and not (0 <= chosen < len(q['choices'])):
         return jsonify({'ok': False, 'error': 'choix invalide'}), 400
-    correct = 1 if chosen is not None and chosen == q['answer'] else 0
+    # Mode flashcard (pas de choix clique) : la reussite se deduit de
+    # l'auto-evaluation — 'again' = rate, hard/good/easy = su.
+    if chosen is not None:
+        correct = 1 if chosen == q['answer'] else 0
+    else:
+        correct = 1 if grade >= 2 else 0
     params = read_params()
     retention = float(params.get('fsrs_retention', 0.90))
     now = now_paris()
