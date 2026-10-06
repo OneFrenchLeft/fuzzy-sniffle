@@ -2371,14 +2371,35 @@ document.addEventListener('keydown', function (e) {
     document.querySelectorAll('.modal-overlay.open').forEach(function (o) { o.classList.remove('open'); });
     closeMobileNav();
   }
+  // Ankimie, style Anki : 1-4 choisit une reponse, puis 1-4 note la carte.
+  if (PAGE === 'ankimie' && ['1', '2', '3', '4'].indexOf(e.key) !== -1 &&
+      !e.ctrlKey && !e.metaKey && !e.altKey &&
+      !(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) {
+    var card = document.querySelector('#ank-list .ank-card');
+    if (!card) return;
+    var idx = parseInt(e.key, 10) - 1;
+    var grades = card.querySelector('.ank-grade');
+    if (grades && grades.style.display !== 'none') {
+      var rates = card.querySelectorAll('.btn-rate');
+      if (rates[idx] && !rates[idx].disabled) rates[idx].click();
+    } else {
+      var choices = card.querySelectorAll('.ank-choice');
+      if (choices[idx] && !choices[idx].disabled) choices[idx].click();
+    }
+  }
 });
 
 /* --- Ankimie : SR sur le deck QCM chimie (independant de la SR Forgecards) --- */
-var ankTotal = 0;
-var ankDone = 0;
+/* Flux continu style Anki : UNE carte a la fois. Choix -> revelation ->
+   auto-evaluation -> carte suivante. Les cartes notees "Pas reussi" sont
+   remises en fin de file, comme les cartes en apprentissage d'Anki. */
+var ankQueue = [];      // file des cartes restantes
+var ankTotal = 0;       // taille initiale de la file
+var ankDone = 0;        // cartes definitivement terminees
 var ankNewDone = 0;     // nouvelles cartes faites aujourd'hui (badge quota)
 var ankNewLimit = 10;
 var ankPool = 0;        // nouvelles encore en reserve dans le deck
+var ankGraded = {};     // qid -> true si deja comptee (pas de double comptage au requeue)
 
 function openAnkimieInfoModal() { om('ank-info-overlay'); }
 function closeAnkimieInfoModal() { cm('ank-info-overlay'); }
@@ -2401,28 +2422,46 @@ function loadAnkimieToday() {
     ankNewLimit = data.new_limit || 10;
     ankPool = data.new_remaining_pool || 0;
     updateAnkQuota();
-    var cards = data.cards || [];
-    list.innerHTML = '';
-    ankTotal = cards.length;
+    ankQueue = data.cards || [];
+    ankTotal = ankQueue.length;
     ankDone = 0;
+    ankGraded = {};
     updateAnkProgress();
-    if (!cards.length) {
-      list.innerHTML = '<p>Rien a faire aujourd\'hui dans ce deck. Reviens demain.</p>';
+    if (!ankQueue.length) {
+      list.innerHTML = '<p style="text-align:center">Rien a faire aujourd\'hui dans ce deck. Reviens demain.</p>';
       return;
     }
-    cards.forEach(function (c) { list.appendChild(buildAnkCard(c)); });
+    renderNextAnkCard();
   }).catch(function (err) {
     if (err && err.status === 401) { openNameGate(); return; }
     list.innerHTML = '<p>Impossible de charger tes cartes.</p><button class="btn-ghost btn-small" onclick="loadAnkimieToday()">Réessayer</button>';
   });
 }
 
+function renderNextAnkCard() {
+  var list = document.getElementById('ank-list');
+  if (!list) return;
+  if (!ankQueue.length) {
+    list.innerHTML = '<div class="ank-end"><div class="ank-end-title">🎉 Deck du jour terminé !</div>' +
+      '<p>' + ankDone + ' carte' + (ankDone > 1 ? 's' : '') + ' travaillée' + (ankDone > 1 ? 's' : '') +
+      '. Reviens demain.</p></div>';
+    updateAnkProgress();
+    fireConfetti();
+    return;
+  }
+  var c = ankQueue[0];
+  list.innerHTML = '';
+  list.appendChild(buildAnkCard(c));
+  updateAnkProgress();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function buildAnkCard(c) {
   var div = document.createElement('div');
-  div.className = 'sr-item';
+  div.className = 'sr-item ank-card';
   div.setAttribute('data-qid', c.qid);
   div.setAttribute('data-was-new', c.was_new ? '1' : '0');
-  var html = '<div class="sr-top"><div class="sr-name">Question' +
+  var html = '<div class="sr-top"><div class="sr-name">' +
     (c.was_new ? ' <span class="chip-chapitre" style="background:rgba(230,126,34,.12);color:#e67e22">Nouvelle</span>' : '') +
     ' <span class="chip-chapitre">' + esc(c.chapitre || 'Autre') + '</span></div></div>';
   html += '<div class="ank-question">' + esc(c.question) + '</div>';
@@ -2438,7 +2477,7 @@ function buildAnkCard(c) {
   });
   html += '</div>';
   html += '<div class="ank-reveal" style="display:none"></div>';
-  html += '<div class="sr-actions" style="display:none">' +
+  html += '<div class="sr-actions ank-grade" style="display:none">' +
     '<div class="sr-block-title" style="margin-bottom:.4rem">Autoévaluation</div>' +
     '<div class="sr-grade-row">' +
     '<button class="btn-rate btn-again" data-result="again">Pas réussi</button>' +
@@ -2463,29 +2502,32 @@ function buildAnkCard(c) {
         if (!good && choices[chosen]) choices[chosen].classList.add('ank-wrong');
         var reveal = div.querySelector('.ank-reveal');
         var goodChoice = c.choices[a.answer];
-        var goodLabel = goodChoice ? (goodChoice.text || (goodChoice.image ? '(image)' : '')) : '';
+        var goodLabel = goodChoice && goodChoice.text ? esc(goodChoice.text) : '';
+        var goodImg = goodChoice && goodChoice.image
+          ? '<img class="ank-verdict-img" src="' + esc(goodChoice.image) + '" alt="Bonne réponse">' : '';
         reveal.innerHTML = '<div class="ank-verdict ' + (good ? 'good' : 'bad') + '">' +
           (good ? '✅ Bonne réponse !'
-                : '❌ Raté — la bonne réponse était : <strong>' + esc(goodLabel) + '</strong>') +
-          '</div>' +
+                : '❌ Raté — la bonne réponse était :' + (goodLabel ? ' <strong>' + goodLabel + '</strong>' : '')) +
+          goodImg + '</div>' +
           (a.explication ? '<div class="ank-explication">' + esc(a.explication) + '</div>' : '');
         reveal.style.display = 'block';
         div.querySelector('.sr-actions').style.display = 'block';
         typesetMath(div);
+        div.querySelector('.sr-actions').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }).catch(function () { showToast('Impossible de révéler la réponse.'); });
     };
   });
   div.querySelectorAll('.btn-rate').forEach(function (b) {
     b.onclick = function () {
       if (b.disabled) return;
+      var result = b.getAttribute('data-result');
       div.querySelectorAll('.btn-rate').forEach(function (x) { x.disabled = true; });
       fetchJson('/api/ankimie/' + encodeURIComponent(c.qid) + '/review', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ result: b.getAttribute('data-result'), chosen: chosen })
+        body: JSON.stringify({ result: result, chosen: chosen })
       }).then(function (res) {
         if (res && res.ok) {
-          showToast('Carte enregistree.');
-          removeAnkCard(c.qid);
+          finishAnkCard(c, result);
         } else {
           div.querySelectorAll('.btn-rate').forEach(function (x) { x.disabled = false; });
           showToast('Erreur : ' + ((res && res.error) || 'enregistrement impossible'));
@@ -2501,29 +2543,36 @@ function buildAnkCard(c) {
   return div;
 }
 
-function removeAnkCard(qid) {
-  var div = document.querySelector('#ank-list .sr-item[data-qid="' + qid + '"]');
-  if (!div) return;
-  div.style.transition = 'opacity .3s, transform .3s';
-  div.style.opacity = '0';
-  div.style.transform = 'scale(0.95)';
-  setTimeout(function () {
-    div.remove(); ankDone++; updateAnkProgress();
-    if (div.getAttribute('data-was-new') === '1') { ankNewDone++; updateAnkQuota(); }
-    var list = document.getElementById('ank-list');
-    if (list && list.children.length === 0) {
-      list.innerHTML = '<p>Bravo, deck du jour termine ! Reviens demain.</p>';
-      fireConfetti();
-    }
-  }, 300);
+function finishAnkCard(c, result) {
+  // Sortie de file + comptages (une seule fois par carte, meme si requeuee).
+  if (ankQueue.length && ankQueue[0].qid === c.qid) ankQueue.shift();
+  if (!ankGraded[c.qid]) {
+    ankGraded[c.qid] = true;
+    ankDone++;
+    if (c.was_new) { ankNewDone++; updateAnkQuota(); }
+  }
+  // Style Anki : "Pas reussi" revient dans la session, en fin de file.
+  if (result === 'again') ankQueue.push(c);
+  var list = document.getElementById('ank-list');
+  var div = list ? list.querySelector('.ank-card') : null;
+  if (div) {
+    div.style.transition = 'opacity .25s, transform .25s';
+    div.style.opacity = '0';
+    div.style.transform = 'translateX(-1.5rem)';
+    setTimeout(renderNextAnkCard, 250);
+  } else {
+    renderNextAnkCard();
+  }
 }
 
 function updateAnkProgress() {
   var el = document.getElementById('ank-progress');
   if (!el) return;
-  if (ankTotal > 0) {
+  var remaining = ankQueue.length;
+  if (ankTotal > 0 && remaining > 0) {
     el.style.display = 'block';
-    el.textContent = 'Progression : ' + ankDone + ' / ' + ankTotal;
+    el.textContent = 'Carte ' + Math.min(ankDone + 1, ankTotal) + ' / ' + ankTotal +
+      ' — restantes : ' + remaining;
   } else {
     el.style.display = 'none';
     el.textContent = '';

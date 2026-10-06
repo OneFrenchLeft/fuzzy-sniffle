@@ -602,19 +602,25 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
 /* Section hors-series de la SR (bonus, hors quota — issue #5) */
 #sr-hs-wrap .section-title{font-size:1rem}
 
-/* Ankimie — SR sur les QCM chimie (issue #6) */
-.ank-question{font-size:1.02rem;font-weight:600;margin:.25rem 0 .75rem}
+/* Ankimie — flux continu style Anki : une carte a la fois, centree */
+.ank-card{max-width:680px;margin:0 auto}
+.ank-question{font-size:1.05rem;font-weight:600;margin:.25rem 0 .75rem;line-height:1.5}
 .ank-choices{display:flex;flex-direction:column;gap:.5rem;margin-bottom:.75rem}
 .ank-choice{display:block;width:100%;text-align:left;padding:.65rem .9rem;border:1.5px solid var(--border);border-radius:.75rem;background:var(--surface);cursor:pointer;font:inherit;transition:border-color .15s,background .15s}
 .ank-choice:hover{border-color:var(--primary)}
-.ank-choice.ank-chosen{border-color:var(--primary);background:color-mix(in srgb,var(--primary) 8%,var(--surface))}
-.ank-choice.ank-correct{border-color:#27ae60;background:color-mix(in srgb,#27ae60 12%,var(--surface));color:#1e8449;font-weight:700}
-.ank-choice.ank-wrong{border-color:#c0392b;background:color-mix(in srgb,#c0392b 10%,var(--surface));color:#922b21}
+.ank-choice:disabled:hover{border-color:var(--border)}
+.ank-choice.ank-chosen,.ank-choice.ank-chosen:disabled:hover{border-color:var(--primary);background:color-mix(in srgb,var(--primary) 8%,var(--surface))}
+.ank-choice.ank-correct,.ank-choice.ank-correct:disabled:hover{border-color:#27ae60;background:color-mix(in srgb,#27ae60 12%,var(--surface));color:#1e8449;font-weight:700}
+.ank-choice.ank-wrong,.ank-choice.ank-wrong:disabled:hover{border-color:#c0392b;background:color-mix(in srgb,#c0392b 10%,var(--surface));color:#922b21}
 .ank-choice:disabled{cursor:default}
 .ank-reveal{margin:.25rem 0 .5rem}
-.ank-verdict{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.5rem 0;font-size:.85rem}
+.ank-verdict{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.5rem 0;font-size:.9rem}
 .ank-verdict.good{color:#1e8449;font-weight:700}
 .ank-verdict.bad{color:#922b21;font-weight:700}
+.ank-verdict-img{display:block;max-width:100%;max-height:140px;margin:.35rem 0 0;border-radius:.4rem}
 .ank-explication{margin-top:.5rem;padding:.75rem;border-left:3px solid var(--border);background:var(--surface);border-radius:0 .5rem .5rem 0;font-size:.9rem}
-.ank-image img{max-width:100%;border-radius:.5rem;margin-top:.5rem}
+.ank-image img{display:block;max-width:100%;max-height:260px;margin:.5rem auto 0;border-radius:.5rem}
 .ank-choice img{display:block;max-width:100%;max-height:120px;margin:.35rem auto 0;border-radius:.4rem}
+.ank-grade{position:sticky;bottom:.5rem;background:var(--surface);border:1px solid var(--border);border-radius:.75rem;padding:.6rem .75rem;box-shadow:0 -4px 18px rgba(0,0,0,.08);z-index:5}
+.ank-end{max-width:680px;margin:2rem auto;text-align:center;padding:2rem 1rem;border:1.5px dashed var(--border);border-radius:1rem}
+.ank-end-title{font-size:1.25rem;font-weight:700;margin-bottom:.5rem}
