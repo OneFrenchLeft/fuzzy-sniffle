@@ -2224,7 +2224,6 @@ function buildSrCard(c) {
           indicesToggle.setAttribute('aria-expanded', String(isHidden));
         };
       }
-  list.appendChild(div);
   queuePreview(c.numero, div);
   return div;
 }
