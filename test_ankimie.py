@@ -78,6 +78,11 @@ ans = r.get_json()
 src = next(q for q in questions if q['qid'] == qid)
 assert ans['answer'] == src['reponse'] - 1, ans
 assert ans['explication'] == src['explication'], ans
+# Intervalles calcules par FSRS pour les 4 boutons (jamais en dur) : presents,
+# non vides ; carte neuve -> 'good' court (jours, pas des mois).
+iv = ans.get('intervals')
+assert iv and all(iv.get(k) for k in ('again', 'hard', 'good', 'easy')), ans
+assert 'mois' not in iv['good'] and 'an' not in iv['good'], iv
 
 # 3) review 'good' avec le bon choix : correct, sortie de file, quota consomme
 r = c.post(f'/api/ankimie/{qid}/review', json={'result': 'good', 'chosen': src['reponse'] - 1})
@@ -111,5 +116,19 @@ assert alice is not None and alice['vues'] == 1 and alice['aujourd_hui'] == 1, s
 chaps = {ch['chapitre']: ch['questions'] for ch in stats['chapters']}
 assert chaps.get('Chapitre 1') == 1, stats
 
-print('TEST OK : Ankimie (quota 10, sans spoiler, FSRS, isolation, stats admin)')
+# 6) mode flashcard (sans choix clique) : 'correct' deduit de la note
+with c.session_transaction() as s:
+    s['sr_user'] = 'Alice'
+r = c.get('/api/ankimie/today')
+data = r.get_json()
+qid_fc = data['cards'][0]['qid']
+r = c.post(f'/api/ankimie/{qid_fc}/review', json={'result': 'good'})
+assert r.status_code == 200 and r.get_json()['correct'] == 1, r.get_data(as_text=True)
+qid_fc2 = data['cards'][1]['qid']
+r = c.post(f'/api/ankimie/{qid_fc2}/review', json={'result': 'again'})
+assert r.status_code == 200 and r.get_json()['correct'] == 0, r.get_data(as_text=True)
+r = c.get('/api/ankimie/today')
+assert r.get_json()['new_done_today'] == 3, r.get_json()
+
+print('TEST OK : Ankimie (quota 10, sans spoiler, FSRS, isolation, stats admin, intervalles, flashcard)')
 print('TOUS LES TESTS SONT PASSES')

@@ -721,6 +721,10 @@ function loadParams() {
     if (khMaxEl) khMaxEl.value = p.max_kholle_num != null ? p.max_kholle_num : 0;
     var fEl = document.getElementById('f-fsrs-retention');
     if (fEl) fEl.value = Math.round((p.fsrs_retention || 0.80) * 100);
+    var ankRetEl = document.getElementById('f-ankimie-retention');
+    if (ankRetEl) ankRetEl.value = Math.round((p.ankimie_retention || 0.90) * 100);
+    var qcmNewEl = document.getElementById('f-qcm-daily-new');
+    if (qcmNewEl) qcmNewEl.value = p.qcm_daily_new_limit != null ? p.qcm_daily_new_limit : 10;
     var newEl = document.getElementById('f-daily-new');
     if (newEl) newEl.value = p.daily_new_limit != null ? p.daily_new_limit : 3;
     var revEl = document.getElementById('f-daily-review');
@@ -729,6 +733,8 @@ function loadParams() {
 }
 function saveParams() {
   var retentionEl = document.getElementById('f-fsrs-retention');
+  var ankRetEl = document.getElementById('f-ankimie-retention');
+  var qcmNewEl = document.getElementById('f-qcm-daily-new');
   var newEl = document.getElementById('f-daily-new');
   var reviewEl = document.getElementById('f-daily-review');
   var body = {
@@ -736,6 +742,8 @@ function saveParams() {
     max_hors_serie_num: (document.getElementById('f-max-hs') || {}).value || 0,
     max_kholle_num: (document.getElementById('f-max-kholle') || {}).value || 0,
     fsrs_retention: retentionEl ? parseFloat(retentionEl.value) / 100 : 0.80,
+    ankimie_retention: ankRetEl ? parseFloat(ankRetEl.value) / 100 : 0.90,
+    qcm_daily_new_limit: qcmNewEl ? qcmNewEl.value : 10,
     daily_new_limit: newEl ? newEl.value : 3,
     daily_review_limit: reviewEl ? reviewEl.value : 3,
   };
@@ -2111,8 +2119,14 @@ function loadSrToday() {
       });
     }
   }).catch(function (err) {
+    // Une exception dans le rendu (donnees inattendues) atterrit ici au meme
+    // titre qu'une erreur reseau : on affiche le detail pour le diagnostic.
+    console.error('loadSrToday:', err);
     if (err && err.status === 401) { openNameGate(); return; }
-    list.innerHTML = '<p>Impossible de charger tes cartes.</p><button class="btn-ghost btn-small" onclick="loadSrToday()">Réessayer</button>';
+    var detail = err && err.status ? (' (erreur ' + err.status + ')')
+      : (err && err.message ? (' (' + err.message + ')') : '');
+    list.innerHTML = '<p>Impossible de charger tes cartes' + esc(detail) + '.</p>' +
+      '<button class="btn-ghost btn-small" onclick="loadSrToday()">Réessayer</button>';
   });
 }
 
@@ -2433,8 +2447,11 @@ function loadAnkimieToday() {
     }
     renderNextAnkCard();
   }).catch(function (err) {
+    console.error('loadAnkimieToday:', err);
     if (err && err.status === 401) { openNameGate(); return; }
-    list.innerHTML = '<p>Impossible de charger tes cartes.</p><button class="btn-ghost btn-small" onclick="loadAnkimieToday()">Réessayer</button>';
+    var detail = err && err.status ? (' (erreur ' + err.status + ')')
+      : (err && err.message ? (' (' + err.message + ')') : '');
+    list.innerHTML = '<p>Impossible de charger tes cartes' + esc(detail) + '.</p><button class="btn-ghost btn-small" onclick="loadAnkimieToday()">Réessayer</button>';
   });
 }
 
@@ -2470,15 +2487,14 @@ function buildAnkCard(c) {
   }
   // Pas de QCM : l'eleve repond dans sa tete, revele la bonne reponse, puis
   // s'auto-evalue — exactement le flux recto/verso d'Anki.
-  html += '<button class="ank-show-answer" type="button">Afficher la réponse</button>';
+  html += '<button class="ank-show-answer" type="button">Révéler la réponse</button>';
   html += '<div class="ank-reveal" style="display:none"></div>';
   html += '<div class="sr-actions ank-grade" style="display:none">' +
-    '<div class="sr-block-title" style="margin-bottom:.4rem">Autoévaluation</div>' +
     '<div class="sr-grade-row">' +
-    '<button class="btn-rate btn-again" data-result="again">Pas réussi</button>' +
-    '<button class="btn-rate btn-hard" data-result="hard">Difficile</button>' +
-    '<button class="btn-rate btn-good" data-result="good">Réussi</button>' +
-    '<button class="btn-rate btn-easy" data-result="easy">Automatique</button>' +
+    '<button class="btn-rate btn-again" data-result="again"><span class="rate-label">Pas réussi</span><span class="rate-interval" data-int="again"></span></button>' +
+    '<button class="btn-rate btn-hard" data-result="hard"><span class="rate-label">Difficile</span><span class="rate-interval" data-int="hard"></span></button>' +
+    '<button class="btn-rate btn-good" data-result="good"><span class="rate-label">Réussi</span><span class="rate-interval" data-int="good"></span></button>' +
+    '<button class="btn-rate btn-easy" data-result="easy"><span class="rate-label">Automatique</span><span class="rate-interval" data-int="easy"></span></button>' +
     '</div></div>';
   div.innerHTML = html;
 
@@ -2500,6 +2516,11 @@ function buildAnkCard(c) {
         (a.explication ? '<div class="ank-explication">' + esc(a.explication) + '</div>' : '');
       reveal.style.display = 'block';
       showBtn.style.display = 'none';
+      // Intervalles calcules par FSRS sous chaque bouton (jamais en dur).
+      var iv = a.intervals || {};
+      div.querySelectorAll('.rate-interval').forEach(function (s) {
+        s.textContent = iv[s.getAttribute('data-int')] || '';
+      });
       div.querySelector('.sr-actions').style.display = 'block';
       typesetMath(div);
       div.querySelector('.sr-actions').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -2555,16 +2576,15 @@ function finishAnkCard(c, result) {
 
 function updateAnkProgress() {
   var el = document.getElementById('ank-progress');
-  if (!el) return;
+  var bar = document.getElementById('ank-progressbar');
+  var fill = document.getElementById('ank-progress-fill');
   var remaining = ankQueue.length;
-  if (ankTotal > 0 && remaining > 0) {
-    el.style.display = 'block';
-    el.textContent = 'Carte ' + Math.min(ankDone + 1, ankTotal) + ' / ' + ankTotal +
-      ' — restantes : ' + remaining;
-  } else {
-    el.style.display = 'none';
-    el.textContent = '';
+  var active = ankTotal > 0 && remaining > 0;
+  if (el) {
+    el.textContent = active ? ((ankDone + 1) + ' / ' + ankTotal) : '';
   }
+  if (bar) bar.style.display = active ? 'block' : 'none';
+  if (fill) fill.style.width = (ankTotal > 0 ? Math.round(100 * ankDone / ankTotal) : 0) + '%';
 }
 
 function loadAnkimieStats() {

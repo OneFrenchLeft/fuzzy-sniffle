@@ -11,7 +11,7 @@ from flask import Blueprint, jsonify, request, session
 
 from config import QCM_FILES, GRADE_MAP_FR, now_paris, read_params
 from db import db, ensure_db, log_event
-from fsrs import apply_review
+from fsrs import apply_review, preview_all_grades, humanize_interval
 from auth import require_sr_user, require_admin
 import qcm_engine
 
@@ -20,6 +20,19 @@ bp = Blueprint('ankimie', __name__)
 # Deck unique au lancement. Structure ouverte : ajouter un deck = ajouter une
 # entree dans QCM_FILES + changer cette constante (ou la parametrer plus tard).
 ANKIMIE_DECK = 'chimie'
+
+# preview_all_grades est clefe par ses labels internes ; l'API expose les cles
+# FR attendues par le client (boutons d'auto-evaluation).
+_PREVIEW_KEY = {'PAS_REUSSI': 'again', 'DIFFICILE': 'hard',
+                'J_AI_DU_REFLECHIR': 'good', 'ULTRA_FACILE': 'easy'}
+
+
+def _retention(params):
+    """Retention cible du deck Ankimie (param admin dedie, repli sur la FSRS)."""
+    try:
+        return float(params.get('ankimie_retention', params.get('fsrs_retention', 0.90)))
+    except (TypeError, ValueError):
+        return 0.90
 
 
 def _deck_questions():
@@ -104,12 +117,39 @@ def ankimie_today():
 @bp.route('/api/ankimie/<qid>/answer', methods=['GET'])
 @require_sr_user
 def ankimie_answer(qid):
-    """Revelation : bonne reponse + explication (apres le choix de l'eleve)."""
+    """Revelation : bonne reponse + explication + intervalles prevus.
+
+    Les intervalles sous les boutons sont CALCULES par FSRS (etat actuel de
+    la carte, retention cible du deck), jamais ecrits en dur : l'eleve voit
+    la consequence reelle de chaque note avant de cliquer.
+    """
     q = _deck_index().get(qid)
     if not q:
         return jsonify({'ok': False, 'error': 'question introuvable'}), 404
+    ensure_db()
+    prenom = session['sr_user']
+    params = read_params()
+    now = now_paris()
+    conn = db()
+    row = conn.execute(
+        'SELECT stability, difficulty, last_review FROM qcm_sr_state WHERE prenom=? AND qid=?',
+        (prenom, qid)).fetchone()
+    conn.close()
+    intervals = {}
+    try:
+        preview = preview_all_grades(
+            row['stability'] if row else None,
+            row['difficulty'] if row else None,
+            row['last_review'] if row else None,
+            now, requested_retention=_retention(params))
+        for label, res in preview.items():
+            key = _PREVIEW_KEY.get(label)
+            if key:
+                intervals[key] = humanize_interval(res['interval_days'])
+    except Exception:
+        intervals = {}
     return jsonify({'ok': True, 'qid': qid, 'answer': q['answer'],
-                    'explication': q.get('explication', '')})
+                    'explication': q.get('explication', ''), 'intervals': intervals})
 
 
 @bp.route('/api/ankimie/<qid>/review', methods=['POST'])
@@ -141,7 +181,7 @@ def ankimie_review(qid):
     else:
         correct = 1 if grade >= 2 else 0
     params = read_params()
-    retention = float(params.get('fsrs_retention', 0.90))
+    retention = _retention(params)
     now = now_paris()
     conn = db()
     row = conn.execute(

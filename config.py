@@ -53,6 +53,9 @@ DEFAULT_PARAMS = {
     'daily_new_limit': 3,
     'daily_review_limit': 3,
     'qcm_daily_new_limit': 10,
+    # Retention cible propre a Ankimie (le deck QCM a des cartes plus petites
+    # que les forgecards : on peut viser un rythme different).
+    'ankimie_retention': 0.90,
     "previous_chapter_bonus": 0.2,
     "last_chapter_bonus": 0.9,
     "teacher_difficulty_weight": 0.15
@@ -129,7 +132,7 @@ def read_params():
         try:
             if k in ('max_active_num', 'daily_new_limit', 'daily_review_limit', 'max_hors_serie_num', 'max_kholle_num', 'qcm_daily_new_limit'):
                 out[k] = max(0, int(data.get(k, default)))
-            elif k == 'fsrs_retention':
+            elif k in ('fsrs_retention', 'ankimie_retention'):
                 out[k] = min(max(float(data.get(k, default)), 0.80), 0.97)
             else:
                 out[k] = float(data.get(k, default))

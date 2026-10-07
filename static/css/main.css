@@ -602,10 +602,21 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
 /* Section hors-series de la SR (bonus, hors quota — issue #5) */
 #sr-hs-wrap .section-title{font-size:1rem}
 
-/* Ankimie — flux continu style Anki : une carte a la fois, centree */
-.ank-card{max-width:680px;margin:0 auto}
-.ank-question{font-size:1.05rem;font-weight:600;margin:.25rem 0 .75rem;line-height:1.5}
-.ank-show-answer{display:block;width:100%;margin:.25rem 0 .75rem;padding:.8rem 1rem;border:1.5px solid var(--primary);border-radius:.75rem;background:color-mix(in srgb,var(--primary) 8%,var(--surface));color:var(--primary);font:inherit;font-weight:700;cursor:pointer;transition:background .15s}
+/* Ankimie — flux continu style Anki : une carte dominante a la fois */
+.ank-topbar{display:flex;align-items:center;justify-content:space-between;gap:.75rem;max-width:680px;margin:0 auto .5rem}
+.ank-quit{border:none;background:none;color:var(--muted);font:inherit;font-weight:600;cursor:pointer;padding:.4rem .2rem}
+.ank-quit:hover{color:var(--primary)}
+.ank-count{font-size:.9rem;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
+.ank-progressbar{max-width:680px;margin:0 auto 1rem;height:.45rem;border-radius:99px;background:color-mix(in srgb,var(--border) 55%,transparent);overflow:hidden}
+.ank-progressbar-fill{height:100%;width:0;border-radius:99px;background:var(--primary);transition:width .35s ease}
+.ank-stage{min-height:40vh}
+.ank-card{max-width:680px;margin:0 auto;padding:1.5rem 1.4rem;border-radius:1.1rem;box-shadow:0 10px 34px rgba(15,23,42,.12);border:1px solid var(--border)}
+.ank-question{font-size:1.15rem;font-weight:600;margin:.4rem 0 1rem;line-height:1.55}
+/* Le LaTeX ne doit pas dominer la carte : taille bridee, debordement scrolle */
+.ank-card mjx-container{font-size:1em !important}
+.ank-card mjx-container svg{max-width:100%;height:auto}
+.ank-card mjx-container[display="true"]{margin:.4em 0;overflow-x:auto;overflow-y:hidden}
+.ank-show-answer{display:block;width:100%;margin:.25rem 0 .75rem;padding:.9rem 1rem;border:1.5px solid var(--primary);border-radius:.75rem;background:color-mix(in srgb,var(--primary) 8%,var(--surface));color:var(--primary);font:inherit;font-weight:700;cursor:pointer;transition:background .15s}
 .ank-show-answer:hover{background:color-mix(in srgb,var(--primary) 16%,var(--surface))}
 .ank-show-answer:disabled{cursor:default;opacity:.6}
 .ank-answer{margin:.25rem 0 .5rem;padding:.8rem 1rem;border:1.5px solid #27ae60;border-radius:.75rem;background:color-mix(in srgb,#27ae60 8%,var(--surface))}
@@ -616,5 +627,8 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
 .ank-explication{margin-top:.5rem;padding:.75rem;border-left:3px solid var(--border);background:var(--surface);border-radius:0 .5rem .5rem 0;font-size:.9rem}
 .ank-image img{display:block;max-width:100%;max-height:260px;margin:.5rem auto 0;border-radius:.5rem}
 .ank-grade{position:sticky;bottom:.5rem;background:var(--surface);border:1px solid var(--border);border-radius:.75rem;padding:.6rem .75rem;box-shadow:0 -4px 18px rgba(0,0,0,.08);z-index:5}
+.ank-grade .btn-rate{display:flex;flex-direction:column;align-items:center;gap:.15rem;line-height:1.2}
+.rate-label{font-weight:700}
+.rate-interval{font-size:.72rem;font-weight:500;opacity:.75;font-variant-numeric:tabular-nums;min-height:.9em}
 .ank-end{max-width:680px;margin:2rem auto;text-align:center;padding:2rem 1rem;border:1.5px dashed var(--border);border-radius:1rem}
 .ank-end-title{font-size:1.25rem;font-weight:700;margin-bottom:.5rem}
