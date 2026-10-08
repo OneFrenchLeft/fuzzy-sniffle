@@ -122,6 +122,24 @@ function typesetMath(root) {
   setTimeout(function () { typesetMath(root); }, 300);
 }
 
+// Variante KaTeX d'abord : rendu identique a la page QCM, taille de police
+// strictement celle du texte environnant (MathJax rend les formules bien
+// plus grosses — rejete par Eliot sur Ankimie). MathJax ne sert plus ici
+// que de secours si les fichiers KaTeX manquent.
+function typesetMathKatex(root) {
+  if (!root) return;
+  if (window.renderMathInElement && window.katexDelimiters) {
+    try { renderMathInElement(root, { delimiters: window.katexDelimiters, throwOnError: false }); }
+    catch (e) { console.warn('KaTeX:', e); }
+    return;
+  }
+  if (window.MathJax && MathJax.typesetPromise) {
+    MathJax.typesetPromise([root]).catch(function (e) { console.warn('MathJax:', e); });
+    return;
+  }
+  setTimeout(function () { typesetMathKatex(root); }, 300);
+}
+
 /* --- Chronometre SR : toast persistant tant qu'une fiche est en cours --- */
 var chronoCard = null;
 var chronoInterval = null;
@@ -2521,7 +2539,7 @@ function buildAnkCard(c) {
         s.textContent = iv[s.getAttribute('data-int')] || '';
       });
       div.querySelector('.sr-actions').style.display = 'block';
-      typesetMath(div);
+      typesetMathKatex(div);
       div.querySelector('.sr-actions').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }).catch(function () { showToast('Impossible de révéler la réponse.'); showBtn.disabled = false; revealed = false; });
   };
@@ -2547,7 +2565,7 @@ function buildAnkCard(c) {
       });
     };
   });
-  typesetMath(div);
+  typesetMathKatex(div);
   return div;
 }
 
