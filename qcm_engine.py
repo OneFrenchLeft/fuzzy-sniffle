@@ -56,6 +56,24 @@ _record_answer = None
 _record_game = None
 _review_query = None
 
+def question_image(question):
+    """Prefer the canonical field, retaining old files until their next save."""
+    return str(question.get('image', question.get('image_complete', '')) or '').strip()
+
+
+def qcm_integer(value):
+    """Parse an integer without silently truncating answers or accepting bools."""
+    if isinstance(value, bool):
+        raise ValueError('entier requis')
+    try:
+        number = int(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError('entier requis') from None
+    if isinstance(value, float) and value != number:
+        raise ValueError('entier requis')
+    return number
+
+
 def normalize_choice(choice):
     if isinstance(choice, dict):
         return {
@@ -85,12 +103,17 @@ def read_qcm_questions(path, theme=None):
             if not isinstance(item, dict):
                 continue
             question = str(item.get('question', '')).strip()
-            choices = [normalize_choice(c) for c in item.get('choix', [])]
-            choices = [c for c in choices if c['text'] or c['image']]
-            answer = int(item.get('reponse')) - 1
-            timer = int(item.get('temps', QCM_DEFAULT_TIME_S))
+            raw_choices = item.get('choix')
+            if not isinstance(raw_choices, list):
+                continue
+            choices = [normalize_choice(c) for c in raw_choices]
+            # Dropping an empty choice shifts the one-based answer index.
+            if any(not c['text'] and not c['image'] for c in choices):
+                continue
+            answer = qcm_integer(item.get('reponse')) - 1
+            timer = qcm_integer(item.get('temps', QCM_DEFAULT_TIME_S))
             timer = max(QCM_MIN_TIME_S, min(QCM_MAX_TIME_S, timer))
-            image = str(item.get('image_complete', item.get('image', ''))).strip()
+            image = question_image(item)
             chapitre = str(item.get('chapitre', '')).strip() or 'Autre'
             if question and 2 <= len(choices) <= 4 and 0 <= answer < len(choices):
                 entry = {'question': question, 'choices': choices,

@@ -76,7 +76,7 @@ def validate_qcm_questions(raw, theme=None):
             )
 
         try:
-            reponse = int(item.get('reponse'))
+            reponse = qcm_engine.qcm_integer(item.get('reponse'))
         except (TypeError, ValueError):
             # Eliot: Validate the answer index before trusting it.
             raise ValueError(
@@ -90,7 +90,7 @@ def validate_qcm_questions(raw, theme=None):
             )
 
         try:
-            temps = int(item.get('temps', QCM_DEFAULT_TIME_S))
+            temps = qcm_engine.qcm_integer(item.get('temps', QCM_DEFAULT_TIME_S))
         except (TypeError, ValueError):
             raise ValueError(
                 f'question {position} : temps doit être un entier'
@@ -109,9 +109,7 @@ def validate_qcm_questions(raw, theme=None):
             'temps': temps,
         }
 
-        image = str(
-            item.get('image', item.get('image', ''))
-        ).strip()
+        image = qcm_engine.question_image(item)
         latex = str(item.get('latex', '')).strip()
 
         if image:
@@ -197,6 +195,8 @@ def _purge_retired_qids(theme=None, chapitre=''):
 def admin_save_qcm(theme):
     path = get_qcm_path(theme)
     payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'ok': False, 'error': 'objet JSON attendu'}), 400
     raw = payload.get('raw')
     # Flying: Accept both parsed JSON and raw JSON for frontend compatibility.
     if isinstance(raw, list):

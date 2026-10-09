@@ -24,6 +24,9 @@ var currentEmojiPw = [];
 var selectedDrawCount = 1;
 var qcmFullList = [];
 var qcmTheme = '';
+var qcmLoadedSubject = null;
+var qcmLoadVersion = 0;
+var qcmSaving = false;
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -585,6 +588,21 @@ function normalizeQcmPreviewChoice(choice) {
   return { text: String(choice == null ? '' : choice).trim(), image: '' };
 }
 
+function qcmQuestionImage(question) {
+  var image = question.image !== undefined ? question.image : question.image_complete;
+  return String(image == null ? '' : image).trim();
+}
+
+function canonicalQcmImage(question) {
+  if (!question || typeof question !== 'object' || Array.isArray(question)) return question;
+  var normalized = Object.assign({}, question);
+  if (Object.prototype.hasOwnProperty.call(normalized, 'image_complete')) {
+    normalized.image = qcmQuestionImage(normalized);
+    delete normalized.image_complete;
+  }
+  return normalized;
+}
+
 function validateQcmPreviewQuestion(question, position) {
   var prefix = 'Question ' + position + ' : ';
   if (!question || typeof question !== 'object' || Array.isArray(question)) {
@@ -612,7 +630,7 @@ function validateQcmPreviewQuestion(question, position) {
   }
   return {
     question: text,
-    image: String(question.image || '').trim(),
+    image: qcmQuestionImage(question),
     choices: choices,
     answer: answer - 1,
     time: timer
@@ -858,20 +876,39 @@ function loadQcmEditor() {
   var subjEl = document.getElementById('qcm-subject-select');
   var editor = document.getElementById('qcm-json-editor');
   if (!subjEl || !editor) return;
-  qcmEditorStatus('Chargement de ' + subjEl.value + '…', false);
-  fetchWithStatus(qcmApiUrl(subjEl.value), { cache: 'no-store' })
+  var subject = subjEl.value;
+  var version = ++qcmLoadVersion;
+  qcmLoadedSubject = null;
+  qcmEditorStatus('Chargement de ' + subject + '…', false);
+  return fetchWithStatus(qcmApiUrl(subject), { cache: 'no-store' })
     .then(function (res) {
+      if (version !== qcmLoadVersion || subjEl.value !== subject) return;
       var d = res.data || {};
       if (!d.ok) { qcmEditorFail(res.status, d); return; }
-      try { qcmFullList = JSON.parse(d.raw || '[]'); }
-      catch (e) { qcmFullList = []; }
+      var loaded;
+      try {
+        loaded = JSON.parse(d.raw);
+        if (!Array.isArray(loaded) || loaded.some(function (q) {
+          return !q || typeof q !== 'object' || Array.isArray(q);
+        })) throw new Error('une liste de questions est attendue');
+      } catch (e) {
+        qcmEditorStatus('Fichier QCM invalide : ' + e.message, true);
+        return;
+      }
+      qcmFullList = loaded.map(canonicalQcmImage);
+      qcmLoadedSubject = subject;
+      if (qcmTheme && qcmThemeList().indexOf(qcmTheme) === -1) qcmTheme = '';
       renderQcmThemeSelect();
       renderQcmEditorBuffer();
       qcmEditorStatus('Chargé depuis le disque' + (d.mtime
         ? ' - modifié le ' + new Date(d.mtime * 1000).toLocaleString('fr-FR')
         : ' - fichier absent (il sera créé à l’enregistrement)'), false);
     })
-    .catch(function (e) { qcmEditorStatus('Erreur réseau : ' + e, true); });
+    .catch(function (e) {
+      if (version === qcmLoadVersion && subjEl.value === subject) {
+        qcmEditorStatus('Erreur réseau : ' + e, true);
+      }
+    });
 }
 
 function loadQcmPhysiqueEditor() { loadQcmEditor(); }
@@ -892,11 +929,20 @@ function saveQcmEditor() {
   var editor = document.getElementById('qcm-json-editor');
   var spinner = document.getElementById('qcm-save-spinner');
   if (!subjEl || !editor) return;
+  if (qcmLoadedSubject !== subjEl.value) {
+    qcmEditorStatus('Attends le chargement de cette matière, ou recharge-la avant d’enregistrer.', true);
+    return;
+  }
+  if (qcmSaving) return;
+  var subject = subjEl.value;
+  var version = qcmLoadVersion;
   var edited;
   try { edited = JSON.parse(editor.value); }
   catch (err) { qcmEditorStatus('JSON invalide : ' + err.message, true); return; }
   if (!Array.isArray(edited)) { qcmEditorStatus('Le JSON doit être une liste de questions.', true); return; }
+  edited = edited.map(canonicalQcmImage);
 
+  var candidate;
   if (qcmTheme) {
     edited = edited.map(function (q) {
       if (q && typeof q === 'object' && !Array.isArray(q)) {
@@ -905,22 +951,25 @@ function saveQcmEditor() {
       return q;
     });
     var others = qcmFullList.filter(function (q) { return String(q.chapitre || '').trim() !== qcmTheme; });
-    qcmFullList = others.concat(edited);
+    candidate = others.concat(edited);
   } else {
-    qcmFullList = edited;
+    candidate = edited;
   }
 
-  var raw = JSON.stringify(qcmFullList, null, 2) + '\n';
+  var raw = JSON.stringify(candidate, null, 2) + '\n';
+  qcmSaving = true;
   if (spinner) spinner.style.display = 'inline-block';
   qcmEditorStatus('Enregistrement…', false);
-  fetchWithStatus(qcmApiUrl(subjEl.value), {
+  return fetchWithStatus(qcmApiUrl(subject), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ raw: raw }),
     cache: 'no-store'
   })
     .then(function (res) {
+      qcmSaving = false;
       if (spinner) spinner.style.display = 'none';
+      if (version !== qcmLoadVersion || subjEl.value !== subject) return;
       var d = res.data || {};
       if (!d.ok) { qcmEditorFail(res.status, d); return; }
       qcmEditorStatus('Enregistré ✔ - ' + d.count + ' questions valides pour ' + d.theme + '.', false);
@@ -928,8 +977,11 @@ function saveQcmEditor() {
       loadQcmEditor();
     })
     .catch(function (e) {
+      qcmSaving = false;
       if (spinner) spinner.style.display = 'none';
-      qcmEditorStatus('Erreur réseau : ' + e, true);
+      if (version === qcmLoadVersion && subjEl.value === subject) {
+        qcmEditorStatus('Erreur réseau : ' + e, true);
+      }
     });
 }
 
