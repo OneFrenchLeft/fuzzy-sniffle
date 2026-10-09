@@ -11,6 +11,8 @@ import config
 with patch.object(config, 'ADMIN_PASSWORD', 'test-only'):
     import db
 import streak
+import sr
+from flask import Flask
 
 
 class StreakAbuseTests(unittest.TestCase):
@@ -22,6 +24,8 @@ class StreakAbuseTests(unittest.TestCase):
             (db, 'DB_PATH', Path(tmp.name) / 'test.db'),
             (db, 'now_paris', lambda: self.now),
             (streak, 'now_paris', lambda: self.now),
+            (sr, 'now_paris', lambda: self.now),
+            (sr, 'read_params', lambda: self.params),
         ):
             p = patch.object(target, name, value)
             p.start()
@@ -141,6 +145,69 @@ class StreakAbuseTests(unittest.TestCase):
 
     def test_really_empty_catalog_retains_free_validation(self):
         self.assertEqual(streak.close_day(self.conn, 'Alice', '2026-10-09', self.params), 'validated_free')
+
+    def postpone(self, number=1):
+        app = Flask(__name__)
+        app.config.update(TESTING=True, SECRET_KEY='test-only')
+        app.register_blueprint(sr.bp)
+        client = app.test_client()
+        with client.session_transaction() as session:
+            session['sr_user'] = 'Alice'
+        response = client.post(f'/api/sr/{number}/advance', json={'days': 1})
+        self.assertEqual(response.status_code, 200)
+        db.log_event(self.conn, 'Alice', 'sr_open')
+        self.conn.commit()
+        return response.get_json()
+
+    def test_postponing_all_due_cards_does_not_validate_the_day(self):
+        self.card()
+        self.assertEqual(self.postpone()['next_review'], '2026-10-10')
+        self.assertEqual(streak._due_count(self.conn, 'Alice', '2026-10-09', self.params), 0)
+        self.assertEqual(streak.streak_verdict(self.conn, 'Alice', self.params), 'due')
+        self.assertEqual(streak.close_day(self.conn, 'Alice', '2026-10-09', self.params), 'missed')
+        self.assertEqual(streak.compute_streak(self.conn, 'Alice'), 0)
+
+    def test_postponed_day_uses_at_most_one_joker(self):
+        self.card()
+        self.conn.execute("UPDATE user_jokers SET count=2 WHERE prenom='Alice'")
+        self.conn.commit()
+        self.postpone()
+        self.assertEqual(streak.close_day(self.conn, 'Alice', '2026-10-09', self.params), 'joker_spent')
+        self.assertEqual(streak.close_day(self.conn, 'Alice', '2026-10-09', self.params), 'already')
+        self.assertEqual(self.stock(), 1)
+
+    def test_review_after_postponement_still_validates_the_day(self):
+        self.card()
+        self.postpone()
+        self.conn.execute(
+            "INSERT INTO reviews(numero, prenom, result, created_at) VALUES (1, 'Alice', 'good', ?)",
+            (self.now.isoformat(),))
+        self.conn.commit()
+        self.assertEqual(streak.streak_verdict(self.conn, 'Alice', self.params), 'done')
+        self.assertEqual(streak.close_day(self.conn, 'Alice', '2026-10-09', self.params), 'review')
+
+    def test_postponement_is_remembered_during_next_day_catchup(self):
+        self.card()
+        self.postpone()
+        self.now += timedelta(days=1)
+        self.assertEqual(streak.close_day(self.conn, 'Alice', '2026-10-09', self.params), 'missed')
+
+    def test_future_and_bonus_cards_do_not_block_free_validation(self):
+        self.card(1)
+        self.card(2)
+        self.conn.execute("UPDATE forgecards SET hors_serie=1, sr_enabled=1 WHERE numero=2")
+        self.conn.execute("INSERT INTO sr_state_user(prenom, numero, next_review) VALUES ('Alice', 1, '2026-10-15')")
+        self.conn.commit()
+        self.postpone(1)
+        self.postpone(2)
+        self.assertEqual(streak.streak_verdict(self.conn, 'Alice', self.params), 'validated')
+        self.assertEqual(streak.close_day(self.conn, 'Alice', '2026-10-09', self.params), 'validated_free')
+
+    def test_todays_new_drop_does_not_count_as_a_due_postponement(self):
+        self.card()
+        self.params['_max_active_increment'] = {'date': '2026-10-09', 'from': 0}
+        self.postpone()
+        self.assertEqual(streak.streak_verdict(self.conn, 'Alice', self.params), 'validated')
 
 
 if __name__ == '__main__':

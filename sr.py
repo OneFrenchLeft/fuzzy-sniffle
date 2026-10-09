@@ -8,7 +8,7 @@ from db import db, ensure_db, log_event, csv_safe, csv_response
 from helpers import card_label, card_exists, interleave_by_chapitre, parse_duration_seconds
 from replay import replay_reviews, get_user_weights
 from streak import (compute_streak, activity_days, compute_record,
-                     reconcile_streak, streak_verdict, close_missed_days)
+                     reconcile_streak, streak_verdict, close_missed_days, card_is_due)
 from auth import require_admin, require_sr_user
 import qcm_engine
 import io, csv
@@ -428,6 +428,8 @@ def sr_advance(numero):
         return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
     row = ensure_sr_row(conn, prenom, numero)
     base_date = now_paris().date()
+    if card_is_due(conn, prenom, numero, base_date.isoformat(), read_params()):
+        log_event(conn, prenom, 'sr_due_postponed', str(numero))
     if row['next_review']:
         try:
             base_date = max(base_date, datetime.strptime(row['next_review'], '%Y-%m-%d').date())

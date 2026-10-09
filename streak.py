@@ -56,7 +56,7 @@ def compute_streak(conn, prenom):
     return streak
 
 
-def _due_count(conn, prenom, day, params):
+def _due_count(conn, prenom, day, params, numero=None):
     """Cartes dues pour `day` — la meme definition partout (guard + verdict UI).
 
     Hors serie exclus (jamais comptes dans la streak). Les fiches rendues
@@ -76,8 +76,20 @@ def _due_count(conn, prenom, day, params):
         'ON s.numero=f.numero AND s.prenom=? '
         'WHERE f.numero<=? AND f.hors_serie=0 '
         'AND (s.next_review IS NULL OR s.next_review<=?) '
-        'AND NOT (f.numero > ? AND ? >= ?)',
-        (prenom, max_active, day, inc_from, inc_date, day)).fetchone()['c']
+        'AND NOT (f.numero > ? AND ? >= ?) '
+        'AND (? IS NULL OR f.numero=?)',
+        (prenom, max_active, day, inc_from, inc_date, day, numero, numero)).fetchone()['c']
+
+
+def card_is_due(conn, prenom, numero, day, params):
+    return _due_count(conn, prenom, day, params, numero=numero) > 0
+
+
+def _postponed_due(conn, prenom, day):
+    # Keep the day's obligation even after postponement changes next_review.
+    return conn.execute(
+        "SELECT 1 FROM events WHERE prenom=? AND type='sr_due_postponed' "
+        "AND substr(created_at,1,10)=? LIMIT 1", (prenom, day)).fetchone() is not None
 
 
 def _deck_count(conn, params):
@@ -103,7 +115,7 @@ def close_day(conn, prenom, day, params, reason='guard_spend', allow_joker=True)
     has_activity = conn.execute(
         "SELECT 1 FROM events WHERE prenom=? AND substr(created_at,1,10)=? "
         "AND type IN ('sr_open','login','review') LIMIT 1", (prenom, day)).fetchone()
-    if deck == 0 or (due == 0 and has_activity):
+    if not _postponed_due(conn, prenom, day) and (deck == 0 or (due == 0 and has_activity)):
         conn.execute('INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) VALUES(?,?,1)',
                      (prenom, day))
         conn.commit()
@@ -150,6 +162,8 @@ def streak_verdict(conn, prenom, params, when=None, prediction=False):
                     'WHERE r.prenom=? AND substr(r.created_at,1,10)=? AND f.hors_serie=0 LIMIT 1',
                     (prenom, today)).fetchone():
         return 'done'
+    if _postponed_due(conn, prenom, today):
+        return 'due'
     deck = _deck_count(conn, params)
     if deck == 0:
         return 'validated'
