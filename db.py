@@ -42,7 +42,8 @@ def init_db():
     conn.execute('''CREATE TABLE IF NOT EXISTS user_jokers (
         prenom TEXT PRIMARY KEY,
         count INTEGER NOT NULL DEFAULT 0,
-        last_milestone INTEGER DEFAULT 0
+        last_milestone INTEGER DEFAULT 0,
+        milestone_chain_start TEXT
     )''')
     conn.execute('''CREATE TABLE IF NOT EXISTS joker_ledger (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -290,6 +291,8 @@ def init_db():
     joker_cols = [r[1] for r in conn.execute("PRAGMA table_info(user_jokers)").fetchall()]
     if 'last_milestone' not in joker_cols:
         conn.execute("ALTER TABLE user_jokers ADD COLUMN last_milestone INTEGER DEFAULT 0")
+    if 'milestone_chain_start' not in joker_cols:
+        conn.execute("ALTER TABLE user_jokers ADD COLUMN milestone_chain_start TEXT")
     if 'note_masquee' not in rev_cols:
         conn.execute("ALTER TABLE reviews ADD COLUMN note_masquee INTEGER DEFAULT 0")
 

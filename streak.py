@@ -72,12 +72,19 @@ def _due_count(conn, prenom, day, params):
     except (TypeError, ValueError):
         inc_from = max_active
     return conn.execute(
-        'SELECT COUNT(*) AS c FROM forgecards f JOIN sr_state_user s '
+        'SELECT COUNT(*) AS c FROM forgecards f LEFT JOIN sr_state_user s '
         'ON s.numero=f.numero AND s.prenom=? '
         'WHERE f.numero<=? AND f.hors_serie=0 '
         'AND (s.next_review IS NULL OR s.next_review<=?) '
         'AND NOT (f.numero > ? AND ? >= ?)',
         (prenom, max_active, day, inc_from, inc_date, day)).fetchone()['c']
+
+
+def _deck_count(conn, params):
+    # State rows are lazy: not opening the SR page must not create free days.
+    return conn.execute(
+        'SELECT COUNT(*) AS c FROM forgecards WHERE hors_serie=0 AND numero<=?',
+        (int(params.get('max_active_num', 36)),)).fetchone()['c']
 
 
 def close_day(conn, prenom, day, params, reason='guard_spend', allow_joker=True):
@@ -91,8 +98,7 @@ def close_day(conn, prenom, day, params, reason='guard_spend', allow_joker=True)
                      (prenom, day))
         conn.commit()
         return 'review'
-    deck = conn.execute('SELECT COUNT(*) AS c FROM sr_state_user WHERE prenom=?',
-                        (prenom,)).fetchone()['c']
+    deck = _deck_count(conn, params)
     due = _due_count(conn, prenom, day, params) if deck else 0
     has_activity = conn.execute(
         "SELECT 1 FROM events WHERE prenom=? AND substr(created_at,1,10)=? "
@@ -144,8 +150,7 @@ def streak_verdict(conn, prenom, params, when=None, prediction=False):
                     'WHERE r.prenom=? AND substr(r.created_at,1,10)=? AND f.hors_serie=0 LIMIT 1',
                     (prenom, today)).fetchone():
         return 'done'
-    deck = conn.execute('SELECT COUNT(*) AS c FROM sr_state_user WHERE prenom=?',
-                        (prenom,)).fetchone()['c']
+    deck = _deck_count(conn, params)
     if deck == 0:
         return 'validated'
     if _due_count(conn, prenom, today, params) > 0:
@@ -256,51 +261,66 @@ def close_all_missed_days(params=None, reason='site_guard'):
 
 
 def reconcile_streak(conn, prenom):
-    # Steph: Reconciliation can award milestones, but it must never spend a joker.
+    # Take SQLite's write lock BEFORE reading reward progress. Concurrent
+    # reviews and guards must not both pay the same milestone. This also works
+    # when the caller already has an open transaction (e.g. a guard log entry).
+    with conn:
+        conn.execute('UPDATE user_jokers SET count=count WHERE prenom=?', (prenom,))
+        return _reconcile_streak_locked(conn, prenom)
+
+
+def _reconcile_streak_locked(conn, prenom):
     days = activity_days(conn, prenom)
     if not days:
-        # Eliot: Reset this or an old milestone can block future rewards.
-        conn.execute("UPDATE user_jokers SET last_milestone=0 WHERE prenom=?", (prenom,))
-        conn.commit()
         return 0
     cursor = now_paris().date()
     if cursor.isoformat() not in days:
         cursor -= timedelta(days=1)
         if cursor.isoformat() not in days:
-            # Trou dans la serie : on reset les paliers, AUCUN depense ici.
-            conn.execute("UPDATE user_jokers SET last_milestone=0 WHERE prenom=?", (prenom,))
-            conn.commit()
+            # Retain the chain marker if a late guard subsequently repairs
+            # yesterday; otherwise its already processed rewards could replay.
             return 0
     streak = 0
     while cursor.isoformat() in days:
         streak += 1
         cursor -= timedelta(days=1)
-    if streak < JOKER_EVERY:
-        return streak
     milestone = streak // JOKER_EVERY
     chain_start = (cursor + timedelta(days=1)).isoformat()
-    jrow = conn.execute('SELECT count, last_milestone FROM user_jokers WHERE prenom=?',
+    jrow = conn.execute('SELECT count, last_milestone, milestone_chain_start FROM user_jokers WHERE prenom=?',
                         (prenom,)).fetchone()
     current = jrow['count'] if jrow else 0
     last_ms = jrow['last_milestone'] if jrow else 0
-    # last_milestone peut etre le reste d'une ANCIENNE chaine (la remise a 0 ne
-    # se faisait que sur deux jours d'absence consecutifs) : le palier 4 d'une
-    # chaine reconstruite n'etait alors jamais paye. Source de verite : le
-    # ledger — on compte les paliers payes PENDANT la chaine courante.
-    # Exception : les chaines commencees avant l'existence du ledger gardent
-    # last_milestone comme reference, sinon on les paierait une 2e fois.
-    first_ledger = conn.execute(
-        "SELECT MIN(substr(created_at,1,10)) AS d FROM joker_ledger").fetchone()['d']
-    if first_ledger and chain_start >= first_ledger:
-        paid = conn.execute(
-            "SELECT COUNT(*) AS c FROM joker_ledger WHERE prenom=? AND reason='milestone_award' "
-            "AND substr(created_at,1,10) >= ?", (prenom, chain_start)).fetchone()['c']
-    else:
+    previous_chain = jrow['milestone_chain_start'] if jrow else None
+    if previous_chain is not None and chain_start <= previous_chain:
+        # Catch-up may extend the same chain backwards with validated days.
+        # Previously processed milestones still belong to that chain.
         paid = last_ms
+    elif previous_chain is not None:
+        paid = 0
+    else:
+        # One-time compatibility with databases predating the chain marker.
+        # A bulk award can grant two jokers in ONE ledger row: count units,
+        # not rows. Older chains without a ledger retain their legacy progress.
+        first_ledger = conn.execute(
+            "SELECT MIN(substr(created_at,1,10)) AS d FROM joker_ledger").fetchone()['d']
+        if first_ledger and chain_start >= first_ledger:
+            paid = conn.execute(
+                "SELECT COALESCE(SUM(delta), 0) AS c FROM joker_ledger "
+                "WHERE prenom=? AND reason='milestone_award' AND delta>0 "
+                "AND substr(created_at,1,10) >= ?", (prenom, chain_start)).fetchone()['c']
+            if paid:
+                paid = max(paid, last_ms)
+        else:
+            paid = last_ms
     if milestone > paid:
         gained = max(0, min(milestone - paid, JOKER_CAP - current))
         if gained > 0:
             apply_joker_change(conn, prenom, gained, 'milestone_award')
-    conn.execute("UPDATE user_jokers SET last_milestone=? WHERE prenom=?", (milestone, prenom))
-    conn.commit()
+    # Mark EVERY reached milestone, including those forfeited at the stock cap.
+    # Spending a joker later must not turn capped rewards into a reserve bank.
+    conn.execute(
+        "INSERT INTO user_jokers(prenom, count) SELECT ?, 0 "
+        "WHERE NOT EXISTS (SELECT 1 FROM user_jokers WHERE prenom=?)", (prenom, prenom))
+    conn.execute("UPDATE user_jokers SET last_milestone=?, milestone_chain_start=? WHERE prenom=?",
+                 (max(milestone, paid), chain_start, prenom))
     return streak
