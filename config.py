@@ -79,6 +79,7 @@ CHAPITRES = [
     'Diffusion de particules',
     'Rayonnement thermique',
     'Référentiels non galiléens',
+    'Cinématique des fluides',
     'Fluides visqueux',
     'Fluides parfaits',
     'Bilans macroscopiques',

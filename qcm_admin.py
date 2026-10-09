@@ -109,13 +109,13 @@ def validate_qcm_questions(raw, theme=None):
             'temps': temps,
         }
 
-        image_complete = str(
-            item.get('image_complete', item.get('image', ''))
+        image = str(
+            item.get('image', item.get('image', ''))
         ).strip()
         latex = str(item.get('latex', '')).strip()
 
-        if image_complete:
-            normalized['image_complete'] = image_complete
+        if image:
+            normalized['image'] = image
         if latex:
             normalized['latex'] = latex
         chapitre = str(item.get('chapitre', '')).strip()
