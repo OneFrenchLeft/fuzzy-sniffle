@@ -2,10 +2,12 @@
 {% block title %}Ankimie{% endblock %}
 {% block content %}
   <section class="view active" id="view-ankimie">
-    <div class="ank-topbar">
-      <button class="ank-quit" type="button" onclick="location.href='/'">← Quitter</button>
-      <div class="ank-count" id="ank-progress" role="status" aria-live="polite"></div>
-      <button class="info-btn" type="button" onclick="openAnkimieInfoModal()" aria-label="Aide Ankimie">i</button>
+    <div class="ank-topbar page-header">
+      <h1 class="page-title">Ankimie</h1>
+      <div class="page-header-actions">
+        <div class="ank-count" id="ank-progress" role="status" aria-live="polite"></div>
+        <button class="info-btn" type="button" onclick="openAnkimieInfoModal()" aria-label="Aide Ankimie">i</button>
+      </div>
     </div>
     <div class="ank-progressbar" id="ank-progressbar" style="display:none"><div class="ank-progressbar-fill" id="ank-progress-fill"></div></div>
     <div id="ank-daily-status" class="import-box" style="display:none;max-width:680px;margin:0 auto .75rem">

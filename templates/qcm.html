@@ -291,8 +291,9 @@ html[data-theme=dark] .chip-select.active{color:#06201f}
 .choice .ctext{font-size:1.05rem}
 .qcm-explication{margin:.4rem 0 0;padding:.45rem .7rem;border-left:3px solid var(--primary,#01696f);background:rgba(1,105,111,.07);font-size:.85rem;border-radius:0 .4rem .4rem 0}
 </style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/public.css', v=1) }}">
 </head>
-<body>
+<body class="public-app" data-page="qcm">
 <header>
   <a class="logo" href="/" title="Retour à l'accueil">Forgecards</a>
   <button class="hamburger-btn" id="hamburger-btn" type="button" aria-label="Ouvrir le menu" aria-expanded="false" aria-controls="qcm-nav"><span></span><span></span><span></span></button>
@@ -305,7 +306,7 @@ html[data-theme=dark] .chip-select.active{color:#06201f}
 <div class="nav-overlay" id="nav-overlay"></div>
 <main>
   <section id="lobby" class="view panel active">
-    <div class="section-title">QCM en direct</div>
+    <div class="page-header"><h1 class="page-title">QCM en direct</h1></div>
     <div id="lobby-content"></div>
   </section>
   <section id="game" class="view panel">

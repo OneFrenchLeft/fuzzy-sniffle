@@ -7,6 +7,7 @@
   <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
   <script>try { document.documentElement.setAttribute('data-theme', localStorage.getItem('mdc-theme') || 'light'); } catch (e) {}</script>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css', v=31) }}">
+  {% if active != 'admin' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/public.css', v=1) }}">{% endif %}
   <link rel="stylesheet" href="{{ url_for('static', filename='katex/katex.min.css') }}">
   <script defer src="{{ url_for('static', filename='katex/katex.min.js') }}"></script>
   <script defer src="{{ url_for('static', filename='katex/contrib/auto-render.min.js') }}"></script>
@@ -34,7 +35,7 @@
   <script defer src="{{ url_for('static', filename='mathjax/tex-svg.js') }}"></script>
   <script src="{{ url_for('static', filename='js/app.js', v=35) }}" defer></script>
 </head>
-<body data-page="{{ active }}">
+<body data-page="{{ active }}"{% if active != 'admin' %} class="public-app"{% endif %}>
 <canvas id="confetti-canvas"></canvas>
 <header>
 <a class="logo" href="/" title="Retour à l'accueil">Forgecards</a>
