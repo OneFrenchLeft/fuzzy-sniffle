@@ -1360,18 +1360,9 @@ function renderAdminDetail() {
     '<input type="checkbox" data-action="kholle-toggle" style="width:auto"' + (kholleOn ? ' checked' : '') + '> Inclure dans la simulation de kholle' +
     (kholleOn ? '' : ' <span class="chip-chapitre" style="background:rgba(192,57,43,.12);color:#c0392b">hors simulation</span>') +
     '</label>';
-  // Eliot: les hors-series peuvent etre actives dans la SR (bonus, hors quota).
-  var srLine = '';
-  if (c.hors_serie) {
-    var srOn = c.sr_enabled !== 0;
-    srLine = '<label style="display:flex;align-items:center;gap:.5rem;margin-top:.5rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text)">' +
-      '<input type="checkbox" data-action="sr-toggle" style="width:auto"' + (srOn ? ' checked' : '') + '> Activer dans la repetition espacee (bonus, hors quota)' +
-      (srOn ? '' : ' <span class="chip-chapitre" style="background:rgba(192,57,43,.12);color:#c0392b">hors SR</span>') +
-      '</label>';
-  }
   var row = adminRow(
     cardTitleHtml(c) +
-    '<div class="meta">' + esc(c.fiche_file) + (c.bareme_file ? (' | bareme: ' + esc(c.bareme_file)) : ' | pas de bareme') + ' | difficulté : ' + esc(c.teacher_difficulty != null ? c.teacher_difficulty : (c.difficulty != null ? c.difficulty : '-')) + '</div>' + wstats + kholleLine + srLine,
+    '<div class="meta">' + esc(c.fiche_file) + (c.bareme_file ? (' | bareme: ' + esc(c.bareme_file)) : ' | pas de bareme') + ' | difficulté : ' + esc(c.teacher_difficulty != null ? c.teacher_difficulty : (c.difficulty != null ? c.difficulty : '-')) + '</div>' + wstats + kholleLine,
     '<button class="btn-ghost btn-small" data-action="edit">Modifier</button>' +
     '<button class="btn-ghost btn-small" data-action="reset-stats">Reinitialiser stats</button>' +
     '<button class="btn-danger btn-small" data-action="delete">Supprimer</button>'
@@ -1401,32 +1392,6 @@ function renderAdminDetail() {
       showToast(err && err.status === 401 ? 'Session admin expiree, reconnecte-toi.' : 'Erreur reseau.');
     });
   };
-  if (c.hors_serie) {
-    row.querySelector('[data-action="sr-toggle"]').onchange = function () {
-      var cb = this;
-      cb.disabled = true;
-      fetchJson('/api/forgecards/' + c.numero + '/sr', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: cb.checked })
-      }).then(function (res) {
-        cb.disabled = false;
-        if (res && res.ok) {
-          c.sr_enabled = res.sr_enabled;
-          renderAdminDetail();
-          showToast(res.sr_enabled
-            ? (c.label || c.numero) + ' activee dans la repetition espacee (bonus, hors quota).'
-            : (c.label || c.numero) + ' retiree de la repetition espacee.');
-        } else {
-          cb.checked = !cb.checked;
-          showToast('Erreur : ' + ((res && res.error) || 'action impossible'));
-        }
-      }).catch(function (err) {
-        cb.disabled = false;
-        cb.checked = !cb.checked;
-        showToast(err && err.status === 401 ? 'Session admin expiree, reconnecte-toi.' : 'Erreur reseau.');
-      });
-    };
-  }
   row.querySelector('[data-action="edit"]').onclick = function () { openEditModal(c); };
   row.querySelector('[data-action="delete"]').onclick = function () {
     askConfirm('Supprimer definitivement la fiche ' + c.numero + ' ?', function () { deleteFiche(c.numero); });
@@ -2166,16 +2131,11 @@ function loadSrToday() {
     srTotalToday = cards.length;
     srDoneToday = 0;
     updateSrProgress();
-    if (!cards.length) {
-      list.innerHTML = '<p>Aucune carte a reviser aujourd\'hui.</p>';
-      if (data.auto_validated_streak) {
-        var forecastEl = document.getElementById('sr-forecast-badge');
-        if (forecastEl) forecastEl.textContent = 'Jour validé (Bravo tu as fait toutes les cartes du jour).';
-      }
-      updateExtraSlot();
-      return;
+    var hsToggle = document.getElementById('sr-hs-enabled');
+    if (hsToggle) {
+      hsToggle.checked = !!data.hors_serie_enabled;
+      hsToggle.disabled = false;
     }
-    cards.forEach(function (c) { list.appendChild(buildSrCard(c)); });
     var hsCards = data.hs_cards || [];
     var hsWrap = document.getElementById('sr-hs-wrap');
     var hsList = document.getElementById('sr-hs-list');
@@ -2188,6 +2148,16 @@ function loadSrToday() {
         hsList.appendChild(div);
       });
     }
+    if (!cards.length) {
+      list.innerHTML = '<p>Aucune carte a reviser aujourd\'hui.</p>';
+      if (data.auto_validated_streak) {
+        var forecastEl = document.getElementById('sr-forecast-badge');
+        if (forecastEl) forecastEl.textContent = 'Jour validé (Bravo tu as fait toutes les cartes du jour).';
+      }
+      updateExtraSlot();
+      return;
+    }
+    cards.forEach(function (c) { list.appendChild(buildSrCard(c)); });
   }).catch(function (err) {
     // Une exception dans le rendu (donnees inattendues) atterrit ici au meme
     // titre qu'une erreur reseau : on affiche le detail pour le diagnostic.
@@ -2197,6 +2167,21 @@ function loadSrToday() {
       : (err && err.message ? (' (' + err.message + ')') : '');
     list.innerHTML = '<p>Impossible de charger tes cartes' + esc(detail) + '.</p>' +
       '<button class="btn-ghost btn-small" onclick="loadSrToday()">Réessayer</button>';
+  });
+}
+
+function saveSrHsPreference(toggle) {
+  var enabled = toggle.checked;
+  toggle.disabled = true;
+  fetchJson('/api/sr/preferences', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hors_serie_enabled: enabled })
+  }).then(function () {
+    loadSrToday();
+  }).catch(function (err) {
+    toggle.checked = !enabled;
+    toggle.disabled = false;
+    showToast(err && err.status === 401 ? 'Reconnecte-toi pour modifier ton deck.' : 'Impossible de modifier ton deck.');
   });
 }
 

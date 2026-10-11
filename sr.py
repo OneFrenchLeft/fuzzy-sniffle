@@ -28,6 +28,24 @@ def ensure_sr_row(conn, prenom, numero):
         row = conn.execute('SELECT * FROM sr_state_user WHERE prenom=? AND numero=?', (prenom, numero)).fetchone()
     return row
 
+@bp.route('/api/sr/preferences', methods=['PUT'])
+@require_sr_user
+def sr_preferences():
+    ensure_db()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get('hors_serie_enabled'), bool):
+        return jsonify({'ok': False, 'error': 'hors_serie_enabled doit être un booléen'}), 400
+    enabled = data['hors_serie_enabled']
+    conn = db()
+    with conn:
+        result = conn.execute('UPDATE users SET sr_hs_enabled=? WHERE prenom=?',
+                              (int(enabled), session['sr_user']))
+    conn.close()
+    if result.rowcount != 1:
+        return jsonify({'ok': False, 'error': 'élève introuvable'}), 404
+    return jsonify({'ok': True, 'hors_serie_enabled': enabled})
+
+
 @bp.route('/api/sr/today', methods=['GET'])
 @require_sr_user
 def sr_today():
@@ -70,13 +88,14 @@ def sr_today():
         "WHERE f.numero <= ? AND f.hors_serie = 0",
         (prenom, inc_from, inc_date, today, tomorrow, today, max_active)
     )
-    # Eliot: les hors-series ACTIVES entrent dans la SR en section bonus,
-    # hors quotas et hors streak. Une HS active est due des sa mise en service.
+    preference = conn.execute('SELECT sr_hs_enabled FROM users WHERE prenom=?', (prenom,)).fetchone()
+    hs_enabled = bool(preference and preference['sr_hs_enabled'])
+    # Each student opts into all bonus cards; retained states survive opting out.
     conn.execute(
         "INSERT OR IGNORE INTO sr_state_user (prenom, numero, stability, difficulty, state, last_review, next_review, repetitions, lapses) "
         "SELECT ?, f.numero, NULL, NULL, 'new', NULL, ?, 0, 0 FROM forgecards f "
-        "WHERE f.hors_serie = 1 AND f.sr_enabled = 1",
-        (prenom, today)
+        "WHERE f.hors_serie = 1 AND ?",
+        (prenom, today, hs_enabled)
     )
     conn.commit()
 
@@ -116,8 +135,8 @@ def sr_today():
         's.difficulty, s.stability, s.next_review, s.last_review, s.repetitions '
         'FROM forgecards f '
         'JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? '
-        'WHERE f.hors_serie = 1 AND f.sr_enabled = 1',
-        (prenom,)
+        'WHERE f.hors_serie = 1 AND ?',
+        (prenom, hs_enabled)
     ).fetchall()
     streak = compute_streak(conn, prenom)
     conn.close()
@@ -174,6 +193,7 @@ def sr_today():
     return jsonify({
         'cards': interleaved,
         'hs_cards': hs_cards,
+        'hors_serie_enabled': hs_enabled,
         'streak': streak,
         'new_done_today': new_done_today,
         'new_limit': new_limit,

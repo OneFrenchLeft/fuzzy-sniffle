@@ -195,7 +195,7 @@ class StreakAbuseTests(unittest.TestCase):
     def test_future_and_bonus_cards_do_not_block_free_validation(self):
         self.card(1)
         self.card(2)
-        self.conn.execute("UPDATE forgecards SET hors_serie=1, sr_enabled=1 WHERE numero=2")
+        self.conn.execute("UPDATE forgecards SET hors_serie=1 WHERE numero=2")
         self.conn.execute("INSERT INTO sr_state_user(prenom, numero, next_review) VALUES ('Alice', 1, '2026-10-15')")
         self.conn.commit()
         self.postpone(1)
