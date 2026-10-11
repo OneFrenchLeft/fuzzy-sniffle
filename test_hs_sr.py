@@ -52,13 +52,22 @@ with c.session_transaction() as s:
     s['sr_user'] = 'Alice'
 
 # Default is opt-out, and the authenticated preference applies only to Alice.
+conn = dbmod.db()
+state_before = [tuple(row) for row in conn.execute('SELECT * FROM sr_state_user')]
+conn.close()
+assert c.get('/api/sr/preferences').get_json() == {'ok': True, 'hors_serie_enabled': False}
+conn = dbmod.db()
+assert [tuple(row) for row in conn.execute('SELECT * FROM sr_state_user')] == state_before
+conn.close()
 r = c.get('/api/sr/today')
 assert r.get_json()['hs_cards'] == [] and r.get_json()['hors_serie_enabled'] is False
 r = c.put('/api/sr/preferences', json={'hors_serie_enabled': True, 'prenom': 'Bob'})
 assert r.status_code == 200 and r.get_json()['hors_serie_enabled'] is True
+assert c.get('/api/sr/preferences').get_json()['hors_serie_enabled'] is True
 for value in ('false', 1, None):
     assert c.put('/api/sr/preferences', json={'hors_serie_enabled': value}).status_code == 400
 anon = app.test_client()
+assert anon.get('/api/sr/preferences').status_code == 401
 assert anon.put('/api/sr/preferences', json={'hors_serie_enabled': True}).status_code == 401
 
 # 1) h1 visible en section bonus, h2 non, quota intact
@@ -97,6 +106,7 @@ assert [h['numero'] for h in c.get('/api/sr/today').get_json()['hs_cards']] == [
 # Bob's preference and review state are independent.
 with c.session_transaction() as session:
     session['sr_user'] = 'Bob'
+assert c.get('/api/sr/preferences').get_json()['hors_serie_enabled'] is False
 assert c.get('/api/sr/today').get_json()['hs_cards'] == []
 assert c.put('/api/sr/preferences', json={'hors_serie_enabled': True}).status_code == 200
 assert sorted(h['numero'] for h in c.get('/api/sr/today').get_json()['hs_cards']) == [9001, 9002]

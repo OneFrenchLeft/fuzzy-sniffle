@@ -28,10 +28,18 @@ def ensure_sr_row(conn, prenom, numero):
         row = conn.execute('SELECT * FROM sr_state_user WHERE prenom=? AND numero=?', (prenom, numero)).fetchone()
     return row
 
-@bp.route('/api/sr/preferences', methods=['PUT'])
+@bp.route('/api/sr/preferences', methods=['GET', 'PUT'])
 @require_sr_user
 def sr_preferences():
     ensure_db()
+    if request.method == 'GET':
+        conn = db()
+        preference = conn.execute('SELECT sr_hs_enabled FROM users WHERE prenom=?',
+                                  (session['sr_user'],)).fetchone()
+        conn.close()
+        if preference is None:
+            return jsonify({'ok': False, 'error': 'élève introuvable'}), 404
+        return jsonify({'ok': True, 'hors_serie_enabled': bool(preference['sr_hs_enabled'])})
     data = request.get_json(silent=True)
     if not isinstance(data, dict) or not isinstance(data.get('hors_serie_enabled'), bool):
         return jsonify({'ok': False, 'error': 'hors_serie_enabled doit être un booléen'}), 400

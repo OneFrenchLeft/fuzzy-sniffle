@@ -253,6 +253,7 @@ function loadCompteDashboard() {
 function refreshAuthUI() {
   var user = currentSrUser || null;
   if (user) loadCompteDashboard();
+  if (user && PAGE === 'compte') loadSrHsPreference();
   document.querySelectorAll('.auth-only').forEach(function (el) { el.hidden = !user; });
   var compteBtn = document.querySelector('[data-view="compte"]');
   if (compteBtn) compteBtn.textContent = user ? '👤 ' + user : 'Espace compte';
@@ -2139,11 +2140,6 @@ function loadSrToday() {
     srTotalToday = cards.length;
     srDoneToday = 0;
     updateSrProgress();
-    var hsToggle = document.getElementById('sr-hs-enabled');
-    if (hsToggle) {
-      hsToggle.checked = !!data.hors_serie_enabled;
-      hsToggle.disabled = false;
-    }
     var hsCards = data.hs_cards || [];
     var hsWrap = document.getElementById('sr-hs-wrap');
     var hsList = document.getElementById('sr-hs-list');
@@ -2178,14 +2174,31 @@ function loadSrToday() {
   });
 }
 
+function loadSrHsPreference() {
+  var toggle = document.getElementById('sr-hs-enabled');
+  if (!toggle || !currentSrUser) return;
+  var user = currentSrUser;
+  toggle.disabled = true;
+  fetchJson('/api/sr/preferences').then(function (data) {
+    if (currentSrUser !== user) return;
+    if (!data || !data.ok) throw new Error('Préférence indisponible');
+    toggle.checked = !!data.hors_serie_enabled;
+    toggle.disabled = false;
+  }).catch(function () {
+    if (currentSrUser === user) showToast('Impossible de charger ton choix de hors-séries. Recharge la page pour réessayer.');
+  });
+}
+
 function saveSrHsPreference(toggle) {
   var enabled = toggle.checked;
   toggle.disabled = true;
   fetchJson('/api/sr/preferences', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ hors_serie_enabled: enabled })
-  }).then(function () {
-    loadSrToday();
+  }).then(function (data) {
+    if (!data || !data.ok) throw new Error('Préférence non enregistrée');
+    toggle.disabled = false;
+    showToast('Préférence enregistrée.');
   }).catch(function (err) {
     toggle.checked = !enabled;
     toggle.disabled = false;

@@ -10,6 +10,11 @@
       </div>
       <div id="compte-logged-in" style="display:none">
         <p class="home-subtitle" style="text-align:left;margin-bottom:1rem">Connecté en tant que <strong id="compte-prenom"></strong>.</p>
+        <div class="sr-preference">
+          <label for="sr-hs-enabled"><input type="checkbox" id="sr-hs-enabled" disabled aria-describedby="sr-hs-hint sr-hs-warning" onchange="saveSrHsPreference(this)"> Ajouter toutes les hors-séries à mon deck</label>
+          <p class="hint" id="sr-hs-hint">Les hors-séries apparaissent quand elles sont dues, sans limite et sans effet sur les quotas ou la série. Ton choix est enregistré sur ton compte.</p>
+          <p class="hint" id="sr-hs-warning"><strong>Attention :</strong> des bugs peuvent survenir si tu désactives cette option.</p>
+        </div>
         <div class="fields-grid" id="compte-dash" style="margin-bottom:1rem">
           <div class="field" style="text-align:center"><div id="dash-streak" style="font-size:1.6rem;font-weight:700">-</div><label style="text-transform:none">Série en cours</label></div>
           <div class="field" style="text-align:center"><div id="dash-record" style="font-size:1.6rem;font-weight:700">-</div><label style="text-transform:none">Record</label></div>
