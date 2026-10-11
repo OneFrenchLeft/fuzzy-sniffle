@@ -227,11 +227,13 @@ function closeMobileNav() {
   var nav = document.getElementById('main-nav');
   var button = document.getElementById('hamburger-btn');
   var overlay = document.getElementById('nav-overlay');
+  var wasOpen = nav.classList.contains('open');
   nav.classList.remove('open');
   button.classList.remove('open');
   button.setAttribute('aria-expanded', 'false');
   button.setAttribute('aria-label', 'Ouvrir le menu');
   if (overlay) overlay.classList.remove('open');
+  if (wasOpen) button.focus();
 }
 
 function loadCompteDashboard() {
@@ -345,12 +347,17 @@ function openNameGate() {
   om('name-gate-overlay');
   var list = document.getElementById('name-chip-list');
   var input = document.getElementById('gate-search');
+  if (input) {
+    input.value = '';
+    setTimeout(function () {
+      if (document.getElementById('name-gate-overlay').classList.contains('open') && document.getElementById('name-step').style.display !== 'none') input.focus();
+    }, 60);
+  }
   list.innerHTML = '<p style="grid-column:1/-1;font-size:.85rem;color:var(--muted)">Chargement des prenoms…</p>';
   fetchJson('/api/users/public').then(function (names) {
     gateNamesCache = names;
-    renderGateChips('');
+    renderGateChips(input ? input.value : '');
     renderLastUserChip();
-    if (input) { input.value = ''; setTimeout(function () { input.focus(); }, 60); }
   }).catch(function () {
     list.innerHTML = '<p style="grid-column:1/-1;font-size:.85rem;color:var(--muted)">Impossible de charger les prenoms.</p><button class="btn-ghost btn-small" onclick="openNameGate()">Réessayer</button>';
   });
@@ -388,6 +395,7 @@ function goToPwStep(prenom) {
   document.getElementById('name-step').style.display = 'none';
   document.getElementById('pw-step').style.display = 'flex';
   document.getElementById('pw-step-title').textContent = 'Bonjour ' + prenom;
+  syncModalState();
   resetEmojiPw();
   loadEmojiKeypad();
 }
@@ -2410,6 +2418,18 @@ function syncModalState() {
   var openOverlay = document.querySelector('.modal-overlay.open');
   var isOpen = !!openOverlay;
   document.body.classList.toggle('modal-open', isOpen);
+  if (openOverlay) {
+    var dialog = openOverlay.querySelector('.modal-box');
+    if (dialog) {
+      dialog.setAttribute('role', 'dialog');
+      dialog.setAttribute('aria-modal', 'true');
+      var title = Array.from(dialog.querySelectorAll('h2,h3')).find(function (el) { return el.getClientRects().length > 0; });
+      if (title) {
+        if (!title.id) title.id = openOverlay.id + '-title';
+        dialog.setAttribute('aria-labelledby', title.id);
+      }
+    }
+  }
   if (isOpen && !modalWasOpen) {
     var focusables = openOverlay.querySelectorAll('button, input, textarea, select, a[href]');
     for (var i = 0; i < focusables.length; i++) {
@@ -2433,6 +2453,21 @@ document.querySelectorAll('.modal-overlay').forEach(function (o) {
   });
 });
 document.addEventListener('keydown', function (e) {
+  if (e.key === 'Tab') {
+    var openDialog = document.querySelector('.modal-overlay.open .modal-box');
+    if (openDialog) {
+      var focusable = Array.from(openDialog.querySelectorAll('button,input,textarea,select,a[href],[tabindex]')).filter(function (el) {
+        return !el.disabled && el.tabIndex >= 0 && el.getClientRects().length > 0;
+      });
+      if (focusable.length) {
+        var first = focusable[0], last = focusable[focusable.length - 1];
+        if (!openDialog.contains(document.activeElement) || (e.shiftKey && document.activeElement === first) || (!e.shiftKey && document.activeElement === last)) {
+          e.preventDefault();
+          (e.shiftKey ? last : first).focus();
+        }
+      }
+    }
+  }
   if (e.key === 'Escape') {
     var gate = document.getElementById('name-gate-overlay');
     if (gate && gate.classList.contains('open')) { cancelGate(); closeMobileNav(); return; }
@@ -2440,7 +2475,7 @@ document.addEventListener('keydown', function (e) {
     closeMobileNav();
   }
   // Ankimie, style Anki : Espace/Entree revele la reponse, 1-4 note la carte.
-  if (PAGE === 'ankimie' && !e.ctrlKey && !e.metaKey && !e.altKey &&
+  if (PAGE === 'ankimie' && !document.querySelector('.modal-overlay.open') && !e.ctrlKey && !e.metaKey && !e.altKey &&
       !(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) {
     var card = document.querySelector('#ank-list .ank-card');
     if (!card) return;
@@ -2665,6 +2700,10 @@ function loadAnkimieStats() {
 
 document.addEventListener('DOMContentLoaded', function () {
   applyTheme(localStorage.getItem('mdc-theme') || 'light');
+  var mainNav = document.getElementById('main-nav');
+  if (mainNav) mainNav.addEventListener('click', function (e) {
+    if (e.target.closest('a,button')) closeMobileNav();
+  });
   if (PAGE === 'compte') loadCompteDashboard();
 
   ['up-difficulty', 'edit-difficulty'].forEach(function (id) {

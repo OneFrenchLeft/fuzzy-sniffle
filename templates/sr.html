@@ -25,8 +25,10 @@
         <button class="btn-ghost btn-small" id="sr-export-btn">Exporter mon deck</button>
       </div>
 
-      <label><input type="checkbox" id="sr-hs-enabled" disabled onchange="saveSrHsPreference(this)"> Ajouter toutes les hors-séries à mon deck</label>
-      <p class="hint">Les hors-séries apparaissent quand elles sont dues, sans limite et sans effet sur les quotas ou la série. Ton choix est enregistré sur ton compte.</p>
+      <div class="sr-preference">
+        <label for="sr-hs-enabled"><input type="checkbox" id="sr-hs-enabled" disabled aria-describedby="sr-hs-hint" onchange="saveSrHsPreference(this)"> Ajouter toutes les hors-séries à mon deck</label>
+        <p class="hint" id="sr-hs-hint">Les hors-séries apparaissent quand elles sont dues, sans limite et sans effet sur les quotas ou la série. Ton choix est enregistré sur ton compte.</p>
+      </div>
 
       <div class="sr-progress" id="sr-progress" role="status" aria-live="polite" style="display:none"></div>
       <div class="sr-list" id="sr-list" aria-live="polite"><p>Connexion…</p></div>

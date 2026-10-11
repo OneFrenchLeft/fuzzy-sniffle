@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Forgecards</title>
 <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
 <script>
@@ -238,6 +238,34 @@ html[data-theme=dark] .btn-primary{color:#06201f}
   .choice{min-height:56px}
 }
 
+/* Match the shared pages' touch targets and readable mobile spacing. */
+body{line-height:1.5}
+.site-footer{position:static;transform:none;left:auto;bottom:auto;margin-top:auto;padding:1rem 1rem calc(1rem + env(safe-area-inset-bottom));text-align:center}
+.view,.panel,.field,.lobby-card,.choice,.ctext{min-width:0}
+.qtext,.qfoot,.errors li,.lobby-card-nom,.mylobby-head .nom{overflow-wrap:anywhere}
+.qfoot{flex-wrap:wrap}
+.nav-btn,.theme-toggle,.btn-quit,.btn-leave,.lobby-joueur .kick{min-height:44px}
+.btn-leave,.hamburger-btn{width:44px;height:44px;min-height:44px;flex-shrink:0}
+.ready-line b{flex-shrink:0}
+.mylobby-actions label{min-height:44px}
+.mylobby-actions input[type=checkbox]{min-width:20px;height:20px;flex-shrink:0;accent-color:var(--primary)}
+.katex-display{max-width:100%;overflow-x:auto;overflow-y:hidden;padding-bottom:.2rem}
+.choice .ctext img{max-width:100%;height:auto}
+.toast{max-width:calc(100vw - 2rem);width:max-content;overflow-wrap:anywhere;line-height:1.4;bottom:calc(1.5rem + env(safe-area-inset-bottom))}
+@media (max-width:1200px){
+  header{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;gap:.75rem;padding:.75rem max(1rem,env(safe-area-inset-right)) .75rem max(1rem,env(safe-area-inset-left))}
+  header .logo{grid-column:2;grid-row:1;text-align:center;min-height:44px;display:flex;align-items:center;justify-content:center}
+  .hamburger-btn{display:inline-flex;order:0;grid-column:1;grid-row:1}
+  .nav{display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);flex-direction:column;flex-wrap:nowrap;padding:1rem;border-bottom:1px solid var(--border);z-index:50;gap:.5rem;max-height:calc(100dvh - 70px);overflow-y:auto;overscroll-behavior:contain}
+  .nav.open{display:flex}
+  .nav .nav-btn,.nav .name-chip,.nav .theme-toggle{width:100%;min-height:44px;justify-content:center}
+  .nav-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9}
+  .nav-overlay.open{display:block}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+}
+
 
 .chips-row{display:flex;gap:.5rem;flex-wrap:wrap}
 .chip-select{border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:999px;padding:.5rem .9rem;font:inherit;font-size:.85rem;font-weight:700;cursor:pointer;min-height:44px;transition:background .15s,border-color .15s,color .15s}
@@ -311,9 +339,10 @@ var inGame=false,currentGid=null,quitGid=null;
 function applyTheme(theme){document.documentElement.setAttribute('data-theme',theme);var b=$('theme-toggle');b.textContent=theme==='dark'?'☀️ Jour':'🌙 Nuit';b.setAttribute('aria-label',theme==='dark'?'Passer en thème clair':'Passer en thème sombre');localStorage.setItem('mdc-theme',theme);}
 $('theme-toggle').onclick=function(){applyTheme((document.documentElement.getAttribute('data-theme')||'light')==='dark'?'light':'dark');};
 applyTheme(localStorage.getItem('mdc-theme')||'light');
-function closeMobileNav(){var n=$('qcm-nav'),b=$('hamburger-btn'),o=$('nav-overlay');n.classList.remove('open');b.classList.remove('open');b.setAttribute('aria-expanded','false');b.setAttribute('aria-label','Ouvrir le menu');o.classList.remove('open');}
+function closeMobileNav(){var n=$('qcm-nav'),b=$('hamburger-btn'),o=$('nav-overlay'),wasOpen=n.classList.contains('open');n.classList.remove('open');b.classList.remove('open');b.setAttribute('aria-expanded','false');b.setAttribute('aria-label','Ouvrir le menu');o.classList.remove('open');if(wasOpen)b.focus();}
 $('hamburger-btn').onclick=function(){var n=$('qcm-nav'),b=$('hamburger-btn'),o=$('nav-overlay'),open=n.classList.toggle('open');b.classList.toggle('open',open);b.setAttribute('aria-expanded',String(open));b.setAttribute('aria-label',open?'Fermer le menu':'Ouvrir le menu');o.classList.toggle('open',open);};
 $('nav-overlay').onclick=closeMobileNav;
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeMobileNav();});
 $('qcm-nav').addEventListener('click',function(e){if(e.target.closest('a'))closeMobileNav();});
 function show(id){['lobby','game','results','errors-box'].forEach(function(s){$(s).classList.toggle('active',s===id);});if(id!=='results')$('errors-box').classList.remove('active');}
 var toastTimer=null;
