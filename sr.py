@@ -508,7 +508,7 @@ def qcm_last_states():
     valid = set()
     for theme, path in QCM_FILES.items():
         if path.exists():
-            for q in qcm_engine.read_qcm_questions(path, theme=theme):
+            for q in qcm_engine.student_questions(theme):
                 if q.get('qid'):
                     valid.add(q['qid'])
     counts = {}

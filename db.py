@@ -88,6 +88,19 @@ def init_db():
         ")"
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_qcm_sr_state_next_review ON qcm_sr_state(next_review)")
+    # Availability is independent of the bank and of student review history.
+    # Missing chapter rows retain the historical behaviour (active by default).
+    conn.execute('''CREATE TABLE IF NOT EXISTS content_chapters (
+        theme TEXT NOT NULL, chapitre TEXT NOT NULL,
+        qcm_active INTEGER NOT NULL DEFAULT 1,
+        ankimie_active INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY(theme, chapitre)
+    )''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS ankimie_memberships (
+        theme TEXT NOT NULL, chapitre TEXT NOT NULL, qid TEXT NOT NULL,
+        included INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY(theme, chapitre, qid)
+    )''')
     conn.execute(
         "CREATE TABLE IF NOT EXISTS qcm_sr_reviews ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"

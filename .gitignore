@@ -24,4 +24,5 @@ static/videos/
 static/song.mp3
 
 # Testing
+node_modules/
 test/test_routes.py

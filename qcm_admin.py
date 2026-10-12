@@ -1,7 +1,8 @@
 # Xiao: Admin-side QCM editing and statistics. Keep validation strict here.
 from flask import Blueprint, request, jsonify, abort
 from pathlib import Path
-import json, hashlib, re
+import json, hashlib, re, os, tempfile, fcntl
+from contextlib import contextmanager
 from config import (QCM_FILES, QCM_MIN_TIME_S, QCM_MAX_TIME_S, QCM_DEFAULT_TIME_S,
                     QCM_THEME_PREFIX, DATA, QID_RE, now_paris)
 from db import db, ensure_db, log_event
@@ -141,18 +142,125 @@ def get_qcm_path(theme):
         abort(404)
     return path
 
+
+def bank_revision(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+def read_bank(theme):
+    path = get_qcm_path(theme)
+    raw = path.read_bytes() if path.exists() else b''
+    parsed = json.loads(raw.decode('utf-8-sig')) if raw else []
+    return validate_qcm_questions(parsed, theme), bank_revision(raw)
+
+
+@contextmanager
+def bank_lock(theme):
+    path = get_qcm_path(theme)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.with_suffix(path.suffix + '.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _atomic_bank_write(path, raw):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=path.name + '.',
+                                         suffix='.tmp', delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+class BankConflict(ValueError):
+    pass
+
+
+def notify_catalog_change():
+    # Emit only after releasing the file lock: a socket write may yield.
+    if qcm_engine.io is not None:
+        try:
+            qcm_engine.push_lobbies()
+        except Exception as exc:
+            print(f'[qcm-admin] actualisation des lobbies impossible: {exc!r}')
+
+
+def store_bank(theme, questions, revision=None):
+    """Caller holds bank_lock across reading, building and replacing a bank."""
+    path = get_qcm_path(theme)
+    previous, current_revision = read_bank(theme)
+    if revision is not None and revision != current_revision:
+        raise BankConflict('La banque a changé depuis son chargement. Recharge-la avant de réessayer.')
+    clean = validate_qcm_questions(questions, theme)
+    ids = [q['qid'] for q in clean]
+    if len(ids) != len(set(ids)):
+        raise ValueError('Une question est présente plusieurs fois. Retire le doublon avant d’enregistrer.')
+    from content_catalog import chapter_name
+    old_chapters = {chapter_name(q.get('chapitre')) for q in previous}
+    new_chapters = {chapter_name(q.get('chapitre')) for q in clean} - old_chapters
+    ensure_db()
+    conn = db()
+    created_chapters = []
+    raw = (json.dumps(clean, ensure_ascii=False, indent=2) + '\n').encode('utf-8')
+    try:
+        with conn:
+            for chapter in new_chapters:
+                # Previously imported chapters stay active; newly introduced ones
+                # enter the bank inactive until a teacher explicitly enables them.
+                inserted = conn.execute('INSERT OR IGNORE INTO content_chapters '
+                                        '(theme, chapitre, qcm_active, ankimie_active) VALUES(?,?,0,0)',
+                                        (theme, chapter))
+                if inserted.rowcount:
+                    created_chapters.append(chapter)
+        # Commit inactive flags BEFORE exposing a new chapter in the file.
+        # A worker crash after the atomic rename cannot accidentally activate it.
+        _atomic_bank_write(path, raw)
+    except Exception:
+        try:
+            with conn:
+                for chapter in created_chapters:
+                    conn.execute('DELETE FROM content_chapters WHERE theme=? AND chapitre=?',
+                                 (theme, chapter))
+        except Exception:
+            # Keeping an empty inactive draft is safe if metadata cleanup fails.
+            pass
+        raise
+    finally:
+        conn.close()
+    # Retiring a question never implicitly deletes student history. The existing
+    # explicit purge API remains available for deliberate historical cleanup.
+    qcm_engine._QUESTIONS_CACHE.clear()
+    return clean, bank_revision(raw)
+
 @bp.route('/api/admin/qcm/<theme>', methods=['GET'])
 @require_admin
 def admin_get_qcm(theme):
     path = get_qcm_path(theme)
-    if not path.exists():
-        return jsonify({'ok': True, 'theme': theme, 'raw': '[]', 'mtime': None})
     try:
-        raw = path.read_text(encoding='utf-8')
-        mtime = path.stat().st_mtime
+        questions, revision = read_bank(theme)
+        mtime = path.stat().st_mtime if path.exists() else None
+    except (ValueError, UnicodeError) as e:
+        return jsonify({'ok': False, 'error': f'Banque invalide : {e}'}), 400
     except OSError as e:
         return jsonify({'ok': False, 'error': f'lecture impossible : {e}'}), 500
-    return jsonify({'ok': True, 'theme': theme, 'raw': raw, 'mtime': mtime})
+    from content_catalog import chapter_overview
+    return jsonify({'ok': True, 'theme': theme,
+                    'raw': json.dumps(questions, ensure_ascii=False, indent=2),
+                    'mtime': mtime, 'revision': revision,
+                    'chapters': chapter_overview(theme, questions)})
 
 def _purge_retired_qids(theme=None, chapitre=''):
     """Remove qcm_answers rows for questions no longer present in the files."""
@@ -213,30 +321,16 @@ def admin_save_qcm(theme):
         else:
             return jsonify({'ok': False, 'error': 'champ raw requis (string JSON ou liste)'}), 400
     try:
-        questions = validate_qcm_questions(parsed, theme=theme)
-    except ValueError as e:
+        with bank_lock(theme):
+            questions, revision = store_bank(theme, parsed, payload.get('revision'))
+    except BankConflict as e:
+        return jsonify({'ok': False, 'error': str(e)}), 409
+    except (ValueError, UnicodeError) as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + '.tmp')
-    normalized_raw = json.dumps(questions, ensure_ascii=False, indent=2) + '\n'
-    try:
-        # Eliot: Write to a temp file first so a failed write doesn't destroy the original.
-        temporary.write_text(normalized_raw, encoding='utf-8')
-        temporary.replace(path)
     except OSError as e:
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
         return jsonify({'ok': False, 'error': f'impossible d’enregistrer : {e}'}), 500
-    try:
-        purged, _ = _purge_retired_qids(theme=theme)
-        if purged:
-            print(f'[qcm-admin] purge auto : {purged} reponses supprimees ({theme})')
-    except Exception as exc:
-        # Xiao: Purging is cleanup; it shouldn't make a successful save look failed.
-        print(f'[qcm-admin] purge auto impossible: {exc!r}')
-    return jsonify({'ok': True, 'theme': theme, 'count': len(questions)})
+    notify_catalog_change()
+    return jsonify({'ok': True, 'theme': theme, 'count': len(questions), 'revision': revision})
 
 @bp.route('/api/admin/qcm/purge-retired', methods=['POST'])
 @require_admin

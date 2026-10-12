@@ -1,0 +1,19 @@
+<div class="content-workspace" id="ank-content">
+  <div class="fields-grid">
+    <div class="field"><label for="ank-admin-subject">Matière</label><select id="ank-admin-subject"><option value="chimie">Chimie</option><option value="physique">Physique</option><option value="maths">Mathématiques</option></select></div>
+    <div class="field"><label for="ank-admin-chapter">Chapitre de révision</label><select id="ank-admin-chapter"></select></div>
+  </div>
+  <p class="hint content-notice">Les cartes utilisent les questions de la banque QCM. Retirer une carte de ce chapitre ne supprime ni la question, ni les autres collections, ni les révisions des élèves. Une carte présente dans plusieurs chapitres n’est proposée qu’une fois aux élèves.</p>
+  <details class="content-overview" open><summary>Chapitres disponibles et activation Ankimie</summary><div id="ank-chapter-overview" class="content-chapters"></div></details>
+  <div class="content-toolbar"><label class="content-grow" for="ank-new-chapter">Nouveau chapitre de révision<input type="text" id="ank-new-chapter" maxlength="200"></label><button type="button" class="btn-ghost btn-small" id="ank-create-chapter">Créer le chapitre</button></div>
+  <div id="ank-content-status" role="status" aria-live="polite"></div>
+  <div class="content-toolbar"><button type="button" class="btn-save btn-small" id="ank-open-picker">Ajouter des cartes existantes</button><button type="button" class="btn-ghost btn-small" id="ank-reload">Recharger les cartes</button></div>
+  <h3 id="ank-collection-title">Cartes du chapitre</h3>
+  <div id="ank-collection-list" class="content-card-list" aria-live="polite"></div>
+  <div id="ank-collection-pages" class="content-toolbar"></div>
+  <section id="ank-card-picker" class="import-box" hidden aria-labelledby="ank-picker-title">
+    <div class="modal-topbar"><h3 id="ank-picker-title">Cartes disponibles dans la banque</h3><button type="button" class="btn-ghost btn-small" id="ank-close-picker">Fermer</button></div>
+    <div class="field"><label for="ank-picker-search">Rechercher une carte</label><input type="search" id="ank-picker-search" placeholder="Question, réponse ou chapitre d’origine…"></div>
+    <div id="ank-picker-list" class="content-card-list"></div><div id="ank-picker-pages" class="content-toolbar"></div>
+  </section>
+</div>

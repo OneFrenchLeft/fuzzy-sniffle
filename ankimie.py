@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Ankimie : repetition espacee (FSRS) sur les questions QCM — deck chimie.
+"""Ankimie : repetition espacee (FSRS) sur les collections de questions QCM.
 
 Entierement independante de la SR Forgecards : etats (qcm_sr_state), reviews
 (qcm_sr_reviews) et quota (qcm_daily_new_limit) sont propres. Seule la
-retention cible FSRS (fsrs_retention) est partagee. Le deck est parametre
-(ANKIMIE_DECK) pour pouvoir brancher physique/maths plus tard sans migration :
-tout est clefé sur le qid stable des questions.
+retention cible FSRS (fsrs_retention) est partagee. Le contenu chimie existant
+reste inclus par defaut ; les autres collections sont gerees visuellement.
+Tout est clefe sur le qid stable des questions, independamment des collections.
 """
 from flask import Blueprint, jsonify, request, session
 
@@ -17,8 +17,8 @@ import qcm_engine
 
 bp = Blueprint('ankimie', __name__)
 
-# Deck unique au lancement. Structure ouverte : ajouter un deck = ajouter une
-# entree dans QCM_FILES + changer cette constante (ou la parametrer plus tard).
+# Compatibility label for existing clients. Actual membership and availability
+# now come from the collections; legacy chemistry content remains included.
 ANKIMIE_DECK = 'chimie'
 
 # preview_all_grades est clefe par ses labels internes ; l'API expose les cles
@@ -36,10 +36,10 @@ def _retention(params):
 
 
 def _deck_questions():
-    path = QCM_FILES.get(ANKIMIE_DECK)
-    if path is None:
-        return []
-    return qcm_engine.read_qcm_questions(path, theme=ANKIMIE_DECK)
+    from content_catalog import ankimie_questions
+    banks = {theme: qcm_engine.read_qcm_questions(path, theme=theme)
+             for theme, path in QCM_FILES.items()}
+    return ankimie_questions(banks)
 
 
 def _deck_index():
@@ -223,15 +223,17 @@ def ankimie_stats():
     today = now_paris().date().isoformat()
     conn = db()
     students = []
+    active_qids = set(_deck_index())
     rows = conn.execute(
         'SELECT prenom, COUNT(*) AS vues, SUM(correct) AS bonnes, '
         'SUM(CASE WHEN substr(created_at,1,10)=? THEN 1 ELSE 0 END) AS aujourd_hui '
         'FROM qcm_sr_reviews GROUP BY prenom ORDER BY prenom', (today,)).fetchall()
     for r in rows:
-        due = conn.execute(
-            'SELECT COUNT(*) AS c FROM qcm_sr_state '
+        due_rows = conn.execute(
+            'SELECT qid FROM qcm_sr_state '
             'WHERE prenom=? AND (next_review IS NULL OR next_review<=?)',
-            (r['prenom'], today)).fetchone()['c']
+            (r['prenom'], today)).fetchall()
+        due = sum(row['qid'] in active_qids for row in due_rows)
         students.append({
             'prenom': r['prenom'],
             'vues': r['vues'],

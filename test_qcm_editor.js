@@ -141,3 +141,45 @@ test('a save completing after switching subjects does not reload or erase the ne
   assert.equal(state.requests.length, 3);
   assert.equal(state.elements['qcm-json-editor'].value, edits);
 });
+
+test('a save completing after switching chapters preserves the new chapter draft', async () => {
+  const state = editor();
+  await load(state, [{ ...question, chapitre: 'Optique' }, { ...question, chapitre: 'Mécanique' }]);
+  state.context.qcmTheme = 'Optique'; state.context.renderQcmEditorBuffer();
+  state.context.saveQcmEditor();
+  state.context.qcmTheme = 'Mécanique'; state.context.qcmScopeVersion++;
+  const draft = JSON.stringify([{ ...question, chapitre: 'Mécanique', question: 'Brouillon conservé' }]);
+  state.elements['qcm-json-editor'].value = draft;
+  state.requests[1].resolve({ status: 200, data: { ok: true, count: 2, theme: 'physique' } });
+  await flush();
+  assert.equal(state.requests.length, 2);
+  assert.equal(state.elements['qcm-json-editor'].value, draft);
+  assert.equal(state.context.qcmTheme, 'Mécanique');
+});
+
+test('saves send the loaded revision and keep unrelated chapters', async () => {
+  const state = editor();
+  state.context.loadQcmEditor();
+  state.requests[0].resolve({ status: 200, data: { ok: true, revision: 'loaded-revision', raw: JSON.stringify([
+    { ...question, chapitre: 'Optique' }, { ...question, question: 'Autre chapitre', chapitre: 'Mécanique' },
+  ]) } });
+  await flush();
+  state.context.qcmTheme = 'Optique'; state.context.renderQcmEditorBuffer();
+  state.elements['qcm-json-editor'].value = JSON.stringify([{ ...question, question: 'Modification' }]);
+  state.context.saveQcmEditor();
+  const payload = JSON.parse(state.requests[1].options.body);
+  assert.equal(payload.revision, 'loaded-revision');
+  const candidate = JSON.parse(payload.raw);
+  assert.ok(candidate.some(q => q.question === 'Autre chapitre' && q.chapitre === 'Mécanique'));
+  assert.ok(candidate.some(q => q.question === 'Modification' && q.chapitre === 'Optique'));
+});
+
+test('empty available chapters remain selectable without adding dummy questions', async () => {
+  const state = editor();
+  state.elements['qcm-theme-select'] = { innerHTML: '' };
+  state.context.loadQcmEditor();
+  state.requests[0].resolve({ status: 200, data: { ok: true, raw: '[]', chapters: [{ chapitre: 'Électricité', qcm_count: 0 }] } });
+  await flush();
+  assert.match(state.elements['qcm-theme-select'].innerHTML, /Électricité \(0\)/);
+  assert.equal(state.context.qcmFullList.length, 0);
+});

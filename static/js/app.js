@@ -27,6 +27,9 @@ var qcmTheme = '';
 var qcmLoadedSubject = null;
 var qcmLoadVersion = 0;
 var qcmSaving = false;
+var qcmRevision = null;
+var qcmChapters = [];
+var qcmScopeVersion = 0;
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -532,12 +535,18 @@ function checkPw() {
         var subjSelect = document.getElementById('qcm-subject-select');
         if (subjSelect && !subjSelect.dataset.bound) {
           subjSelect.dataset.bound = '1';
-          subjSelect.addEventListener('change', function () { qcmTheme = ''; loadQcmEditor(); });
+          subjSelect.addEventListener('change', function () {
+            if (window.contentAdmin && !window.contentAdmin.canSwitch()) { subjSelect.value = qcmLoadedSubject; return; }
+            qcmTheme = ''; qcmScopeVersion++; loadQcmEditor();
+          });
         }
         var themeSelect = document.getElementById('qcm-theme-select');
         if (themeSelect && !themeSelect.dataset.bound) {
           themeSelect.dataset.bound = '1';
-          themeSelect.addEventListener('change', function () { qcmTheme = themeSelect.value; renderQcmEditorBuffer(); });
+          themeSelect.addEventListener('change', function () {
+            if (window.contentAdmin && !window.contentAdmin.canSwitch()) { themeSelect.value = qcmTheme; return; }
+            qcmTheme = themeSelect.value; qcmScopeVersion++; renderQcmEditorBuffer();
+          });
         }
         loadQcmEditor();
       });
@@ -589,8 +598,10 @@ function qcmPreviewImageUrl(ref) {
 
 function normalizeQcmPreviewChoice(choice) {
   if (choice && typeof choice === 'object' && !Array.isArray(choice)) {
+    var text = String(choice.texte !== undefined ? choice.texte : (choice.text || '')).trim();
+    if (choice.latex) text += (text ? '\n' : '') + '$' + choice.latex + '$';
     return {
-      text: String(choice.texte !== undefined ? choice.texte : (choice.text || '')).trim(),
+      text: text,
       image: String(choice.image || '').trim()
     };
   }
@@ -638,7 +649,7 @@ function validateQcmPreviewQuestion(question, position) {
     throw new Error(prefix + '"temps" doit être un entier entre 10 et 300.');
   }
   return {
-    question: text,
+    question: text + (question.latex ? '\n$$' + question.latex + '$$' : ''),
     image: qcmQuestionImage(question),
     choices: choices,
     answer: answer - 1,
@@ -816,9 +827,9 @@ function qcmApiUrl(subject) {
 }
 
 function qcmThemeList() {
-  var seen = [];
+  var seen = qcmChapters.map(function (ch) { return ch.chapitre; });
   qcmFullList.forEach(function (q) {
-    var t = String(q.chapitre || '').trim();
+    var t = String(q.chapitre || 'Autre').trim() || 'Autre';
     if (t && seen.indexOf(t) === -1) seen.push(t);
   });
   return seen;
@@ -828,9 +839,9 @@ function renderQcmThemeSelect() {
   var sel = document.getElementById('qcm-theme-select');
   if (!sel) return;
   var themes = qcmThemeList();
-  var html = '<option value="">Tous les thèmes (' + qcmFullList.length + ')</option>';
+  var html = '<option value="">Tous les chapitres (' + qcmFullList.length + ')</option>';
   themes.forEach(function (t) {
-    var n = qcmFullList.filter(function (q) { return String(q.chapitre || '').trim() === t; }).length;
+    var n = qcmFullList.filter(function (q) { return String(q.chapitre || 'Autre').trim() === t; }).length;
     html += '<option value="' + esc(t) + '"' + (t === qcmTheme ? ' selected' : '') + '>' + esc(t) + ' (' + n + ')</option>';
   });
   sel.innerHTML = html;
@@ -842,12 +853,14 @@ function renderQcmEditorBuffer() {
   var editor = document.getElementById('qcm-json-editor');
   if (!editor) return;
   var subset = qcmTheme
-    ? qcmFullList.filter(function (q) { return String(q.chapitre || '').trim() === qcmTheme; })
+    ? qcmFullList.filter(function (q) { return String(q.chapitre || 'Autre').trim() === qcmTheme; })
     : qcmFullList;
   editor.value = JSON.stringify(subset, null, 2) + '\n';
+  if (typeof window !== 'undefined' && window.contentAdmin) window.contentAdmin.render();
 }
 
 function createQcmTheme() {
+  if (typeof window !== 'undefined' && window.contentAdmin) return window.contentAdmin.createChapter('qcm');
   var input = document.getElementById('qcm-new-theme-input');
   var name = (input.value || '').trim();
   if (!name) return;
@@ -888,6 +901,8 @@ function loadQcmEditor() {
   var subject = subjEl.value;
   var version = ++qcmLoadVersion;
   qcmLoadedSubject = null;
+  qcmRevision = null;
+  if (typeof window !== 'undefined' && window.contentAdmin) window.contentAdmin.loading();
   qcmEditorStatus('Chargement de ' + subject + '…', false);
   return fetchWithStatus(qcmApiUrl(subject), { cache: 'no-store' })
     .then(function (res) {
@@ -905,13 +920,13 @@ function loadQcmEditor() {
         return;
       }
       qcmFullList = loaded.map(canonicalQcmImage);
+      qcmRevision = d.revision || null;
+      qcmChapters = d.chapters || [];
       qcmLoadedSubject = subject;
       if (qcmTheme && qcmThemeList().indexOf(qcmTheme) === -1) qcmTheme = '';
       renderQcmThemeSelect();
       renderQcmEditorBuffer();
-      qcmEditorStatus('Chargé depuis le disque' + (d.mtime
-        ? ' - modifié le ' + new Date(d.mtime * 1000).toLocaleString('fr-FR')
-        : ' - fichier absent (il sera créé à l’enregistrement)'), false);
+      qcmEditorStatus('Banque chargée : ' + loaded.length + ' questions disponibles.', false);
     })
     .catch(function (e) {
       if (version === qcmLoadVersion && subjEl.value === subject) {
@@ -945,6 +960,7 @@ function saveQcmEditor() {
   if (qcmSaving) return;
   var subject = subjEl.value;
   var version = qcmLoadVersion;
+  var scopeVersion = qcmScopeVersion;
   var edited;
   try { edited = JSON.parse(editor.value); }
   catch (err) { qcmEditorStatus('JSON invalide : ' + err.message, true); return; }
@@ -959,26 +975,32 @@ function saveQcmEditor() {
       }
       return q;
     });
-    var others = qcmFullList.filter(function (q) { return String(q.chapitre || '').trim() !== qcmTheme; });
+    var others = qcmFullList.filter(function (q) { return String(q.chapitre || 'Autre').trim() !== qcmTheme; });
     candidate = others.concat(edited);
   } else {
     candidate = edited;
   }
 
   var raw = JSON.stringify(candidate, null, 2) + '\n';
+  var removed = qcmFullList.filter(function (old) {
+    return old.qid && !candidate.some(function (q) { return q && (q.qid === old.qid || (!q.qid && q.question === old.question && (q.chapitre || 'Autre') === (old.chapitre || 'Autre'))); });
+  });
+  if (removed.length && typeof window !== 'undefined' && !window.confirm('Retirer définitivement ' + removed.length + ' questions de la banque dans le périmètre sélectionné ? Les révisions historiques sont conservées.')) return;
   qcmSaving = true;
+  if (typeof window !== 'undefined' && window.contentAdmin) window.contentAdmin.busy();
   if (spinner) spinner.style.display = 'inline-block';
   qcmEditorStatus('Enregistrement…', false);
   return fetchWithStatus(qcmApiUrl(subject), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ raw: raw }),
+    body: JSON.stringify({ raw: raw, revision: qcmRevision }),
     cache: 'no-store'
   })
     .then(function (res) {
       qcmSaving = false;
+      if (typeof window !== 'undefined' && window.contentAdmin) window.contentAdmin.busy();
       if (spinner) spinner.style.display = 'none';
-      if (version !== qcmLoadVersion || subjEl.value !== subject) return;
+      if (version !== qcmLoadVersion || subjEl.value !== subject || scopeVersion !== qcmScopeVersion) return;
       var d = res.data || {};
       if (!d.ok) { qcmEditorFail(res.status, d); return; }
       qcmEditorStatus('Enregistré ✔ - ' + d.count + ' questions valides pour ' + d.theme + '.', false);
@@ -987,6 +1009,7 @@ function saveQcmEditor() {
     })
     .catch(function (e) {
       qcmSaving = false;
+      if (typeof window !== 'undefined' && window.contentAdmin) window.contentAdmin.busy();
       if (spinner) spinner.style.display = 'none';
       if (version === qcmLoadVersion && subjEl.value === subject) {
         qcmEditorStatus('Erreur réseau : ' + e, true);
@@ -2626,7 +2649,10 @@ function buildAnkCard(c) {
       div.querySelector('.sr-actions').style.display = 'block';
       typesetMathKatex(div);
       div.querySelector('.sr-actions').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }).catch(function () { showToast('Impossible de révéler la réponse.'); showBtn.disabled = false; revealed = false; });
+    }).catch(function (err) {
+      if (err && err.status === 404) { showToast('Cette carte n’est plus active. Le deck est actualisé.'); loadAnkimieToday(); return; }
+      showToast('Impossible de révéler la réponse.'); showBtn.disabled = false; revealed = false;
+    });
   };
   div.querySelectorAll('.btn-rate').forEach(function (b) {
     b.onclick = function () {
@@ -2645,6 +2671,7 @@ function buildAnkCard(c) {
         }
       }).catch(function (err) {
         if (err && err.status === 401) { openNameGate(); return; }
+        if (err && err.status === 404) { showToast('Cette carte n’est plus active. Le deck est actualisé.'); loadAnkimieToday(); return; }
         div.querySelectorAll('.btn-rate').forEach(function (x) { x.disabled = false; });
         showToast('Erreur reseau, la carte n\'a pas ete enregistree.');
       });
@@ -2693,7 +2720,7 @@ function loadAnkimieStats() {
   var box = document.getElementById('ankimie-stats');
   if (!box) return;
   adminAction('/api/ankimie/stats', 'GET', function (d) {
-    var html = '<h3>Élèves (deck ' + esc(d.deck || '') + ')</h3>';
+    var html = '<h3>Élèves — collections Ankimie</h3>';
     html += '<table class="weak-table"><thead><tr><th>Élève</th><th>Vues</th><th>Aujourd\'hui</th><th>Réussite</th><th>Dues</th></tr></thead><tbody>';
     (d.students || []).forEach(function (s) {
       html += '<tr><td>' + esc(s.prenom) + '</td><td>' + s.vues + '</td><td>' + s.aujourd_hui + '</td><td>' +

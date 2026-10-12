@@ -12,6 +12,15 @@ espacée (FSRS modifié), QCM en direct façon kahoot, et bot Discord
 - `fsrs.py` — moteur de répétition espacée (FSRS-4.5 ajusté + influence de la difficulté professeur)
 - `message.py` — envoie un message Discord depuis le terminal
 
+## Administration des contenus
+
+La banque QCM se gère avec des formulaires, un import CSV avec aperçu et des
+chapitres activables. Ankimie utilise des collections de ces mêmes questions.
+Le JSON reste disponible dans « Mode avancé — édition JSON ».
+
+Voir [le guide et les notes de migration](docs/admin-content.md) pour les
+comportements, les API et les commandes de vérification.
+
 ## Déploiement
 
 - Python 3.11+, `pip install -r requirements.txt`

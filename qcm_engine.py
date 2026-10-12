@@ -76,8 +76,12 @@ def qcm_integer(value):
 
 def normalize_choice(choice):
     if isinstance(choice, dict):
+        text = str(choice.get('texte', choice.get('text', ''))).strip()
+        latex = str(choice.get('latex') or '').strip()
+        if latex:
+            text = (text + '\n' if text else '') + '$' + latex + '$'
         return {
-            'text': str(choice.get('texte', choice.get('text', ''))).strip(),
+            'text': text,
             'image': str(choice.get('image', '')).strip(),
         }
     return {'text': str(choice).strip(), 'image': ''}
@@ -92,7 +96,7 @@ def read_qcm_questions(path, theme=None):
     if cached and cached[0] == mtime:
         return cached[1]
     try:
-        data = json.loads(path.read_text(encoding='utf-8'))
+        data = json.loads(path.read_text(encoding='utf-8-sig'))
     except Exception:
         return []
     if not isinstance(data, list):
@@ -116,7 +120,9 @@ def read_qcm_questions(path, theme=None):
             image = question_image(item)
             chapitre = str(item.get('chapitre', '')).strip() or 'Autre'
             if question and 2 <= len(choices) <= 4 and 0 <= answer < len(choices):
-                entry = {'question': question, 'choices': choices,
+                latex = str(item.get('latex') or '').strip()
+                displayed = question + ('\n$$' + latex + '$$' if latex else '')
+                entry = {'question': displayed, 'choices': choices,
                          'answer': answer, 'time': timer, 'image': image,
                          'chapitre': chapitre,
                          'explication': str(item.get('explication', '')).strip()}
@@ -132,6 +138,13 @@ def read_qcm_questions(path, theme=None):
     _QUESTIONS_CACHE[cache_key] = (mtime, out)
     return out
 
+def student_questions(theme):
+    """Filter at consumption time; the file cache always retains the full bank."""
+    from content_catalog import settings, qcm_is_active
+    configuration = settings()
+    return [q for q in read_qcm_questions(QCM_FILES[theme], theme=theme)
+            if qcm_is_active(theme, q['chapitre'], configuration)]
+
 def available_chapters(themes):
     if not themes:
         themes = list(QCM_FILES)
@@ -142,7 +155,7 @@ def available_chapters(themes):
         path = QCM_FILES.get(theme)
         if path is None:
             continue
-        for q in read_qcm_questions(path):
+        for q in student_questions(theme):
             pair = [theme, q.get('chapitre', 'Autre')]
             if pair not in seen:
                 seen.append(pair)
@@ -161,7 +174,7 @@ def review_questions(prenom, themes, n, chapitres=None):
     for name in (themes or QCM_FILES):
         if name not in QCM_FILES:
             continue
-        for q in read_qcm_questions(QCM_FILES[name], theme=name):
+        for q in student_questions(name):
             if q.get('qid') in wrong_qids:
                 q = dict(q)
                 q['time'] = 600
@@ -179,7 +192,7 @@ def pick_questions(themes=None, n=QCM_QUESTIONS_PER_MATCH, chapitres=None):
     for name in themes:
         if name not in QCM_FILES:
             continue
-        for q in read_qcm_questions(QCM_FILES[name], theme=name):
+        for q in student_questions(name):
             pool.append((name, q))
     if chapitres:
         wanted = set()

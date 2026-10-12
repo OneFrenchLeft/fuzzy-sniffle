@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Admin{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin_content.css', v=1) }}">
+<script src="{{ url_for('static', filename='js/admin_content.js', v=1) }}" defer></script>
+{% endblock %}
 {% block content %}
 <style>
 /* Interface admin seulement. Le formulaire de login est hors de ce conteneur. */
@@ -94,7 +98,11 @@
         <div class="saved-msg" id="saved-msg">Parametres enregistrés</div>
         </div>
 
-        </section><section class="atelier-view" id="atelier-qcm" hidden><div class="atelier-heading"><h2>Éditeur QCM</h2><p>Éditer puis tester les questions sans quitter l’atelier.</p></div><div class="import-box" id="qcm-editor-box">
+        </section><section class="atelier-view" id="atelier-qcm" hidden><div class="atelier-heading"><h2>Banque de questions QCM</h2><p>Choisir une matière et un chapitre, gérer les questions puis décider ce qui est actif pour les élèves.</p></div>
+        {% include 'admin_qcm_visual.html' %}
+        <details class="content-advanced" id="qcm-advanced"><summary>Mode avancé — édition JSON</summary>
+        <p class="hint">Réservé aux utilisateurs expérimentés. Une modification incorrecte du JSON peut rendre certaines questions invalides. Pour une modification normale, utilisez l’éditeur visuel ci-dessus. Une liste vide retire les questions du périmètre sélectionné ; les autres chapitres sont conservés.</p>
+        <div class="import-box" id="qcm-editor-box">
           <div class="modal-topbar">
             <div>
               <h3>Éditeur QCM web</h3>
@@ -107,33 +115,17 @@
             </div>
           </div>
 
-          <div class="fields-grid">
-            <div class="field">
-              <label for="qcm-subject-select">Matière</label>
-              <select id="qcm-subject-select">
-                <option value="physique">Physique</option>
-                <option value="chimie">Chimie</option>
-                <option value="maths">Maths</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="qcm-theme-select">Thème</label>
-              <select id="qcm-theme-select"><option value="">Tous les thèmes</option></select>
-            </div>
-          </div>
-          <div class="admin-row-actions" id="qcm-new-theme-row" style="display:none;margin-bottom:1rem">
-            <input type="text" id="qcm-new-theme-input" placeholder="Nom du nouveau thème (ex : SN1 et SN2)" style="flex:1;min-width:200px">
-            <button type="button" class="btn-save btn-small" onclick="createQcmTheme()">Créer le thème</button>
-          </div>
-
           <div class="admin-row-actions" style="margin-bottom:1rem">
-            <button type="button" class="btn-ghost btn-small" onclick="loadQcmEditor()">⟳ Recharger</button>
+            <button type="button" class="btn-ghost btn-small" onclick="if(contentAdmin.canSwitch()) loadQcmEditor()">⟳ Recharger</button>
             <button type="button" class="btn-ghost btn-small" onclick="formatQcmEditor()">✨ Formater le JSON</button>
+            <button type="button" class="btn-ghost btn-small" id="qcm-json-validate">Valider avant d’enregistrer</button>
             <button type="button" class="btn-save btn-small" onclick="saveQcmEditor()">💾 Enregistrer <span id="qcm-save-spinner" class="spinner" style="display:none"></span></button>
           </div>
 
           <div class="field">
             <label for="qcm-json-editor">Questions JSON</label>
+            <label for="qcm-json-file">Charger un fichier JSON dans l’éditeur (sans enregistrer)</label>
+            <input type="file" id="qcm-json-file" accept=".json,application/json">
             <textarea id="qcm-json-editor" spellcheck="false"
                       style="min-height:520px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem"
                       placeholder='[
@@ -155,7 +147,6 @@
             </span>
           </div>
 
-          <div id="qcm-editor-status" class="saved-msg" role="status" aria-live="polite"></div>
         </div><div class="import-box" id="qcm-preview-box">
       <div class="modal-topbar">
         <div>
@@ -215,7 +206,7 @@
           </p>
         </div>
       </div>
-    </div></section><section class="atelier-view" id="atelier-qcmstats" hidden><div class="atelier-heading"><h2>Résultats QCM</h2><p>Analyser les questions et retrouver les parties.</p></div><div class="import-box" id="qcm-weak-box">
+    </div></details></section><section class="atelier-view" id="atelier-qcmstats" hidden><div class="atelier-heading"><h2>Résultats QCM</h2><p>Analyser les questions et retrouver les parties.</p></div><div class="import-box" id="qcm-weak-box">
           <h3>Questions QCM les plus ratées</h3>
           <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">
             Statistiques cumulées de toutes les QCM (tous élèves confondus).
@@ -260,10 +251,12 @@
           </p>
           <button type="button" class="btn-ghost btn-small" onclick="loadStatsOverview()">⟳ Calculer / Rafraîchir</button>
           <div id="stats-overview" style="margin-top:.75rem"></div>
-        </div></section><section class="atelier-view" id="atelier-ankimie" hidden><div class="atelier-heading"><h2>Ankimie</h2><p>Suivi de la répétition espacée des fiches QCM chimie.</p></div><div class="import-box">
+        </div></section><section class="atelier-view" id="atelier-ankimie" hidden><div class="atelier-heading"><h2>Collections Ankimie</h2><p>Composer les chapitres de révision à partir de la banque QCM, sans supprimer les questions ni l’historique des élèves.</p></div>
+        {% include 'admin_ankimie_content.html' %}
+        <details class="content-advanced"><summary>Statistiques Ankimie</summary><div class="import-box">
           <button type="button" class="btn-ghost btn-small" onclick="loadAnkimieStats()">⟳ Calculer / Rafraîchir</button>
           <div id="ankimie-stats" style="margin-top:.75rem"></div>
-        </div></section><section class="atelier-view" id="atelier-exports" hidden><div class="atelier-heading"><h2>Exports</h2><p>Télécharger les données et rapports existants.</p></div><div class="import-box">
+        </div></details></section><section class="atelier-view" id="atelier-exports" hidden><div class="atelier-heading"><h2>Exports</h2><p>Télécharger les données et rapports existants.</p></div><div class="import-box">
           <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">Exports pour regarder en fin d'année.</p>
           <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem">
             <button class="btn-ghost btn-small" onclick="exportCsv('activite-quotidienne')">Activité quotidienne (élève × jour)</button>
@@ -283,7 +276,8 @@ function open(key){
   root.querySelectorAll('.atelier-view').forEach(function(v){v.hidden=v.id!=='atelier-'+key;});
   var h=root.querySelector('#atelier-'+key+' .atelier-heading h2');if(h){h.tabIndex=-1;h.focus();}
   if(key==='proba'&&window.loadProbaSimOnce)window.loadProbaSimOnce();
-  if(key==='ankimie'&&window.loadAnkimieStats)window.loadAnkimieStats();
+  if(key==='qcm'&&window.contentAdmin&&!window.contentAdmin.hasDraft()&&!qcmSaving)loadQcmEditor();
+  if(key==='ankimie'&&window.contentAdmin)window.contentAdmin.loadAnkimie();
 }
 buttons.forEach(function(b){b.addEventListener('click',function(){open(b.dataset.atelier);});});
 })();</script></div>
