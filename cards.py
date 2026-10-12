@@ -492,33 +492,11 @@ def admin_stats_overview():
     eight_weeks_ago = (today - timedelta(days=56)).isoformat()
 
     users = [r['prenom'] for r in conn.execute("SELECT prenom FROM users WHERE prenom != 'admin' ORDER BY prenom").fetchall()]
-    active_days = {}
-    for r in conn.execute(
-            "SELECT prenom, substr(created_at,1,10) AS d, COUNT(*) AS n FROM events "
-            "WHERE type IN ('login','sr_open','review') AND created_at >= ? GROUP BY prenom, d",
-            (eight_weeks_ago,)).fetchall():
-        active_days.setdefault(r['prenom'], set()).add(r['d'])
-    for r in conn.execute(
-            "SELECT prenom, substr(created_at,1,10) AS d FROM reviews WHERE created_at >= ? GROUP BY prenom, d",
-            (eight_weeks_ago,)).fetchall():
-        active_days.setdefault(r['prenom'], set()).add(r['d'])
-    for r in conn.execute(
-            "SELECT prenom, day FROM sr_daily_streak WHERE validated=1 AND day >= ?",
-            (eight_weeks_ago,)).fetchall():
-        active_days.setdefault(r['prenom'], set()).add(r['day'])
-    weeks = [(today - timedelta(days=7 * k)).isoformat() for k in range(8)][::-1]
-    assiduite = []
-    for p in users:
-        days = active_days.get(p, set())
-        row = {'prenom': p, 'total': len(days)}
-        for wk in weeks:
-            w0 = datetime.strptime(wk, '%Y-%m-%d').date()
-            row[wk] = sum(1 for d in days if w0 - timedelta(days=6) <= datetime.strptime(d, '%Y-%m-%d').date() <= w0)
-        assiduite.append(row)
 
-    # Assiduité détaillée par élève : série en cours, record, jours travaillés.
-    # activity_days = source complète (reviews hors-série exclues + jours
-    # validés), cohérente avec le calcul des séries des élèves.
+    # Assiduité par élève : série en cours, record, jours travaillés sur 30 j,
+    # détail par semaine (8 dernières) et dernière activité. Une seule source :
+    # activity_days (reviews hors-série exclues + jours validés), cohérente
+    # avec le calcul des séries des élèves.
     last_act = {}
     for r in conn.execute("SELECT prenom, MAX(created_at) AS m FROM events GROUP BY prenom").fetchall():
         if r['m']:
@@ -526,24 +504,26 @@ def admin_stats_overview():
     for r in conn.execute("SELECT prenom, MAX(created_at) AS m FROM reviews GROUP BY prenom").fetchall():
         if r['m'] and r['m'] > last_act.get(r['prenom'], ''):
             last_act[r['prenom']] = r['m']
-    d7 = (today - timedelta(days=6)).isoformat()
+    weeks = [(today - timedelta(days=7 * k)).isoformat() for k in range(8)][::-1]
     d30 = (today - timedelta(days=29)).isoformat()
-    suivi_assiduite = []
+    assiduite = []
     for p in users:
         full_days = activity_days(conn, p)
-        n7 = sum(1 for d in full_days if d >= d7)
         n30 = sum(1 for d in full_days if d >= d30)
-        suivi_assiduite.append({
+        row = {
             'prenom': p,
             'streak': compute_streak(conn, p),
             'record': compute_record(full_days),
-            'jours7': n7,
             'jours30': n30,
             'pct30': round(100 * n30 / 30),
-            'total_jours': len(full_days),
+            'total': sum(1 for d in full_days if d >= eight_weeks_ago),
             'last': last_act.get(p),
-        })
-    suivi_assiduite.sort(key=lambda r: (-r['streak'], -r['pct30'], r['prenom']))
+        }
+        for wk in weeks:
+            w_start = (datetime.strptime(wk, '%Y-%m-%d').date() - timedelta(days=6)).isoformat()
+            row[wk] = sum(1 for d in full_days if w_start <= d <= wk)
+        assiduite.append(row)
+    assiduite.sort(key=lambda r: (-r['streak'], -r['pct30'], r['prenom']))
 
     heures = [0] * 24
     for r in conn.execute(
@@ -576,7 +556,6 @@ def admin_stats_overview():
 
     conn.close()
     return jsonify({'ok': True, 'semaines': weeks, 'assiduite': assiduite,
-                    'suivi_assiduite': suivi_assiduite,
                     'heures': heures, 'qcm_mois': qcm_mois,
                     'retention_reelle': retention_reelle,
                     'retention_jours': retention_jours})

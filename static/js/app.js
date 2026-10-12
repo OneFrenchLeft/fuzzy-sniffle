@@ -1918,32 +1918,23 @@ function loadStatsOverview() {
       html += '<div class="section-title" style="margin:.75rem 0 .4rem">Rétention quotidienne (60 derniers jours, hors nouvelles cartes)</div>';
       html += retentionChartSvg(d.retention_jours);
     }
-    if (d.suivi_assiduite && d.suivi_assiduite.length) {
-      html += '<div class="section-title" style="margin:.75rem 0 .4rem">Assiduité — qui travaille tous les jours ?</div>';
-      html += '<table class="weak-table"><thead><tr><th>Élève</th><th>🔥 Série</th><th>Record</th><th>7 derniers jours</th><th>30 derniers jours</th><th>Dernière activité</th></tr></thead><tbody>';
-      d.suivi_assiduite.forEach(function (r) {
-        var bg = r.pct30 >= 80 ? 'rgba(39,174,96,.25)' : (r.pct30 >= 50 ? 'rgba(230,126,34,.18)' : (r.pct30 >= 20 ? 'rgba(230,126,34,.07)' : ''));
-        html += '<tr><td>' + esc(r.prenom) + '</td>' +
-          '<td style="text-align:center"><strong>' + r.streak + '</strong> j</td>' +
-          '<td style="text-align:center">' + r.record + ' j</td>' +
-          '<td style="text-align:center">' + r.jours7 + '/7</td>' +
-          '<td style="text-align:center;background:' + bg + '">' + r.jours30 + '/30 (' + r.pct30 + ' %)</td>' +
-          '<td>' + (r.last ? fmtDateTimeFR(r.last) : 'jamais') + '</td></tr>';
-      });
-      html += '</tbody></table>';
-    }
-    html += '<div class="section-title" style="margin:.75rem 0 .4rem">Jours actifs par semaine (8 dernières semaines)</div>';
-    html += '<table class="weak-table"><thead><tr><th>Élève</th>' +
+    html += '<div class="section-title" style="margin:.75rem 0 .4rem">Assiduité — série en cours et jours travaillés (8 dernières semaines)</div>';
+    html += '<table class="weak-table"><thead><tr><th>Élève</th><th>🔥 Série</th><th>Record</th><th title="Jours travaillés sur les 30 derniers jours">30 j</th>' +
       d.semaines.map(function (w) { return '<th title="Semaine finissant le ' + w + '">' + w.slice(5).split('-').reverse().join('/') + '</th>'; }).join('') +
-      '<th>Total</th></tr></thead><tbody>';
+      '<th title="Jours travaillés sur les 8 dernières semaines">Tot.</th><th>Dernière activité</th></tr></thead><tbody>';
     d.assiduite.forEach(function (r) {
+      var bg30 = r.pct30 >= 80 ? 'rgba(39,174,96,.25)' : (r.pct30 >= 50 ? 'rgba(230,126,34,.18)' : (r.pct30 >= 20 ? 'rgba(230,126,34,.07)' : ''));
       html += '<tr><td>' + esc(r.prenom) + '</td>' +
+        '<td style="text-align:center"><strong>' + r.streak + '</strong> j</td>' +
+        '<td style="text-align:center">' + r.record + ' j</td>' +
+        '<td style="text-align:center;background:' + bg30 + '" title="' + r.pct30 + ' % des 30 derniers jours">' + r.jours30 + '/30</td>' +
         d.semaines.map(function (w) {
           var v = r[w] || 0;
           var bg = v >= 5 ? 'rgba(39,174,96,.25)' : (v >= 3 ? 'rgba(230,126,34,.18)' : (v >= 1 ? 'rgba(230,126,34,.07)' : ''));
           return '<td style="text-align:center;background:' + bg + '">' + v + '</td>';
         }).join('') +
-        '<td style="text-align:center"><strong>' + r.total + '</strong></td></tr>';
+        '<td style="text-align:center"><strong>' + r.total + '</strong></td>' +
+        '<td>' + (r.last ? fmtDateTimeFR(r.last) : 'jamais') + '</td></tr>';
     });
     html += '</tbody></table>';
     var maxH = Math.max.apply(null, d.heures.concat([1]));
