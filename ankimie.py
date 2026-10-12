@@ -17,8 +17,7 @@ import qcm_engine
 
 bp = Blueprint('ankimie', __name__)
 
-# Compatibility label for existing clients. Actual membership and availability
-# now come from the collections; legacy chemistry content remains included.
+# Deck fixe : chimie uniquement (voir content_catalog.ankimie_questions).
 ANKIMIE_DECK = 'chimie'
 
 # preview_all_grades est clefe par ses labels internes ; l'API expose les cles

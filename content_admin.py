@@ -172,7 +172,6 @@ def delete_chapter(theme):
         conn = db()
         try:
             with conn:
-                conn.execute('DELETE FROM ankimie_memberships WHERE theme=? AND chapitre=?', (theme, ch))
                 conn.execute('DELETE FROM content_chapters WHERE theme=? AND chapitre=?', (theme, ch))
         finally:
             conn.close()

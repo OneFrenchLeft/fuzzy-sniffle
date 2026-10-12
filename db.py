@@ -96,11 +96,6 @@ def init_db():
         ankimie_active INTEGER NOT NULL DEFAULT 1,
         PRIMARY KEY(theme, chapitre)
     )''')
-    conn.execute('''CREATE TABLE IF NOT EXISTS ankimie_memberships (
-        theme TEXT NOT NULL, chapitre TEXT NOT NULL, qid TEXT NOT NULL,
-        included INTEGER NOT NULL DEFAULT 1,
-        PRIMARY KEY(theme, chapitre, qid)
-    )''')
     conn.execute(
         "CREATE TABLE IF NOT EXISTS qcm_sr_reviews ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
