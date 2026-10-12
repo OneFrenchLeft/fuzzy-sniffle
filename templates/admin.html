@@ -108,17 +108,17 @@
         <div class="saved-msg" id="saved-msg">Parametres enregistrés</div>
         </div>
 
-        </section><section class="atelier-view" id="atelier-qcm" hidden><div class="atelier-heading"><h2>Éditeur QCM</h2><p>La banque de questions : gérer, tester, importer.</p></div>
+        </section><section class="atelier-view" id="atelier-qcm" hidden><div class="atelier-heading"><h2>Questions QCM</h2><p>Gérer la banque, tester un rendu, ou éditer en JSON.</p></div>
         <div class="subtab-bar" role="tablist" aria-label="Éditeur QCM">
-          <button type="button" role="tab" data-subtab="bank" aria-selected="true">Banque de questions</button>
+          <button type="button" role="tab" data-subtab="bank" aria-selected="true">Gérer les questions</button>
           <button type="button" role="tab" data-subtab="preview" aria-selected="false">Tester une question</button>
-          <button type="button" role="tab" data-subtab="json" aria-selected="false">JSON avancé</button>
+          <button type="button" role="tab" data-subtab="json" aria-selected="false">Édition avancée (JSON)</button>
         </div>
         <div class="subtab-panel" data-pane="bank" role="tabpanel">
         {% include 'admin_qcm_visual.html' %}
         </div>
         <div class="subtab-panel" data-pane="json" role="tabpanel" hidden>
-        <p class="hint">Réservé aux utilisateurs expérimentés. Une modification incorrecte du JSON peut rendre certaines questions invalides. Pour une modification normale, utilise l’onglet « Banque de questions ». Une liste vide retire les questions du périmètre sélectionné ; les autres chapitres sont conservés.</p>
+        <p class="hint">Réservé aux utilisateurs expérimentés. Une modification incorrecte du JSON peut rendre certaines questions invalides. Pour une modification normale, utilise l’onglet « Gérer les questions ». Une liste vide retire les questions du périmètre sélectionné ; les autres chapitres sont conservés.</p>
         <div class="import-box" id="qcm-editor-box">
           <div class="modal-topbar">
             <div>
