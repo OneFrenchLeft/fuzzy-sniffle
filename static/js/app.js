@@ -1209,19 +1209,25 @@ function loadProbaSim() {
         return;
       }
       var max = d.rows[0].pct || 1;
+      var single = d.count === 1;
 
       // Médiane du tirage : la fiche où le cumul des probabilités dépasse
-      // 50 %. Au-dessus = une moitié des chances, en dessous = l'autre.
+      // 50 %. Elle n'a de sens QUE pour un tirage d'une seule fiche : avec N
+      // fiches par tirage, chaque barre est une probabilité marginale
+      // d'apparition et la somme des pourcentages vaut N × 100 % — ce n'est
+      // plus une répartition, le cumul ne veut donc plus rien dire.
       var cum = 0;
       var crossedAt = -1;
       var beforeCross = 0;
-      d.rows.forEach(function (r, i) {
-        if (crossedAt === -1 && cum < 50 && cum + r.pct >= 50) {
-          crossedAt = i;
-          beforeCross = cum;
-        }
-        cum += r.pct;
-      });
+      if (single) {
+        d.rows.forEach(function (r, i) {
+          if (crossedAt === -1 && cum < 50 && cum + r.pct >= 50) {
+            crossedAt = i;
+            beforeCross = cum;
+          }
+          cum += r.pct;
+        });
+      }
 
       var markerPctInTrack = crossedAt >= 0
         ? Math.min(100, Math.max(0, 100 * (50 - beforeCross) / max))
@@ -1248,7 +1254,7 @@ function loadProbaSim() {
             marker +
           '</span>' +
           '<span style="flex:none;width:4.6rem;font-variant-numeric:tabular-nums;color:var(--muted)">' + r.pct.toFixed(2).replace('.', ',') + ' %</span>';
-        row.title = esc(r.chapitre) + ' — cumul ' + cumRender.toFixed(1).replace('.', ',') + ' %';
+        row.title = esc(r.chapitre) + (single ? ' — cumul ' + cumRender.toFixed(1).replace('.', ',') + ' %' : '');
         chart.appendChild(row);
         if (i === crossedAt) {
           var caption = document.createElement('div');
@@ -1258,8 +1264,9 @@ function loadProbaSim() {
           chart.appendChild(caption);
         }
       });
-      status.innerHTML = d.rows.length + ' fiches éligibles — probabilité d’apparaître dans un tirage de ' +
+      status.innerHTML = d.rows.length + ' fiches éligibles — probabilité pour chaque fiche d’apparaître dans un tirage de ' +
         d.count + ' fiche' + (d.count > 1 ? 's' : '') +
+        (d.count > 1 ? ' (leur somme vaut ' + d.count + ' × 100 % : ce n’est pas une répartition)' : '') +
         (crossedAt >= 0 ? ' (barres estompées = l’autre moitié du tirage)' : '') + ' :';
     })
     .catch(function () { status.textContent = 'Erreur réseau.'; });
