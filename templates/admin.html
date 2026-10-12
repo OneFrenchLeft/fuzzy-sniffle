@@ -2,7 +2,7 @@
 {% block title %}Admin{% endblock %}
 {% block extra_head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/admin_content.css', v=5) }}">
-<script src="{{ url_for('static', filename='js/admin_content.js', v=5) }}" defer></script>
+<script src="{{ url_for('static', filename='js/admin_content.js', v=6) }}" defer></script>
 {% endblock %}
 {% block content %}
 <style>
@@ -277,8 +277,8 @@
           <div id="stats-overview" style="margin-top:.75rem"></div>
         </div></section><section class="atelier-view" id="atelier-ankimie" hidden><div class="atelier-heading"><h2>Ankimie</h2><p>Révision espacée automatique à partir de la banque QCM.</p></div><div class="import-box">
           <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.85rem">
-            Ankimie pioche automatiquement dans <strong>toutes les questions des chapitres actifs en QCM</strong> — il n'y a rien à gérer ici.
-            Pour retirer du contenu d'Ankimie, désactive le chapitre dans « Éditeur &amp; aperçu › Gérer les questions » : il disparaît du QCM et d'Ankimie en même temps.
+            Ankimie pioche automatiquement dans <strong>toutes les questions de chimie des chapitres actifs en QCM</strong> — il n'y a rien à gérer ici.
+            Pour retirer du contenu d'Ankimie, désactive le chapitre de chimie dans « Éditeur &amp; aperçu › Gérer les questions » : il disparaît du QCM et d'Ankimie en même temps.
           </p>
           <div class="section-title" style="margin:.5rem 0 .4rem">Statistiques Ankimie</div>
           <div id="ankimie-stats"></div>

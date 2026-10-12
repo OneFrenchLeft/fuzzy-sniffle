@@ -36,18 +36,24 @@ def chapter_overview(theme, questions):
         active = bool(flags.get('qcm_active', 1))
         out.append({'chapitre': ch,
                     'qcm_count': count,
-                    # Collection Ankimie = le chapitre entier, automatiquement.
-                    'ankimie_count': count,
+                    # Collection Ankimie = le chapitre entier, chimie uniquement.
+                    'ankimie_count': count if theme == 'chimie' else 0,
                     'qcm_active': active,
-                    'ankimie_active': active})
+                    'ankimie_active': active if theme == 'chimie' else False})
     return out
 
 
 def ankimie_questions(banks, active_only=True):
-    """Toutes les questions des chapitres actifs en QCM, sans gestion."""
+    """Toutes les questions CHIMIE des chapitres actifs en QCM, sans gestion.
+
+    Ankimie est et reste un deck chimie : les autres matieres ne sont jamais
+    piochees, meme si leurs chapitres sont actifs en QCM.
+    """
     configuration = settings()
     selected = {}
     for theme, questions in banks.items():
+        if theme != 'chimie':
+            continue
         for q in questions:
             ch = chapter_name(q.get('chapitre'))
             if active_only and not qcm_is_active(theme, ch, configuration):
