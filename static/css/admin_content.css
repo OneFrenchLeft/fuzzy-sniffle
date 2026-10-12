@@ -46,8 +46,23 @@ html[data-theme=dark] .content-field-error{color:#fda4af}
 #qcm-editor-status{min-height:1.5rem;text-align:left}
 #qcm-import-result{margin:1rem 0}
 #qcm-visual button:disabled,#ank-content button:disabled{opacity:.5;cursor:wait}
+/* Editeur QCM « Gerer les questions » : contenu a gauche, chapitres a droite */
+.qcm-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:1.2rem;align-items:start}
+.qcm-main{min-width:0}
+.qcm-context{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.75rem;align-items:end}
+.qcm-context .field{margin:0}
+.qcm-actions{margin:.6rem 0 .75rem}
+.qcm-side{position:sticky;top:5rem;display:grid;gap:.75rem;align-content:start;min-width:0}
+.qcm-side-card{border:1px solid var(--border);border-radius:var(--radius);padding:1rem;background:var(--surface)}
+.qcm-side-card h3{margin:0 0 .75rem;font-size:1rem}
+.qcm-side .content-chapters{grid-template-columns:1fr;max-height:46vh;overflow:auto;margin-top:.5rem}
+.qcm-side .content-toolbar{margin:.25rem 0}
+.qcm-side .content-overview,.qcm-side .content-help{margin:0}
 #content-question-dialog button:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:1000px){
+  .qcm-grid{grid-template-columns:1fr}
+  .qcm-side{position:static}
+  .qcm-side .content-chapters{max-height:none}
   #admin-form .admin-workspace .atelier-shell{grid-template-columns:minmax(0,1fr)}
   #admin-form .admin-workspace .atelier-nav{display:flex;flex-wrap:nowrap;gap:.4rem;align-items:center;overflow-x:auto;max-height:none;position:sticky;top:4.3125rem;z-index:9;padding:.5rem;overscroll-behavior-x:contain}
   #admin-form .admin-workspace .atelier-nav h2,#admin-form .admin-workspace .atelier-nav small{display:none}
