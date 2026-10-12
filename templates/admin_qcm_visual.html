@@ -1,22 +1,25 @@
 <div class="content-workspace" id="qcm-visual">
-  <div id="content-subject-overview" class="content-chapters" aria-label="Matières disponibles"></div>
+  <details class="content-overview"><summary>Matières disponibles</summary><div id="content-subject-overview" class="content-chapters" aria-label="Matières disponibles"></div></details>
   <div class="fields-grid">
     <div class="field"><label for="qcm-subject-select">Matière</label><select id="qcm-subject-select"><option value="physique">Physique</option><option value="chimie">Chimie</option><option value="maths">Mathématiques</option></select></div>
     <div class="field"><label for="qcm-theme-select">Chapitre</label><select id="qcm-theme-select"><option value="">Tous les chapitres</option></select></div>
   </div>
-  <p class="hint content-notice"><strong>Disponible ≠ actif pour les élèves.</strong> Les questions restent dans la banque quand un chapitre est désactivé. L’historique est conservé. Les nouveaux chapitres sont créés inactifs.</p>
-  <details class="content-overview" open><summary>Chapitres disponibles et activation</summary><div id="qcm-chapter-overview" class="content-chapters"></div></details>
+  <p class="content-path" id="qcm-current-path" aria-live="polite">Physique &gt; Tous les chapitres</p>
+  <details class="content-overview" id="qcm-chapters"><summary id="qcm-chapters-summary">Chapitres et activation</summary>
   <div class="content-toolbar" id="qcm-new-theme-row">
     <label class="content-grow" for="qcm-new-theme-input">Nouveau chapitre<input type="text" id="qcm-new-theme-input" maxlength="200" placeholder="Ex. : Optique"></label>
     <button type="button" class="btn-ghost btn-small" onclick="createQcmTheme()">Créer le chapitre</button>
   </div>
+  <div id="qcm-chapter-overview" class="content-chapters"></div>
+  </details>
+  <details class="content-help"><summary>Comment fonctionne l’activation ?</summary><p class="hint">Disponible ne signifie pas actif pour les élèves. Désactiver conserve les questions et l’historique. Les nouveaux chapitres sont inactifs. QCM et Ankimie ont des activations indépendantes.</p></details>
   <div id="qcm-editor-status" class="saved-msg" role="status" aria-live="polite"></div>
   <div class="content-toolbar">
     <button type="button" class="btn-save btn-small" id="qcm-add-question">Ajouter une question</button>
     <button type="button" class="btn-ghost btn-small" id="qcm-open-import">Importer des questions</button>
     <button type="button" class="btn-ghost btn-small" onclick="if(contentAdmin.canSwitch()) loadQcmEditor()">Recharger la banque</button>
   </div>
-  <div class="field"><label for="qcm-question-search">Rechercher dans ce chapitre</label><input type="search" id="qcm-question-search" placeholder="Un mot de la question ou de ses réponses…"></div>
+  <details class="content-overview" id="qcm-search-panel"><summary id="qcm-search-summary">Rechercher dans ce chapitre</summary><div class="field"><label for="qcm-question-search" id="qcm-search-label">Question ou réponse</label><input type="search" id="qcm-question-search" placeholder="Un mot de la question ou de ses réponses…"></div><button type="button" class="btn-ghost btn-small" id="qcm-search-clear" hidden>Effacer la recherche</button></details>
   <div id="qcm-question-list" class="content-card-list" aria-live="polite"></div>
   <div id="qcm-question-pages" class="content-toolbar"></div>
   <section id="qcm-import-panel" class="import-box" hidden aria-labelledby="qcm-import-title">
@@ -35,11 +38,10 @@
     <div class="modal-topbar"><h3 id="content-question-title">Question</h3><button type="button" class="btn-ghost btn-small" id="content-question-close">Fermer</button></div>
     <div class="field"><label for="content-question-text">Question</label><textarea id="content-question-text" required aria-describedby="content-error-question"></textarea><p class="content-field-error" id="content-error-question"></p></div>
     <div class="fields-grid">
-      <div class="field"><label for="content-question-chapter">Chapitre</label><select id="content-question-chapter" required></select></div>
+      <div class="field" id="content-question-chapter-field"><label for="content-question-chapter">Chapitre</label><select id="content-question-chapter" required></select></div>
       <div class="field"><label for="content-question-time">Temps de réponse (secondes)</label><input type="number" id="content-question-time" min="10" max="300" step="1" value="30" required aria-describedby="content-error-temps"><p class="content-field-error" id="content-error-temps"></p></div>
     </div>
-    <fieldset class="content-answer-group" aria-describedby="content-error-choix content-error-reponse"><legend>Réponses possibles (2 à 4) — coche la bonne réponse</legend><div id="content-question-choices"></div><p class="content-field-error" id="content-error-choix"></p><p class="content-field-error" id="content-error-reponse"></p></fieldset>
-    <button type="button" class="btn-ghost btn-small" id="content-choice-add">Ajouter une réponse</button>
+    <fieldset class="content-answer-group" aria-describedby="content-error-choix content-error-reponse"><legend>Réponses possibles (2 à 4) — coche la bonne réponse</legend><button type="button" class="btn-save btn-small" id="content-choice-add">Ajouter une réponse</button><div id="content-question-choices"></div><p class="content-field-error" id="content-error-choix"></p><p class="content-field-error" id="content-error-reponse"></p></fieldset>
     <div class="field"><label for="content-question-explanation">Explication (facultative)</label><textarea id="content-question-explanation"></textarea></div>
     <details class="content-advanced"><summary>Illustration et formule (facultatives)</summary>
       <div class="field"><label for="content-question-image">Image — adresse ou fichier existant</label><input type="text" id="content-question-image" placeholder="https://…"></div>

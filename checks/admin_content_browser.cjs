@@ -38,10 +38,15 @@ async function run() {
     await page.locator('[data-atelier="qcm"]').click();
     await page.waitForFunction(() => qcmLoadedSubject === 'physique');
     assert.equal(await page.locator('#qcm-json-editor').isVisible(), false, 'JSON must be hidden in normal mode');
+    assert.equal(await page.locator('#qcm-chapters').evaluate(el => el.open), false);
+    assert.equal(await page.locator('#qcm-search-panel').evaluate(el => el.open), false);
     await page.locator('#qcm-theme-select').selectOption('Optique');
+    assert.equal(await page.locator('#qcm-current-path').innerText(), 'Physique > Optique');
     assert.equal(await page.locator('#qcm-question-list .content-question').count(), 1);
     assert.match(await page.locator('#qcm-question-list').innerText(), /physique.*Optique/);
     await page.locator('#qcm-add-question').click(); await page.locator('#content-question-dialog').waitFor({ state: 'visible' });
+    assert.match(await page.locator('#content-question-title').innerText(), /Ajouter une question à Physique > Optique/);
+    assert.equal(await page.locator('#content-question-chapter').isVisible(), false, 'Chapter scope should be automatic');
     await page.locator('#content-question-text').fill('Créée visuellement');
     await page.locator('[data-choice-text]').nth(0).fill('Première réponse'); await page.locator('[data-choice-text]').nth(1).fill('Bonne réponse');
     await page.locator('input[name="content-correct-answer"]').nth(1).check();
@@ -49,7 +54,10 @@ async function run() {
     let card = page.locator('#qcm-question-list .content-question').filter({ hasText: 'Créée visuellement' }); await card.waitFor();
     const qid = await card.getAttribute('data-qid');
     assert.ok(JSON.parse(await page.locator('#qcm-json-editor').inputValue()).some(q => q.question === 'Créée visuellement'));
+    const subjectsSummary = page.locator('#content-subject-overview').locator('..').locator('summary');
+    await subjectsSummary.click();
     assert.match(await page.locator('#content-subject-overview [data-subject="physique"]').innerText(), /3 questions/);
+    await subjectsSummary.click();
     await card.getByRole('button', { name: 'Modifier', exact: true }).click(); await page.locator('#content-question-text').fill('Modifiée visuellement');
     await page.locator('#content-choice-add').click(); await page.locator('[data-choice-text]').nth(2).fill('Troisième réponse'); await page.locator('input[name="content-correct-answer"]').nth(2).check();
     await page.locator('.content-choice').nth(1).getByRole('button', { name: 'Retirer cette réponse' }).click();
@@ -58,11 +66,13 @@ async function run() {
     assert.equal(await card.getAttribute('data-qid'), qid);
     let saved = JSON.parse(await page.locator('#qcm-json-editor').inputValue()).find(q => q.qid === qid);
     assert.equal(saved.reponse, 2); assert.equal(saved.choix.length, 2); assert.equal(saved.temps, 45);
+    assert.equal(saved.chapitre, 'Optique');
     await card.getByRole('button', { name: 'Dupliquer' }).click(); await page.locator('#content-question-save').click(); await page.locator('#content-question-dialog').waitFor({ state: 'hidden' });
     const copy = page.locator('#qcm-question-list .content-question').filter({ hasText: '(copie)' }); await copy.waitFor(); assert.notEqual(await copy.getAttribute('data-qid'), qid);
     await copy.getByRole('button', { name: 'Supprimer de la banque' }).click(); await copy.waitFor({ state: 'detached' });
     assert.equal((await (await context.request.get(base + '/api/admin/qcm/physique')).json()).chapters.find(ch => ch.chapitre === 'Mécanique').qcm_count, 1);
 
+    await page.locator('#qcm-chapters > summary').click();
     await page.locator('#qcm-new-theme-input').fill('Thermodynamique'); await page.getByRole('button', { name: 'Créer le chapitre', exact: true }).first().click();
     await page.waitForFunction(() => qcmTheme === 'Thermodynamique');
     const chapterCard = page.locator('#qcm-chapter-overview .content-chapter').filter({ hasText: 'Thermodynamique' });
@@ -84,13 +94,16 @@ async function run() {
     await page.locator('#qcm-theme-select').selectOption('Optique'); await page.locator('#qcm-advanced > summary').click();
     let edited = JSON.parse(await page.locator('#qcm-json-editor').inputValue()); edited.find(q => q.qid === qid).question = 'Modifiée en mode avancé';
     await page.locator('#qcm-json-editor').fill(JSON.stringify(edited)); assert.match(await page.locator('#qcm-question-list').innerText(), /Modifiée en mode avancé/);
-    await page.locator('#qcm-json-validate').click(); await page.getByRole('button', { name: /Enregistrer/, exact: false }).filter({ has: page.locator('#qcm-save-spinner') }).click();
+    assert.equal(await page.locator('#qcm-chapter-overview .content-danger').first().isDisabled(), true, 'Unsaved JSON should block chapter deletion');
+    assert.equal(await page.getByRole('button', { name: 'Valider avant d’enregistrer' }).count(), 0);
+    await page.getByRole('button', { name: /Enregistrer/, exact: false }).filter({ has: page.locator('#qcm-save-spinner') }).click();
     await page.waitForFunction(() => qcmFullList.some(q => q.question === 'Modifiée en mode avancé') && !qcmSaving);
     await page.locator('#qcm-json-editor').fill('{ incorrect'); const before = await (await context.request.get(base + '/api/admin/qcm/physique')).json();
     await page.getByRole('button', { name: /Enregistrer/ }).filter({ has: page.locator('#qcm-save-spinner') }).click();
     assert.equal((await (await context.request.get(base + '/api/admin/qcm/physique')).json()).revision, before.revision);
     await page.locator('#qcm-json-editor').fill(JSON.stringify([{ question: 'Invalide', choix: {}, reponse: 1 }]));
     await page.getByRole('button', { name: /Enregistrer/ }).filter({ has: page.locator('#qcm-save-spinner') }).click();
+    await page.waitForFunction(() => !qcmSaving && document.querySelector('#qcm-editor-status').textContent.includes('choix'));
     assert.equal((await (await context.request.get(base + '/api/admin/qcm/physique')).json()).revision, before.revision);
     await page.locator('#qcm-visual').getByRole('button', { name: 'Recharger la banque', exact: true }).click(); await page.waitForFunction(() => qcmLoadedSubject === 'physique');
     let held = false;
@@ -100,7 +113,38 @@ async function run() {
     assert.equal(await page.locator('#qcm-subject-select').inputValue(), 'maths'); assert.match(await page.locator('#qcm-question-list').innerText(), /maths/); assert.doesNotMatch(await page.locator('#qcm-question-list').innerText(), /physique/);
     await page.unroute('**/api/admin/qcm/physique?*');
 
+    // A hidden search must remain understandable and clear when changing scope.
+    await page.locator('#qcm-search-panel > summary').click();
+    await page.locator('#qcm-question-search').fill('inexistant');
+    assert.match(await page.locator('#qcm-question-list').innerText(), /correspond à cette recherche/);
+    await page.locator('#qcm-search-panel > summary').click();
+    assert.match(await page.locator('#qcm-search-summary').innerText(), /filtre « inexistant »/);
+    await page.locator('#qcm-theme-select').selectOption('Optique');
+    assert.equal(await page.locator('#qcm-question-search').inputValue(), '');
+    assert.equal(await page.locator('#qcm-question-list .content-question').count(), 1);
+
+    // Cancel, then delete a populated chapter while preserving every question.
+    const optics = page.locator('#qcm-chapter-overview .content-chapter').filter({ hasText: 'Optique' });
+    const mathsBefore = (await (await context.request.get(base + '/api/admin/qcm/maths')).json());
+    const opticsId = JSON.parse(mathsBefore.raw).find(q => q.chapitre === 'Optique').qid;
+    await optics.getByRole('button', { name: 'Supprimer le chapitre', exact: true }).click();
+    assert.match(await page.locator('#content-delete-title').innerText(), /Mathématiques > Optique/);
+    assert.match(await page.locator('#content-delete-effects').innerText(), /conservée et déplacée/);
+    assert.equal(await page.locator('#content-delete-cancel').evaluate(el => el === document.activeElement), true);
+    await page.keyboard.press('Escape');
+    assert.equal((await (await context.request.get(base + '/api/admin/qcm/maths')).json()).revision, mathsBefore.revision);
+    await optics.getByRole('button', { name: 'Supprimer le chapitre', exact: true }).click();
+    await page.locator('#content-delete-destination').selectOption('Mécanique'); await page.locator('#content-delete-confirm').click();
+    await page.locator('#content-delete-dialog').waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('#qcm-current-path').innerText(), 'Mathématiques > Mécanique');
+    assert.equal(await page.locator('#qcm-question-list .content-question').count(), 2);
+    const mathsAfter = (await (await context.request.get(base + '/api/admin/qcm/maths')).json());
+    assert.ok(JSON.parse(mathsAfter.raw).some(q => q.qid === opticsId && q.chapitre === 'Mécanique'));
+    assert.ok(!mathsAfter.chapters.some(ch => ch.chapitre === 'Optique'));
+
     await page.locator('[data-atelier="ankimie"]').click(); await page.waitForFunction(() => !document.querySelector('#ank-open-picker').disabled);
+    assert.equal(await page.locator('#ank-chapters').evaluate(el => el.open), false);
+    await page.locator('#ank-chapters > summary').click();
     await page.locator('#ank-admin-chapter').selectOption('Optique');
     assert.equal(await page.locator('#ank-collection-list .content-question').count(), 1);
     let releaseMembership;
@@ -116,16 +160,26 @@ async function run() {
     await page.waitForFunction(() => document.querySelectorAll('#ank-collection-list .content-question').length === 0 && !document.querySelector('#ank-open-picker').disabled);
     await page.unroute('**/api/admin/ankimie/chimie/collections');
     assert.equal(JSON.parse((await (await context.request.get(base + '/api/admin/qcm/chimie')).json()).raw).length, 2);
-    await page.locator('#ank-open-picker').click(); await page.locator('#ank-picker-search').fill('Optique'); await page.locator('#ank-picker-list').getByRole('button', { name: 'Ajouter au chapitre' }).click();
+    await page.locator('#ank-open-picker').click();
+    assert.match(await page.locator('#ank-picker-title').innerText(), /Ajouter des cartes à Chimie > Optique/);
+    assert.equal(await page.locator('#ank-search-panel').evaluate(el => el.open), false);
+    await page.locator('#ank-search-panel > summary').click();
+    await page.locator('#ank-picker-search').fill('Optique'); await page.locator('#ank-picker-list').getByRole('button', { name: 'Ajouter au chapitre' }).click();
     await page.waitForFunction(() => document.querySelectorAll('#ank-collection-list .content-question').length === 1);
     await page.locator('#ank-new-chapter').fill('Révisions personnelles'); await page.locator('#ank-create-chapter').click(); await page.waitForFunction(() => document.querySelector('#ank-admin-chapter').value === 'Révisions personnelles');
     const ankChapter = page.locator('#ank-chapter-overview .content-chapter').filter({ hasText: 'Révisions personnelles' }); assert.equal(await ankChapter.locator('input[type=checkbox]').isChecked(), false);
     await page.locator('#ank-picker-search').fill('Mécanique'); await page.locator('#ank-picker-list').getByRole('button', { name: 'Ajouter au chapitre' }).click(); await page.waitForFunction(() => document.querySelectorAll('#ank-collection-list .content-question').length === 1);
     await ankChapter.locator('input[type=checkbox]').check();
     await page.waitForFunction(() => document.querySelector('#ank-chapter-overview .content-chapter.selected input').checked);
+    await ankChapter.getByRole('button', { name: 'Supprimer le chapitre', exact: true }).click();
+    assert.equal(await page.locator('#content-delete-destination').isVisible(), false, 'Empty QCM chapters need no destination selection');
+    await page.locator('#content-delete-confirm').click(); await page.locator('#content-delete-dialog').waitFor({ state: 'hidden' });
+    assert.ok(!((await (await context.request.get(base + '/api/admin/ankimie/chimie/collections')).json()).chapters.some(ch => ch.chapitre === 'Révisions personnelles')));
 
     await page.locator('[data-atelier="qcm"]').click();
     if (await page.locator('#qcm-advanced').evaluate(el => el.open)) await page.locator('#qcm-advanced > summary').click();
+    for (const id of ['qcm-chapters', 'ank-chapters', 'ank-search-panel']) await page.locator('#' + id).evaluate(el => { el.open = false; });
+    await page.locator('#ank-card-picker').evaluate(el => { el.hidden = true; });
     const screenshots = process.env.CONTENT_CHECK_SCREENSHOTS;
     if (screenshots) mkdirSync(screenshots, { recursive: true });
     for (const theme of ['light', 'dark']) {
@@ -142,8 +196,14 @@ async function run() {
             await page.locator('#qcm-add-question').click(); await page.locator('#content-question-dialog').waitFor({ state: 'visible' });
             assert.equal(await page.locator('#content-question-text').evaluate(el => el === document.activeElement), true, 'Question form should focus its first field');
             assert.equal(await page.locator('#content-question-dialog').evaluate(el => el.scrollWidth > el.clientWidth), false, 'dialog overflow ' + width);
+            if (screenshots && width === 390) await page.screenshot({ path: path.join(screenshots, theme + '-390-question-form.png') });
             if (width === 320) await page.keyboard.press('Escape'); else await page.locator('#content-question-cancel').click();
             await page.locator('#content-question-dialog').waitFor({ state: 'hidden' });
+            await page.locator('#qcm-chapters > summary').click();
+            await page.locator('#qcm-chapter-overview').getByRole('button', { name: 'Supprimer le chapitre', exact: true }).first().click();
+            assert.equal(await page.locator('#content-delete-dialog').evaluate(el => el.scrollWidth > el.clientWidth), false, 'deletion dialog overflow ' + width);
+            if (screenshots && width === 390) await page.screenshot({ path: path.join(screenshots, theme + '-390-chapter-delete.png') });
+            await page.keyboard.press('Escape'); await page.locator('#qcm-chapters > summary').click();
           }
           if (screenshots) await page.screenshot({ path: path.join(screenshots, theme + '-' + width + '-' + key + '.png'), fullPage: true });
         }

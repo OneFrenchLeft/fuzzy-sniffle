@@ -8,11 +8,30 @@ et les explications. « Ajouter », « Modifier » et « Dupliquer » ouvrent un
 formulaire. Les réponses se gèrent avec des boutons et la bonne réponse se coche.
 Les identifiants des questions sont automatiques.
 
+Le chemin « Matière > Chapitre » reste visible. Dans un chapitre sélectionné,
+les formulaires utilisent automatiquement ce chapitre et masquent son sélecteur.
+Dans « Tous les chapitres », il reste possible de choisir la destination dans
+le formulaire. La recherche, les listes de chapitres, l’aperçu des matières et
+les aides sont repliés par défaut. Ouvrir « Chapitres de… — gérer ou créer »
+donne accès à la création avant la liste. Une recherche active reste signalée
+dans son intitulé même après repli ; changer de chapitre efface la recherche QCM.
+
 L’aperçu des chapitres distingue le contenu **disponible** du contenu **actif pour
 les élèves**. Les nouveaux chapitres sont inactifs ; cocher leur activation pour
 les publier. Désactiver un chapitre ne supprime ni ses questions ni l’historique.
 QCM et Ankimie ont des activations indépendantes : publier un QCM n’oblige pas à
 publier les mêmes cartes en répétition espacée.
+
+« Supprimer le chapitre » ouvre une confirmation qui indique le nombre de
+questions et de cartes concernées. Si le chapitre contient des questions QCM,
+choisir où les conserver : elles sont déplacées avec leurs identifiants stables,
+puis suivent les activations de ce chapitre. « Autre » (ou « À classer » pour
+supprimer « Autre ») peut être créé automatiquement, inactif par défaut. La
+collection Ankimie du chapitre supprimé est retirée ; les autres collections,
+questions et historiques restent conservés. En chimie, les questions déplacées
+rejoignent aussi la collection du chapitre de destination. Cette suppression
+concerne le chapitre commun aux deux activités, même depuis la vue Ankimie.
+Supprimer un chapitre vide ne demande pas de destination.
 
 « Importer des questions » propose un modèle CSV pour un tableur. Choisir d’abord
 la matière et le chapitre destinataire, exporter le tableur en CSV, puis vérifier
@@ -40,12 +59,15 @@ distincte de la désactivation et du retrait d’une collection.
 ## Mode avancé
 
 « Mode avancé — édition JSON » est fermé par défaut. Il conserve l’édition en
-masse, le chargement d’un fichier JSON, le formatage et l’ancien test de rendu.
+masse, le chargement d’un fichier JSON et l’ancien test de rendu.
 Le contenu montré correspond à la matière et au chapitre sélectionnés. Une
 édition d’un seul chapitre préserve tous les autres chapitres. Choisir « Tous les
 chapitres » permet de modifier la matière entière.
 
-Le bouton de validation appelle le serveur. Les modifications JSON non
+« Enregistrer » valide et sauvegarde en une seule action, sans bouton de
+validation ou de formatage préalable. Une édition qui retire des questions est
+validée avant la confirmation de suppression ; annuler conserve le brouillon.
+Les modifications JSON non
 enregistrées apparaissent en aperçu visuel, mais bloquent les actions visuelles
 jusqu’à leur enregistrement ou leur abandon. Un changement de périmètre ou un
 rechargement demande confirmation avant d’abandonner un brouillon. Une sauvegarde
@@ -96,6 +118,7 @@ Tous les endpoints d’administration conservent l’authentification admin exis
 | --- | --- |
 | GET `/api/admin/content/subjects` | Matières, chapitres et compteurs |
 | POST/PUT `/api/admin/content/<theme>/chapters` | Créer un chapitre / modifier ses activations |
+| DELETE `/api/admin/content/<theme>/chapters` | Déplacer les questions puis supprimer le chapitre et sa collection (révision obligatoire) |
 | GET/PUT `/api/admin/qcm/<theme>` | JSON canonique, révision et métadonnées / édition en masse |
 | POST `/api/admin/qcm/<theme>/questions` | Créer une question |
 | PUT/DELETE `/api/admin/qcm/<theme>/questions/<qid>` | Modifier / supprimer la question |
@@ -150,6 +173,7 @@ les tailles 320/390/768/1280 px dans les deux thèmes.
   `qcm_admin.py`, `qcm_engine.py`, `ankimie.py`, `sr.py`, `app.py`.
 - Interface : `templates/admin.html`, `templates/base.html`,
   `templates/admin_qcm_visual.html`, `templates/admin_ankimie_content.html`,
+  `templates/admin_chapter_delete.html`,
   `static/js/app.js`, `static/js/admin_content.js`, `static/css/admin_content.css`.
 - Contrôles : `test_qcm_editor.js`, `checks/content_admin_checks.py`,
   `checks/admin_content_browser.cjs`.

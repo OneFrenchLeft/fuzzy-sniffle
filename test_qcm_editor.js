@@ -183,3 +183,54 @@ test('empty available chapters remain selectable without adding dummy questions'
   assert.match(state.elements['qcm-theme-select'].innerHTML, /Électricité \(0\)/);
   assert.equal(state.context.qcmFullList.length, 0);
 });
+
+test('one save validates destructive JSON before showing a confirmation', async () => {
+  const state = editor();
+  let confirmations = 0;
+  state.context.window = { confirm: () => { confirmations++; return true; } };
+  await load(state, [{ ...question, qid: 'p-123456789abc-12345678' }]);
+  const draft = '[{"question":"Invalide","choix":{},"reponse":1}]';
+  state.elements['qcm-json-editor'].value = draft;
+  state.context.saveQcmEditor();
+  assert.match(state.requests[1].url, /\/validate$/);
+  assert.equal(confirmations, 0);
+  state.requests[1].resolve({ status: 400, data: { ok: false, error: 'Réponses invalides' } });
+  await flush();
+  assert.equal(confirmations, 0);
+  assert.equal(state.requests.length, 2);
+  assert.equal(state.elements['qcm-json-editor'].value, draft);
+  assert.equal(state.context.qcmSaving, false);
+});
+
+test('valid destructive JSON saves with one click and preserves cancellation drafts', async () => {
+  for (const confirmSave of [false, true]) {
+    const state = editor();
+    state.context.window = { confirm: () => confirmSave };
+    await load(state, [{ ...question, qid: 'p-123456789abc-12345678' }]);
+    state.elements['qcm-json-editor'].value = '[]';
+    state.context.saveQcmEditor(); state.context.saveQcmEditor();
+    assert.equal(state.requests.length, 2);
+    state.requests[1].resolve({ status: 200, data: { ok: true, questions: [] } });
+    await flush();
+    assert.equal(state.requests.length, confirmSave ? 3 : 2);
+    assert.equal(state.elements['qcm-json-editor'].value, '[]');
+    if (confirmSave) assert.equal(state.requests[2].options.method, 'PUT');
+    else assert.equal(state.context.qcmSaving, false);
+  }
+});
+
+test('late validation cannot confirm or save a different chapter draft', async () => {
+  const state = editor();
+  state.context.window = { confirm: () => { throw new Error('Stale validation must not ask for confirmation'); } };
+  await load(state, [{ ...question, chapitre: 'Optique', qid: 'p-123456789abc-12345678' }]);
+  state.elements['qcm-json-editor'].value = '[]';
+  state.context.saveQcmEditor();
+  state.context.qcmTheme = 'Mécanique'; state.context.qcmScopeVersion++;
+  const draft = JSON.stringify([{ ...question, question: 'Brouillon courant' }]);
+  state.elements['qcm-json-editor'].value = draft;
+  state.requests[1].resolve({ status: 200, data: { ok: true, questions: [] } });
+  await flush();
+  assert.equal(state.requests.length, 2);
+  assert.equal(state.elements['qcm-json-editor'].value, draft);
+  assert.equal(state.context.qcmSaving, false);
+});

@@ -189,6 +189,14 @@ class BankConflict(ValueError):
     pass
 
 
+def validate_bank_questions(questions, theme):
+    clean = validate_qcm_questions(questions, theme)
+    ids = [q['qid'] for q in clean]
+    if len(ids) != len(set(ids)):
+        raise ValueError('Une question est présente plusieurs fois. Retire le doublon avant d’enregistrer.')
+    return clean
+
+
 def notify_catalog_change():
     # Emit only after releasing the file lock: a socket write may yield.
     if qcm_engine.io is not None:
@@ -204,10 +212,7 @@ def store_bank(theme, questions, revision=None):
     previous, current_revision = read_bank(theme)
     if revision is not None and revision != current_revision:
         raise BankConflict('La banque a changé depuis son chargement. Recharge-la avant de réessayer.')
-    clean = validate_qcm_questions(questions, theme)
-    ids = [q['qid'] for q in clean]
-    if len(ids) != len(set(ids)):
-        raise ValueError('Une question est présente plusieurs fois. Retire le doublon avant d’enregistrer.')
+    clean = validate_bank_questions(questions, theme)
     from content_catalog import chapter_name
     old_chapters = {chapter_name(q.get('chapitre')) for q in previous}
     new_chapters = {chapter_name(q.get('chapitre')) for q in clean} - old_chapters

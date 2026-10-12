@@ -10,7 +10,7 @@ from auth import require_admin
 from config import QCM_FILES
 from db import db, ensure_db
 from content_catalog import chapter_name, chapter_overview, memberships, collection_questions
-from qcm_admin import (read_bank, store_bank, bank_lock, validate_qcm_questions,
+from qcm_admin import (read_bank, store_bank, bank_lock, validate_qcm_questions, validate_bank_questions,
                        get_qcm_path, BankConflict, notify_catalog_change)
 
 bp = Blueprint('content_admin', __name__)
@@ -148,12 +148,44 @@ def question_mutation(theme, qid=None):
         return error_response(exc)
 
 
+@bp.route('/api/admin/content/<theme>/chapters', methods=['DELETE'])
+@require_admin
+def delete_chapter(theme):
+    get_qcm_path(theme)
+    data = body()
+    ch = selected_chapter(data.get('chapitre'))
+    with bank_lock(theme):
+        questions, revision = read_bank(theme)
+        if data.get('revision') != revision:
+            raise BankConflict('La banque a changé. Recharge les chapitres avant de réessayer.')
+        if ch not in {r['chapitre'] for r in chapter_overview(theme, questions)}:
+            raise ValueError('Ce chapitre n’existe plus dans cette matière.')
+        moving = [q for q in questions if chapter_name(q.get('chapitre')) == ch]
+        destination = selected_chapter(data.get('destination')) if moving else None
+        if destination == ch:
+            raise ValueError('Choisis un autre chapitre pour conserver les questions.')
+        candidate = [{**q, 'chapitre': destination} if chapter_name(q.get('chapitre')) == ch else q
+                     for q in questions]
+        # Preserve stable IDs and histories. New destinations enter inactive.
+        # Keep the original chapter metadata until the bank write succeeds.
+        clean, revision = store_bank(theme, candidate, revision)
+        conn = db()
+        try:
+            with conn:
+                conn.execute('DELETE FROM ankimie_memberships WHERE theme=? AND chapitre=?', (theme, ch))
+                conn.execute('DELETE FROM content_chapters WHERE theme=? AND chapitre=?', (theme, ch))
+        finally:
+            conn.close()
+    notify_catalog_change()
+    return bank_result(theme, clean, revision)
+
+
 @bp.route('/api/admin/qcm/<theme>/validate', methods=['POST'])
 @require_admin
 def validate_questions(theme):
     get_qcm_path(theme)
     try:
-        clean = validate_qcm_questions(body().get('questions'), theme)
+        clean = validate_bank_questions(body().get('questions'), theme)
         return jsonify({'ok': True, 'questions': clean})
     except (ValueError, UnicodeError) as exc:
         return error_response(exc)

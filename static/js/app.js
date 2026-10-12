@@ -985,22 +985,31 @@ function saveQcmEditor() {
   var removed = qcmFullList.filter(function (old) {
     return old.qid && !candidate.some(function (q) { return q && (q.qid === old.qid || (!q.qid && q.question === old.question && (q.chapitre || 'Autre') === (old.chapitre || 'Autre'))); });
   });
-  if (removed.length && typeof window !== 'undefined' && !window.confirm('Retirer définitivement ' + removed.length + ' questions de la banque dans le périmètre sélectionné ? Les révisions historiques sont conservées.')) return;
+  var needsConfirmation = removed.length && typeof window !== 'undefined';
   qcmSaving = true;
   if (typeof window !== 'undefined' && window.contentAdmin) window.contentAdmin.busy();
   if (spinner) spinner.style.display = 'inline-block';
-  qcmEditorStatus('Enregistrement…', false);
-  return fetchWithStatus(qcmApiUrl(subject), {
+  qcmEditorStatus(needsConfirmation ? 'Validation des questions…' : 'Enregistrement…', false);
+  function writeQuestions() { return fetchWithStatus(qcmApiUrl(subject), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ raw: raw, revision: qcmRevision }),
     cache: 'no-store'
-  })
+  }); }
+  var request = needsConfirmation ? fetchWithStatus('/api/admin/qcm/' + subject + '/validate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questions: candidate }), cache: 'no-store'
+  }).then(function (res) {
+    if (version !== qcmLoadVersion || subjEl.value !== subject || scopeVersion !== qcmScopeVersion) return null;
+    if (!res.data || !res.data.ok) { qcmEditorFail(res.status, res.data || {}); return null; }
+    if (!window.confirm('Retirer définitivement ' + removed.length + ' questions de la banque dans le périmètre sélectionné ? Les révisions historiques sont conservées.')) { qcmEditorStatus('Enregistrement annulé. Tes modifications sont conservées.', false); return null; }
+    qcmEditorStatus('Enregistrement…', false); return writeQuestions();
+  }) : writeQuestions();
+  return request
     .then(function (res) {
       qcmSaving = false;
       if (typeof window !== 'undefined' && window.contentAdmin) window.contentAdmin.busy();
       if (spinner) spinner.style.display = 'none';
-      if (version !== qcmLoadVersion || subjEl.value !== subject || scopeVersion !== qcmScopeVersion) return;
+      if (!res || version !== qcmLoadVersion || subjEl.value !== subject || scopeVersion !== qcmScopeVersion) return;
       var d = res.data || {};
       if (!d.ok) { qcmEditorFail(res.status, d); return; }
       qcmEditorStatus('Enregistré ✔ - ' + d.count + ' questions valides pour ' + d.theme + '.', false);
@@ -1011,7 +1020,7 @@ function saveQcmEditor() {
       qcmSaving = false;
       if (typeof window !== 'undefined' && window.contentAdmin) window.contentAdmin.busy();
       if (spinner) spinner.style.display = 'none';
-      if (version === qcmLoadVersion && subjEl.value === subject) {
+      if (version === qcmLoadVersion && subjEl.value === subject && scopeVersion === qcmScopeVersion) {
         qcmEditorStatus('Erreur réseau : ' + e, true);
       }
     });

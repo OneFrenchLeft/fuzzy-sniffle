@@ -123,6 +123,65 @@ class ContentAdministration(unittest.TestCase):
         database.init_db()
         self.assertFalse(next(ch for ch in self.bank()['chapters'] if ch['chapitre'] == 'Électricité')['qcm_active'])
 
+    def test_chapter_deletion_moves_questions_without_deleting_histories(self):
+        before = self.questions('chimie')
+        q = before[0]
+        self.client.post('/api/ankimie/' + q['qid'] + '/review', json={'result': 'good'})
+        self.client.put('/api/admin/ankimie/chimie/collections', json={'chapitre': 'Mécanique', 'qid': q['qid'], 'included': True})
+        conn = database.db()
+        conn.execute('INSERT INTO qcm_answers(qid,theme,chapitre,question,prenom,ok) VALUES(?,?,?,?,?,0)',
+                     (q['qid'], 'chimie', 'Optique', q['question'], 'Élève'))
+        conn.commit(); conn.close()
+        response = self.client.delete('/api/admin/content/chimie/chapters', json={
+            'chapitre': 'Optique', 'destination': 'Autre', 'revision': self.bank('chimie')['revision']})
+        self.assertEqual(response.status_code, 200)
+        after = response.get_json()
+        self.assertNotIn('Optique', [ch['chapitre'] for ch in after['chapters']])
+        moved = next(item for item in after['questions'] if item['qid'] == q['qid'])
+        self.assertEqual(moved, {**q, 'chapitre': 'Autre'})
+        self.assertIn(before[1], after['questions'])
+        destination = next(ch for ch in after['chapters'] if ch['chapitre'] == 'Autre')
+        self.assertFalse(destination['qcm_active'])
+        self.assertFalse(destination['ankimie_active'])
+        self.assertIn(q['qid'], self.client.get('/api/admin/ankimie/chimie/collections?chapitre=Mécanique').get_json()['included'])
+        for table in ('qcm_answers', 'qcm_sr_state', 'qcm_sr_reviews', 'forgecards'):
+            self.assertEqual(self.count(table), 1, table)
+
+    def test_chapter_deletion_rejects_missing_destination_and_stale_revision(self):
+        original = config.QCM_FILES['physique'].read_bytes()
+        for payload, status in [
+            ({'chapitre': 'Optique', 'revision': self.bank()['revision']}, 400),
+            ({'chapitre': 'Optique', 'destination': 'Optique', 'revision': self.bank()['revision']}, 400),
+            ({'chapitre': 'Optique', 'destination': 'Autre', 'revision': 'stale'}, 409),
+        ]:
+            self.assertEqual(self.client.delete('/api/admin/content/physique/chapters', json=payload).status_code, status)
+            self.assertEqual(config.QCM_FILES['physique'].read_bytes(), original)
+        self.assertEqual(self.app.test_client().delete('/api/admin/content/physique/chapters', json={}).status_code, 401)
+
+    def test_empty_chapter_deletion_removes_collection_only(self):
+        self.client.post('/api/admin/content/chimie/chapters', json={'chapitre': 'Vide'})
+        before = self.questions('chimie')
+        self.client.put('/api/admin/ankimie/chimie/collections', json={'chapitre': 'Vide', 'qid': before[0]['qid'], 'included': True})
+        response = self.client.delete('/api/admin/content/chimie/chapters', json={
+            'chapitre': 'Vide', 'revision': self.bank('chimie')['revision']})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.questions('chimie'), before)
+        self.assertNotIn('Vide', [ch['chapitre'] for ch in self.bank('chimie')['chapters']])
+        self.assertEqual(self.count('ankimie_memberships'), 0)
+        self.assertEqual(self.count('forgecards'), 1)
+
+    def test_failed_chapter_move_keeps_original_chapter_and_bank(self):
+        self.client.put('/api/admin/content/physique/chapters', json={'chapitre': 'Optique', 'qcm_active': False})
+        original = config.QCM_FILES['physique'].read_bytes()
+        with patch('qcm_admin._atomic_bank_write', side_effect=OSError('read only')):
+            response = self.client.delete('/api/admin/content/physique/chapters', json={
+                'chapitre': 'Optique', 'destination': 'Autre', 'revision': self.bank()['revision']})
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(config.QCM_FILES['physique'].read_bytes(), original)
+        chapters = self.bank()['chapters']
+        self.assertFalse(next(ch for ch in chapters if ch['chapitre'] == 'Optique')['qcm_active'])
+        self.assertNotIn('Autre', [ch['chapitre'] for ch in chapters])
+
     def test_deactivation_filters_lobby_game_review_but_keeps_history(self):
         optics = self.questions()[0]
         conn = database.db()

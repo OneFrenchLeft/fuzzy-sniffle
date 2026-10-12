@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Admin{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/admin_content.css', v=1) }}">
-<script src="{{ url_for('static', filename='js/admin_content.js', v=1) }}" defer></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin_content.css', v=2) }}">
+<script src="{{ url_for('static', filename='js/admin_content.js', v=2) }}" defer></script>
 {% endblock %}
 {% block content %}
 <style>
@@ -110,17 +110,16 @@
                 Le LaTeX s'écrit directement dans les textes entre <code>$...$</code> ;
                 en JSON, chaque antislash est doublé (<code>\\frac{1}{2}</code>).
                 Les images utilisent le champ <code>image</code> (URL https publique). L’ancien champ <code>image_complete</code> est converti en <code>image</code> à l’enregistrement. Le champ optionnel <code>explication</code> s'affiche à tous à la révélation de la réponse et dans le récap des erreurs. Si question, contacter Eliot, ou sinon regarder la cheatfiche.<br>
-                Point d'attention sur la suppression d'un thème, enregistrer une thème vide avec [] pour le supprimer.
+                Pour supprimer un chapitre en conservant ses questions, utilise « Supprimer le chapitre » dans la liste des chapitres.
               </p>
             </div>
           </div>
 
           <div class="admin-row-actions" style="margin-bottom:1rem">
             <button type="button" class="btn-ghost btn-small" onclick="if(contentAdmin.canSwitch()) loadQcmEditor()">⟳ Recharger</button>
-            <button type="button" class="btn-ghost btn-small" onclick="formatQcmEditor()">✨ Formater le JSON</button>
-            <button type="button" class="btn-ghost btn-small" id="qcm-json-validate">Valider avant d’enregistrer</button>
             <button type="button" class="btn-save btn-small" onclick="saveQcmEditor()">💾 Enregistrer <span id="qcm-save-spinner" class="spinner" style="display:none"></span></button>
           </div>
+          <p class="hint">Enregistrer valide automatiquement toutes les questions. En cas d’erreur, la banque reste inchangée et tes modifications restent disponibles pour correction.</p>
 
           <div class="field">
             <label for="qcm-json-editor">Questions JSON</label>
@@ -285,6 +284,7 @@ buttons.forEach(function(b){b.addEventListener('click',function(){open(b.dataset
   </section>
 {% endblock %}
 {% block modals %}
+{% include 'admin_chapter_delete.html' %}
 <div class="modal-overlay critical" id="confirm-overlay">
   <div class="modal-box">
     <div class="modal-topbar">
