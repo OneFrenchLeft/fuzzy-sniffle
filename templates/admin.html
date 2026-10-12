@@ -2,7 +2,7 @@
 {% block title %}Admin{% endblock %}
 {% block extra_head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/admin_content.css', v=5) }}">
-<script src="{{ url_for('static', filename='js/admin_content.js', v=4) }}" defer></script>
+<script src="{{ url_for('static', filename='js/admin_content.js', v=5) }}" defer></script>
 {% endblock %}
 {% block content %}
 <style>
@@ -275,12 +275,14 @@
           </p>
           <button type="button" class="btn-ghost btn-small" onclick="loadStatsOverview()">⟳ Calculer / Rafraîchir</button>
           <div id="stats-overview" style="margin-top:.75rem"></div>
-        </div></section><section class="atelier-view" id="atelier-ankimie" hidden><div class="atelier-heading"><h2>Collections Ankimie</h2><p>Composer les chapitres de révision à partir de la banque QCM, sans supprimer les questions ni l’historique des élèves.</p></div>
-        {% include 'admin_ankimie_content.html' %}
-        <details class="content-advanced"><summary>Statistiques Ankimie</summary><div class="import-box">
-          <button type="button" class="btn-ghost btn-small" onclick="loadAnkimieStats()">⟳ Calculer / Rafraîchir</button>
-          <div id="ankimie-stats" style="margin-top:.75rem"></div>
-        </div></details></section><section class="atelier-view" id="atelier-exports" hidden><div class="atelier-heading"><h2>Exports</h2><p>Télécharger les données et rapports existants.</p></div><div class="import-box">
+        </div></section><section class="atelier-view" id="atelier-ankimie" hidden><div class="atelier-heading"><h2>Ankimie</h2><p>Révision espacée automatique à partir de la banque QCM.</p></div><div class="import-box">
+          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.85rem">
+            Ankimie pioche automatiquement dans <strong>toutes les questions des chapitres actifs en QCM</strong> — il n'y a rien à gérer ici.
+            Pour retirer du contenu d'Ankimie, désactive le chapitre dans « Éditeur &amp; aperçu › Gérer les questions » : il disparaît du QCM et d'Ankimie en même temps.
+          </p>
+          <div class="section-title" style="margin:.5rem 0 .4rem">Statistiques Ankimie</div>
+          <div id="ankimie-stats"></div>
+        </div></section><section class="atelier-view" id="atelier-exports" hidden><div class="atelier-heading"><h2>Exports</h2><p>Télécharger les données et rapports existants.</p></div><div class="import-box">
           <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">Exports pour regarder en fin d'année.</p>
           <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem">
             <button class="btn-ghost btn-small" onclick="exportCsv('activite-quotidienne')">Activité quotidienne (élève × jour)</button>
@@ -301,7 +303,7 @@ function open(key){
   var h=root.querySelector('#atelier-'+key+' .atelier-heading h2');if(h){h.tabIndex=-1;h.focus();}
   if(key==='proba'&&window.loadProbaSimOnce)window.loadProbaSimOnce();
   if(key==='qcm'&&window.contentAdmin&&!window.contentAdmin.hasDraft()&&!qcmSaving)loadQcmEditor();
-  if(key==='ankimie'&&window.contentAdmin)window.contentAdmin.loadAnkimie();
+  if(key==='ankimie'&&window.loadAnkimieStats)window.loadAnkimieStats();
 }
 buttons.forEach(function(b){b.addEventListener('click',function(){open(b.dataset.atelier);});});
 // Onglets internes d'un sous-menu (Éditeur QCM, Résultats QCM).

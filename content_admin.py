@@ -9,7 +9,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature
 from auth import require_admin
 from config import QCM_FILES
 from db import db, ensure_db
-from content_catalog import chapter_name, chapter_overview, memberships, collection_questions
+from content_catalog import chapter_name, chapter_overview
 from qcm_admin import (read_bank, store_bank, bank_lock, validate_qcm_questions, validate_bank_questions,
                        get_qcm_path, BankConflict, notify_catalog_change)
 
@@ -326,46 +326,5 @@ def import_commit(theme):
     except (ValueError, UnicodeError) as exc:
         return error_response(exc)
 
-
-@bp.route('/api/admin/ankimie/<theme>/collections')
-@require_admin
-def ankimie_collection(theme):
-    questions, revision = read_bank(theme)
-    ch = chapter_name(request.args.get('chapitre'))
-    associations = memberships()
-    overview = chapter_overview(theme, questions)
-    by_chapter = {row['chapitre']: [q['qid'] for q in collection_questions(
-        theme, row['chapitre'], questions, associations)] for row in overview}
-    included = set(by_chapter.get(ch, []))
-    return jsonify({'ok': True, 'questions': questions, 'included': sorted(included),
-                    'chapters': overview, 'included_by_chapter': by_chapter, 'revision': revision})
-
-
-@bp.route('/api/admin/ankimie/<theme>/collections', methods=['PUT'])
-@require_admin
-def ankimie_membership(theme):
-    get_qcm_path(theme)
-    try:
-        data = body()
-        ch = selected_chapter(data.get('chapitre'))
-        if type(data.get('included')) is not bool:
-            raise ValueError('Choisis Ajouter ou Retirer pour cette carte.')
-        with bank_lock(theme):
-            questions, revision = read_bank(theme)
-            if data.get('revision') is not None and data['revision'] != revision:
-                raise BankConflict('La banque a changé. Recharge les cartes avant de réessayer.')
-            if data.get('qid') not in {q['qid'] for q in questions}:
-                raise ValueError('Cette carte n’existe plus dans la banque QCM.')
-            if ch not in {r['chapitre'] for r in chapter_overview(theme, questions)}:
-                raise ValueError('Crée ou sélectionne d’abord le chapitre.')
-            ensure_db()
-            conn = db()
-            try:
-                with conn:
-                    conn.execute('INSERT OR REPLACE INTO ankimie_memberships VALUES(?,?,?,?)',
-                                 (theme, ch, data['qid'], int(data['included'])))
-            finally:
-                conn.close()
-        return jsonify({'ok': True})
-    except (ValueError, UnicodeError) as exc:
-        return error_response(exc)
+# Ankimie n'a plus de routes de gestion : elle pioche automatiquement dans
+# les questions des chapitres actifs en QCM (voir content_catalog.py).

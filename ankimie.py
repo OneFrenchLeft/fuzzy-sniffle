@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Ankimie : repetition espacee (FSRS) sur les collections de questions QCM.
+"""Ankimie : repetition espacee (FSRS) sur les questions QCM.
 
 Entierement independante de la SR Forgecards : etats (qcm_sr_state), reviews
 (qcm_sr_reviews) et quota (qcm_daily_new_limit) sont propres. Seule la
-retention cible FSRS (fsrs_retention) est partagee. Le contenu chimie existant
-reste inclus par defaut ; les autres collections sont gerees visuellement.
-Tout est clefe sur le qid stable des questions, independamment des collections.
+retention cible FSRS (fsrs_retention) est partagee. Le deck est automatique :
+toutes les questions des chapitres actifs en QCM, sans gestion de collections.
+Tout est clefe sur le qid stable des questions.
 """
 from flask import Blueprint, jsonify, request, session
 

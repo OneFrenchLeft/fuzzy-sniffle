@@ -1668,9 +1668,10 @@ function loadStats() {
         '<button class="btn-ghost btn-small" data-action="regen-pw">New mdp</button>' +
         '<button class="btn-ghost btn-small" data-action="joker" title="Donner un joker">🃏 ' + (s.jokers || 0) + '</button>' +
         '<button class="btn-ghost btn-small" data-action="deck">Deck</button>' +
+        '<button class="btn-ghost btn-small" data-action="suivi">📊 Suivi</button>' +
         '<a class="btn-ghost btn-small" style="text-decoration:none;text-align:center" href="/api/users/' + encodeURIComponent(s.prenom) + '/export">Export CSV</a>' +
         '<button class="btn-danger btn-small" data-action="delete">Retirer</button></div>' +
-        '<div class="deck-slot"></div></div>';
+        '<div class="deck-slot"></div><div class="suivi-slot"></div></div>';
       det.querySelector('[data-action="show-pw"]').onclick = function () { showUserPassword(s.prenom, this); };
       det.querySelector('[data-action="regen-pw"]').onclick = function () { regenUserPassword(s.prenom); };
       det.querySelector('[data-action="joker"]').onclick = function () { grantJoker(s.prenom); };
@@ -1679,6 +1680,12 @@ function loadStats() {
         if (slot.dataset.loaded) { slot.innerHTML = ''; delete slot.dataset.loaded; this.textContent = 'Deck'; return; }
         this.textContent = 'Chargement…';
         loadDeck(s.prenom, slot, this);
+      };
+      det.querySelector('[data-action="suivi"]').onclick = function () {
+        var slot = det.querySelector('.suivi-slot');
+        if (slot.dataset.loaded) { slot.innerHTML = ''; delete slot.dataset.loaded; this.textContent = '📊 Suivi'; return; }
+        this.textContent = 'Chargement…';
+        loadSuivi(s.prenom, slot, this);
       };
       det.querySelector('[data-action="delete"]').onclick = function () {
         askConfirm('Retirer ' + s.prenom + ' de la liste ? Cela supprimera aussi definitivement tout son historique de revisions.', function () { deletePrenom(s.prenom); });
@@ -1703,6 +1710,62 @@ function loadDeck(prenom, slot, btn) {
     if (btn) btn.textContent = 'Deck';
     showToast('Impossible de charger le deck.');
   });
+}
+// --- Suivi individuel complet (assiduité, SR, Ankimie, QCM) ---
+function loadSuivi(prenom, slot, btn) {
+  fetchJson('/api/admin/suivi/' + encodeURIComponent(prenom), { cache: 'no-store' }).then(function (d) {
+    if (!d || d.ok === false) {
+      if (btn) btn.textContent = '📊 Suivi';
+      showToast((d && d.error) || 'Suivi indisponible.');
+      return;
+    }
+    slot.innerHTML = renderSuiviHtml(d);
+    slot.dataset.loaded = '1';
+    if (btn) btn.textContent = 'Masquer';
+  }).catch(function () {
+    if (btn) btn.textContent = '📊 Suivi';
+    showToast('Erreur réseau.');
+  });
+}
+function suiviStatCard(label, value, sub) {
+  return '<div style="border:1px solid var(--border);border-radius:var(--radius);padding:.6rem .75rem;background:var(--surface);min-width:0">' +
+    '<div style="font-size:.72rem;color:var(--muted)">' + label + '</div>' +
+    '<div style="font-size:1.05rem;font-weight:800">' + value + '</div>' +
+    (sub ? '<div style="font-size:.72rem;color:var(--muted)">' + sub + '</div>' : '') +
+    '</div>';
+}
+function renderSuiviHtml(d) {
+  var a = d.assiduite;
+  var html = '<div style="margin-top:.6rem;border-top:1px dashed var(--border);padding-top:.6rem">';
+  html += '<div class="meta" style="margin-bottom:.4rem">🔥 Série <strong>' + a.streak + ' j</strong> (record ' + a.record + ' j) — actif ' +
+    a.jours30 + '/30 j (' + a.pct30 + ' %) et ' + a.jours7 + '/7 j — ' +
+    (a.last_activity ? 'dernière activité ' + fmtDateTimeFR(a.last_activity) : 'jamais actif') +
+    (a.last_login ? ' — dernière connexion ' + fmtDateTimeFR(a.last_login) : '') + '</div>';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.5rem">';
+  html += suiviStatCard('SR Forgecards', d.sr.total + ' révisions',
+    (d.sr.taux != null ? d.sr.taux + ' % réussite' : 'pas de révision') + ' · moy. ' + fmtDuree(d.sr.avg_duration) + '/carte · ' + d.sr.due + ' dues');
+  html += suiviStatCard('Aujourd’hui (SR)', d.sr.today + ' faite' + (d.sr.today > 1 ? 's' : ''),
+    d.sr.nouvelles + ' nouvelles au total · ' + d.sr.total_minutes + ' min de travail');
+  html += suiviStatCard('Ankimie', d.ankimie.total + ' cartes vues',
+    (d.ankimie.taux != null ? d.ankimie.taux + ' % réussite' : 'jamais utilisé') + ' · ' + d.ankimie.due + ' dues · ' + d.ankimie.today + ' aujourd’hui');
+  html += suiviStatCard('QCM en classe', d.qcm.total + ' réponses',
+    (d.qcm.taux != null ? d.qcm.taux + ' % réussite' : 'aucune partie') +
+    (d.qcm.avg_elapsed != null ? ' · ' + String(d.qcm.avg_elapsed).replace('.', ',') + ' s/réponse' : '') +
+    (d.qcm.today ? ' · ' + d.qcm.today + ' aujourd’hui' : ''));
+  html += '</div>';
+  if (d.qcm.best_elapsed != null) {
+    html += '<div class="meta" style="margin-top:.3rem">⚡ Réponse la plus rapide : ' + String(d.qcm.best_elapsed).replace('.', ',') + ' s</div>';
+  }
+  var maxDay = Math.max.apply(null, d.activite30.map(function (j) { return j.sr + j.ank + j.qcm; }).concat([1]));
+  html += '<div class="meta" style="margin:.5rem 0 .2rem">Activité des 30 derniers jours (SR + Ankimie + QCM)</div>';
+  html += '<div style="display:flex;align-items:flex-end;gap:1px;height:48px">';
+  d.activite30.forEach(function (j) {
+    var tot = j.sr + j.ank + j.qcm;
+    html += '<div title="' + j.d + ' : ' + tot + ' (SR ' + j.sr + ', Ankimie ' + j.ank + ', QCM ' + j.qcm + ')" style="flex:1;background:var(--primary,#01696f);opacity:' + (tot ? '.85' : '.15') + ';height:' + Math.max(3, Math.round(100 * tot / maxDay)) + '%"></div>';
+  });
+  html += '</div><div class="meta" style="text-align:center">il y a 30 j — aujourd’hui</div>';
+  html += '</div>';
+  return html;
 }
 var allWeakCards = [];
 function loadWeakCards() {
@@ -1854,6 +1917,20 @@ function loadStatsOverview() {
     if (d.retention_jours && d.retention_jours.length) {
       html += '<div class="section-title" style="margin:.75rem 0 .4rem">Rétention quotidienne (60 derniers jours, hors nouvelles cartes)</div>';
       html += retentionChartSvg(d.retention_jours);
+    }
+    if (d.suivi_assiduite && d.suivi_assiduite.length) {
+      html += '<div class="section-title" style="margin:.75rem 0 .4rem">Assiduité — qui travaille tous les jours ?</div>';
+      html += '<table class="weak-table"><thead><tr><th>Élève</th><th>🔥 Série</th><th>Record</th><th>7 derniers jours</th><th>30 derniers jours</th><th>Dernière activité</th></tr></thead><tbody>';
+      d.suivi_assiduite.forEach(function (r) {
+        var bg = r.pct30 >= 80 ? 'rgba(39,174,96,.25)' : (r.pct30 >= 50 ? 'rgba(230,126,34,.18)' : (r.pct30 >= 20 ? 'rgba(230,126,34,.07)' : ''));
+        html += '<tr><td>' + esc(r.prenom) + '</td>' +
+          '<td style="text-align:center"><strong>' + r.streak + '</strong> j</td>' +
+          '<td style="text-align:center">' + r.record + ' j</td>' +
+          '<td style="text-align:center">' + r.jours7 + '/7</td>' +
+          '<td style="text-align:center;background:' + bg + '">' + r.jours30 + '/30 (' + r.pct30 + ' %)</td>' +
+          '<td>' + (r.last ? fmtDateTimeFR(r.last) : 'jamais') + '</td></tr>';
+      });
+      html += '</tbody></table>';
     }
     html += '<div class="section-title" style="margin:.75rem 0 .4rem">Jours actifs par semaine (8 dernières semaines)</div>';
     html += '<table class="weak-table"><thead><tr><th>Élève</th>' +

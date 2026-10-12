@@ -516,6 +516,35 @@ def admin_stats_overview():
             row[wk] = sum(1 for d in days if w0 - timedelta(days=6) <= datetime.strptime(d, '%Y-%m-%d').date() <= w0)
         assiduite.append(row)
 
+    # Assiduité détaillée par élève : série en cours, record, jours travaillés.
+    # activity_days = source complète (reviews hors-série exclues + jours
+    # validés), cohérente avec le calcul des séries des élèves.
+    last_act = {}
+    for r in conn.execute("SELECT prenom, MAX(created_at) AS m FROM events GROUP BY prenom").fetchall():
+        if r['m']:
+            last_act[r['prenom']] = r['m']
+    for r in conn.execute("SELECT prenom, MAX(created_at) AS m FROM reviews GROUP BY prenom").fetchall():
+        if r['m'] and r['m'] > last_act.get(r['prenom'], ''):
+            last_act[r['prenom']] = r['m']
+    d7 = (today - timedelta(days=6)).isoformat()
+    d30 = (today - timedelta(days=29)).isoformat()
+    suivi_assiduite = []
+    for p in users:
+        full_days = activity_days(conn, p)
+        n7 = sum(1 for d in full_days if d >= d7)
+        n30 = sum(1 for d in full_days if d >= d30)
+        suivi_assiduite.append({
+            'prenom': p,
+            'streak': compute_streak(conn, p),
+            'record': compute_record(full_days),
+            'jours7': n7,
+            'jours30': n30,
+            'pct30': round(100 * n30 / 30),
+            'total_jours': len(full_days),
+            'last': last_act.get(p),
+        })
+    suivi_assiduite.sort(key=lambda r: (-r['streak'], -r['pct30'], r['prenom']))
+
     heures = [0] * 24
     for r in conn.execute(
             "SELECT CAST(substr(created_at,12,2) AS INTEGER) AS h, COUNT(*) AS n "
@@ -547,9 +576,117 @@ def admin_stats_overview():
 
     conn.close()
     return jsonify({'ok': True, 'semaines': weeks, 'assiduite': assiduite,
+                    'suivi_assiduite': suivi_assiduite,
                     'heures': heures, 'qcm_mois': qcm_mois,
                     'retention_reelle': retention_reelle,
                     'retention_jours': retention_jours})
+
+@bp.route('/api/admin/suivi/<prenom>', methods=['GET'])
+@require_admin
+def admin_suivi_eleve(prenom):
+    """Suivi individuel complet : assiduité, SR forgecards, Ankimie, QCM.
+
+    Tout est recalculé à la demande depuis le journal brut (reviews,
+    qcm_sr_reviews, qcm_answers, events) — aucune donnée pré-agrégée.
+    """
+    ensure_db()
+    conn = db()
+    if not conn.execute('SELECT 1 FROM users WHERE prenom=?', (prenom,)).fetchone():
+        conn.close()
+        return jsonify({'ok': False, 'error': 'Élève introuvable.'}), 404
+    today = now_paris().date()
+    today_s = today.isoformat()
+    d7 = (today - timedelta(days=6)).isoformat()
+    d30 = (today - timedelta(days=29)).isoformat()
+
+    days = activity_days(conn, prenom)
+    streak_now = compute_streak(conn, prenom)
+    record = compute_record(days)
+    ev = conn.execute(
+        "SELECT MAX(created_at) AS last, "
+        "MAX(CASE WHEN type='login' THEN created_at END) AS last_login "
+        "FROM events WHERE prenom=?", (prenom,)).fetchone()
+    rev_last = conn.execute(
+        "SELECT MAX(created_at) AS m FROM reviews WHERE prenom=?", (prenom,)).fetchone()['m']
+    last_activity = max(ev['last'] or '', rev_last or '') or None
+
+    sr = conn.execute(
+        "SELECT COUNT(*) AS total, "
+        "SUM(CASE WHEN result='again' THEN 1 ELSE 0 END) AS again, "
+        "SUM(CASE WHEN result='hard' THEN 1 ELSE 0 END) AS hard, "
+        "SUM(CASE WHEN result='good' THEN 1 ELSE 0 END) AS good, "
+        "SUM(CASE WHEN result='easy' THEN 1 ELSE 0 END) AS easy, "
+        "SUM(CASE WHEN was_new=1 THEN 1 ELSE 0 END) AS nouvelles, "
+        "SUM(CASE WHEN substr(created_at,1,10)=? THEN 1 ELSE 0 END) AS today, "
+        "AVG(duration_seconds) AS avg_dur, SUM(duration_seconds) AS total_dur "
+        "FROM reviews WHERE prenom=?", (today_s, prenom)).fetchone()
+    sr_due = conn.execute(
+        "SELECT COUNT(*) AS c FROM sr_state_user WHERE prenom=? AND (next_review IS NULL OR next_review<=?)",
+        (prenom, today_s)).fetchone()['c']
+
+    ank = conn.execute(
+        "SELECT COUNT(*) AS total, SUM(correct) AS bonnes, "
+        "SUM(CASE WHEN substr(created_at,1,10)=? THEN 1 ELSE 0 END) AS today "
+        "FROM qcm_sr_reviews WHERE prenom=?", (today_s, prenom)).fetchone()
+    ank_due = conn.execute(
+        "SELECT COUNT(*) AS c FROM qcm_sr_state WHERE prenom=? AND (next_review IS NULL OR next_review<=?)",
+        (prenom, today_s)).fetchone()['c']
+
+    qcm = conn.execute(
+        "SELECT COUNT(*) AS total, SUM(ok) AS bonnes, AVG(elapsed) AS avg_el, MIN(elapsed) AS best_el, "
+        "SUM(CASE WHEN substr(created_at,1,10)=? THEN 1 ELSE 0 END) AS today "
+        "FROM qcm_answers WHERE prenom=?", (today_s, prenom)).fetchone()
+
+    jours = {}
+    for table, key in (('reviews', 'sr'), ('qcm_sr_reviews', 'ank'), ('qcm_answers', 'qcm')):
+        for r in conn.execute(
+                "SELECT substr(created_at,1,10) AS d, COUNT(*) AS n FROM " + table +
+                " WHERE prenom=? AND created_at>=? GROUP BY d", (d30, prenom)).fetchall():
+            jours.setdefault(r['d'], {'d': r['d'], 'sr': 0, 'ank': 0, 'qcm': 0})[key] = r['n']
+    activite30 = []
+    for k in range(29, -1, -1):
+        d = (today - timedelta(days=k)).isoformat()
+        activite30.append(jours.get(d, {'d': d, 'sr': 0, 'ank': 0, 'qcm': 0}))
+
+    joker_row = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
+    jokers = joker_row['count'] if joker_row else 0
+    conn.close()
+
+    def pct(ok, n):
+        return round(100.0 * (ok or 0) / n, 1) if n else None
+
+    n7 = sum(1 for d in days if d >= d7)
+    n30 = sum(1 for d in days if d >= d30)
+    return jsonify({
+        'ok': True, 'prenom': prenom, 'jokers': jokers,
+        'assiduite': {
+            'streak': streak_now, 'record': record,
+            'jours7': n7, 'jours30': n30, 'pct30': round(100 * n30 / 30),
+            'total_jours': len(days),
+            'last_activity': last_activity, 'last_login': ev['last_login'],
+        },
+        'sr': {
+            'total': sr['total'], 'today': sr['today'] or 0,
+            'again': sr['again'] or 0, 'hard': sr['hard'] or 0,
+            'good': sr['good'] or 0, 'easy': sr['easy'] or 0,
+            'nouvelles': sr['nouvelles'] or 0,
+            'taux': pct((sr['good'] or 0) + (sr['easy'] or 0), sr['total']),
+            'avg_duration': round(sr['avg_dur']) if sr['avg_dur'] is not None else None,
+            'total_minutes': round((sr['total_dur'] or 0) / 60),
+            'due': sr_due,
+        },
+        'ankimie': {
+            'total': ank['total'], 'today': ank['today'] or 0,
+            'taux': pct(ank['bonnes'], ank['total']), 'due': ank_due,
+        },
+        'qcm': {
+            'total': qcm['total'], 'today': qcm['today'] or 0,
+            'taux': pct(qcm['bonnes'], qcm['total']),
+            'avg_elapsed': round(qcm['avg_el'], 1) if qcm['avg_el'] is not None else None,
+            'best_elapsed': round(qcm['best_el'], 1) if qcm['best_el'] is not None else None,
+        },
+        'activite30': activite30,
+    })
 
 @bp.route('/api/admin/stats/export/<kind>', methods=['GET'])
 @require_admin

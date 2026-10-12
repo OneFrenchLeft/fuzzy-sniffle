@@ -5,11 +5,9 @@
   var names = { physique: 'Physique', chimie: 'Chimie', maths: 'Mathématiques' };
   var pageSize = 20, qPage = 0, lastBuffer = '', importDraft = null, formState = null;
   var importVersion = 0, jsonFileVersion = 0;
-  var activationPending = { qcm: false, ank: false };
+  var activationPending = false;
   var deleteState = null;
   var qSearchScope = '';
-  var lastAnkContext = '';
-  var ank = { version: 0, theme: 'chimie', chapter: '', questions: [], chapters: [], included: new Set(), revision: null, loaded: false, saving: false, page: 0, pickerPage: 0 };
 
   function chapter(q) { return String(q.chapitre || 'Autre').trim() || 'Autre'; }
   function currentSubject() { return $('qcm-subject-select').value; }
@@ -59,86 +57,48 @@
     if (q.explication) { var explanation = document.createElement('p'); explanation.className = 'hint'; explanation.textContent = q.explication; el.appendChild(explanation); }
     return el;
   }
-  function chaptersOverview(target, rows, theme, selected, mode, choose) {
+  function chaptersOverview(target, rows, theme, selected, choose) {
     target.innerHTML = '';
     if (!rows.length) { empty(target, 'Aucun chapitre disponible. Crée le premier chapitre ci-dessous.'); return; }
-    if (target.classList.contains('content-chapters-compact')) {
-      var total = rows.reduce(function (sum, row) { return sum + row.qcm_count; }, 0);
-      var allRow = document.createElement('div'); allRow.className = 'chapter-row' + (selected === '' ? ' selected' : '');
-      var allPick = document.createElement('button'); allPick.type = 'button'; allPick.className = 'chapter-pick';
-      allPick.disabled = selected === '';
-      allPick.onclick = function () { if (mode !== 'ank' || !ank.saving) choose(''); };
-      var allName = document.createElement('span'); allName.className = 'chapter-name'; allName.textContent = 'Tous les chapitres';
-      var allCount = document.createElement('span'); allCount.className = 'chapter-count'; allCount.textContent = plural(total, 'question', 'questions');
-      allPick.append(allName, allCount); allRow.appendChild(allPick); target.appendChild(allRow);
-      rows.forEach(function (row) {
-        var line = document.createElement('div'); line.className = 'chapter-row' + (row.chapitre === selected ? ' selected' : '');
-        var pick = document.createElement('button'); pick.type = 'button'; pick.className = 'chapter-pick';
-        pick.disabled = row.chapitre === selected;
-        pick.onclick = function () { if (mode !== 'ank' || !ank.saving) choose(row.chapitre); };
-        var name = document.createElement('span'); name.className = 'chapter-name'; name.textContent = row.chapitre;
-        var count = document.createElement('span'); count.className = 'chapter-count'; count.textContent = row.qcm_count;
-        pick.append(name, count); line.appendChild(pick);
-        var label = document.createElement('label'); label.className = 'chapter-toggle'; label.title = 'Actif pour les élèves (' + (mode === 'qcm' ? 'QCM' : 'Ankimie') + ')';
-        var toggle = document.createElement('input'); toggle.type = 'checkbox';
-        var flag = mode === 'qcm' ? 'qcm_active' : 'ankimie_active'; toggle.checked = row[flag];
-        toggle.disabled = activationPending[mode];
-        label.appendChild(toggle); line.appendChild(label);
-        toggle.onchange = async function () {
-          if (activationPending[mode]) return;
-          var value = toggle.checked, version = mode === 'qcm' ? qcmLoadVersion : ank.version;
-          activationPending[mode] = true;
-          target.querySelectorAll('input[type=checkbox]').forEach(function (input) { input.disabled = true; });
-          try {
-            var payload = { chapitre: row.chapitre }; payload[flag] = value;
-            var data = await send('/api/admin/content/' + theme + '/chapters', 'PUT', payload);
-            if (mode === 'qcm' && version === qcmLoadVersion && theme === currentSubject()) {
-              qcmChapters = data.chapters; chaptersOverview(target, qcmChapters, theme, qcmTheme, mode, choose);
-            } else if (mode === 'ank' && version === ank.version && theme === ank.theme) {
-              ank.chapters = data.chapters; renderAnkimie();
-            }
-            showToast(value ? 'Chapitre activé pour les élèves.' : 'Chapitre désactivé. Contenu et historique conservés.');
-          } catch (error) { toggle.checked = !value; showToast(error.message); }
-          finally { activationPending[mode] = false; target.querySelectorAll('input[type=checkbox]').forEach(function (input) { input.disabled = false; }); }
-        };
-        var del = document.createElement('button'); del.type = 'button'; del.className = 'chapter-del content-danger'; del.textContent = '×'; del.title = 'Supprimer le chapitre';
-        del.onclick = function () { openDeleteChapter(row, mode); };
-        del.disabled = mode === 'qcm' ? qcmSaving || dirty() : ank.saving;
-        line.appendChild(del); target.appendChild(line);
-      });
-      return;
-    }
+    var total = rows.reduce(function (sum, row) { return sum + row.qcm_count; }, 0);
+    var allRow = document.createElement('div'); allRow.className = 'chapter-row' + (selected === '' ? ' selected' : '');
+    var allPick = document.createElement('button'); allPick.type = 'button'; allPick.className = 'chapter-pick';
+    allPick.disabled = selected === '';
+    allPick.onclick = function () { choose(''); };
+    var allName = document.createElement('span'); allName.className = 'chapter-name'; allName.textContent = 'Tous les chapitres';
+    var allCount = document.createElement('span'); allCount.className = 'chapter-count'; allCount.textContent = plural(total, 'question', 'questions');
+    allPick.append(allName, allCount); allRow.appendChild(allPick); target.appendChild(allRow);
     rows.forEach(function (row) {
-      var card = document.createElement('article'); card.className = 'content-chapter' + (row.chapitre === selected ? ' selected' : '');
-      var h = document.createElement('h4'); h.textContent = row.chapitre;
-      var counts = document.createElement('p'); counts.className = 'hint'; counts.textContent = plural(row.qcm_count, 'question disponible', 'questions disponibles') + ' · ' + plural(row.ankimie_count, 'carte Ankimie', 'cartes Ankimie'); card.append(h, counts);
-      var label = document.createElement('label'), toggle = document.createElement('input'); toggle.type = 'checkbox';
-      var flag = mode === 'qcm' ? 'qcm_active' : 'ankimie_active'; toggle.checked = row[flag];
-      toggle.disabled = activationPending[mode];
-      label.append(toggle, document.createTextNode('Actif pour les élèves (' + (mode === 'qcm' ? 'QCM' : 'Ankimie') + ')')); card.appendChild(label);
+      var line = document.createElement('div'); line.className = 'chapter-row' + (row.chapitre === selected ? ' selected' : '');
+      var pick = document.createElement('button'); pick.type = 'button'; pick.className = 'chapter-pick';
+      pick.disabled = row.chapitre === selected;
+      pick.onclick = function () { choose(row.chapitre); };
+      var name = document.createElement('span'); name.className = 'chapter-name'; name.textContent = row.chapitre;
+      var count = document.createElement('span'); count.className = 'chapter-count'; count.textContent = row.qcm_count;
+      pick.append(name, count); line.appendChild(pick);
+      var label = document.createElement('label'); label.className = 'chapter-toggle'; label.title = 'Actif pour les élèves (QCM et Ankimie)';
+      var toggle = document.createElement('input'); toggle.type = 'checkbox';
+      toggle.checked = row.qcm_active;
+      toggle.disabled = activationPending;
+      label.appendChild(toggle); line.appendChild(label);
       toggle.onchange = async function () {
-        if (activationPending[mode]) return;
-        var value = toggle.checked, version = mode === 'qcm' ? qcmLoadVersion : ank.version;
-        activationPending[mode] = true;
+        if (activationPending) return;
+        var value = toggle.checked, version = qcmLoadVersion;
+        activationPending = true;
         target.querySelectorAll('input[type=checkbox]').forEach(function (input) { input.disabled = true; });
         try {
-          var payload = { chapitre: row.chapitre }; payload[flag] = value;
-          var data = await send('/api/admin/content/' + theme + '/chapters', 'PUT', payload);
-          if (mode === 'qcm' && version === qcmLoadVersion && theme === currentSubject()) {
-            qcmChapters = data.chapters; chaptersOverview(target, qcmChapters, theme, qcmTheme, mode, choose);
-          } else if (mode === 'ank' && version === ank.version && theme === ank.theme) {
-            ank.chapters = data.chapters; renderAnkimie();
+          var data = await send('/api/admin/content/' + theme + '/chapters', 'PUT', { chapitre: row.chapitre, qcm_active: value });
+          if (version === qcmLoadVersion && theme === currentSubject()) {
+            qcmChapters = data.chapters; chaptersOverview(target, qcmChapters, theme, qcmTheme, choose);
           }
-          showToast(value ? 'Chapitre activé pour les élèves.' : 'Chapitre désactivé. Contenu et historique conservés.');
+          showToast(value ? 'Chapitre activé pour les élèves (QCM et Ankimie).' : 'Chapitre désactivé partout. Contenu et historique conservés.');
         } catch (error) { toggle.checked = !value; showToast(error.message); }
-        finally { activationPending[mode] = false; target.querySelectorAll('input[type=checkbox]').forEach(function (input) { input.disabled = false; }); }
+        finally { activationPending = false; target.querySelectorAll('input[type=checkbox]').forEach(function (input) { input.disabled = false; }); }
       };
-      var actions = document.createElement('div'); actions.className = 'content-toolbar';
-      var view = button(row.chapitre === selected ? 'Chapitre courant' : 'Voir le chapitre', function () { if (mode !== 'ank' || !ank.saving) choose(row.chapitre); });
-      view.disabled = row.chapitre === selected || (mode === 'ank' && ank.saving);
-      var remove = button('Supprimer le chapitre', function () { openDeleteChapter(row, mode); });
-      remove.classList.add('content-danger'); remove.disabled = mode === 'qcm' ? qcmSaving || dirty() : ank.saving;
-      actions.append(view, remove); card.appendChild(actions); target.appendChild(card);
+      var del = document.createElement('button'); del.type = 'button'; del.className = 'chapter-del content-danger'; del.textContent = '×'; del.title = 'Supprimer le chapitre';
+      del.onclick = function () { openDeleteChapter(row); };
+      del.disabled = qcmSaving || dirty();
+      line.appendChild(del); target.appendChild(line);
     });
   }
   function setQcmControls() {
@@ -179,7 +139,7 @@
     var searchScope = path(currentSubject(), qcmTheme);
     if (searchScope !== qSearchScope) { $('qcm-question-search').value = ''; qSearchScope = searchScope; }
     setQcmControls();
-    chaptersOverview($('qcm-chapter-overview'), qcmChapters, currentSubject(), qcmTheme, 'qcm', function (ch) {
+    chaptersOverview($('qcm-chapter-overview'), qcmChapters, currentSubject(), qcmTheme, function (ch) {
       if (!canSwitch()) return; qcmTheme = ch; qcmScopeVersion++; $('qcm-theme-select').value = ch; renderQcmEditorBuffer();
     }); renderQuestions();
   }
@@ -192,24 +152,24 @@
     qcmFullList = data.questions; qcmRevision = data.revision; qcmChapters = data.chapters;
     renderQcmThemeSelect(); renderQcmEditorBuffer(); return true;
   }
-  async function createChapter(mode) {
-    var input = $(mode === 'qcm' ? 'qcm-new-theme-input' : 'ank-new-chapter');
-    if (input.disabled || (mode === 'qcm' && (!ready() || qcmSaving || !canSwitch())) || (mode === 'ank' && (!ank.loaded || ank.saving))) return;
+  async function createChapter() {
+    var input = $('qcm-new-theme-input');
+    if (input.disabled || !ready() || qcmSaving || !canSwitch()) return;
     var ch = input.value.trim(); if (!ch) { input.focus(); showToast('Donne un nom au chapitre.'); return; }
-    var theme = mode === 'qcm' ? currentSubject() : $('ank-admin-subject').value;
-    var version = mode === 'qcm' ? qcmLoadVersion : ank.version; input.disabled = true;
-    var scope = mode === 'qcm' ? qcmScopeVersion : ank.chapter;
-    var startingBuffer = mode === 'qcm' ? $('qcm-json-editor').value : null;
+    var theme = currentSubject();
+    var version = qcmLoadVersion; input.disabled = true;
+    var scope = qcmScopeVersion;
+    var startingBuffer = $('qcm-json-editor').value;
     try {
       var data = await send('/api/admin/content/' + theme + '/chapters', 'POST', { chapitre: ch });
-      if (mode === 'qcm' && theme === currentSubject() && version === qcmLoadVersion && scope === qcmScopeVersion) {
+      if (theme === currentSubject() && version === qcmLoadVersion && scope === qcmScopeVersion) {
         if (dirty() && $('qcm-json-editor').value !== startingBuffer && !canSwitch()) return;
         qcmChapters = data.chapters; qcmTheme = ch; qcmScopeVersion++; renderQcmThemeSelect(); renderQcmEditorBuffer();
         input.value = '';
-      } else if (mode === 'ank' && theme === $('ank-admin-subject').value && version === ank.version && scope === ank.chapter) { ank.chapter = ch; await loadAnkimie(); input.value = ''; }
+      }
       showToast('Chapitre créé, inactif pour les élèves.');
     } catch (error) { showToast(error.message); }
-    finally { if (mode === 'qcm') setQcmControls(); else input.disabled = !ank.loaded; }
+    finally { setQcmControls(); }
   }
   function choiceValues(c) {
     return typeof c === 'string' ? { text: c, image: '', latex: '' } : { text: c.texte !== undefined ? c.texte : (c.text || ''), image: c.image || '', latex: c.latex || '' };
@@ -300,7 +260,7 @@
   }
   async function deleteQuestion(q) {
     if (!ready() || qcmSaving || dirty()) return;
-    if (!confirm('Supprimer définitivement cette question de la banque QCM ? Elle ne sera plus disponible dans ses collections Ankimie. Les révisions historiques sont conservées.')) return;
+    if (!confirm('Supprimer définitivement cette question de la banque QCM ? Elle ne sera plus disponible ni en QCM ni dans Ankimie. Les révisions historiques sont conservées.')) return;
     var theme = currentSubject(), version = qcmLoadVersion, scope = qcmScopeVersion; qcmSaving = true; setQcmControls();
     try {
       var data = await send('/api/admin/qcm/' + theme + '/questions/' + encodeURIComponent(q.qid), 'DELETE', { revision: qcmRevision });
@@ -317,20 +277,18 @@
     var ch = $('content-delete-destination').value;
     var row = deleteState.chapters.find(function (r) { return r.chapitre === ch; });
     $('content-delete-destination-status').textContent = 'Destination : ' + path(deleteState.theme, ch) + '. ' +
-      (row ? 'Les questions suivront les activations de ce chapitre : QCM ' + (row.qcm_active ? 'actif' : 'inactif') + ', Ankimie ' + (row.ankimie_active ? 'actif' : 'inactif') + '.' : 'Ce nouveau chapitre sera inactif pour les élèves.');
+      (row ? 'Les questions suivront l’activation de ce chapitre (QCM et Ankimie) : ' + (row.qcm_active ? 'actif' : 'inactif') + '.' : 'Ce nouveau chapitre sera inactif pour les élèves.');
   }
-  function openDeleteChapter(row, mode) {
-    if (mode === 'qcm' ? !ready() || qcmSaving || dirty() : !ank.loaded || ank.saving) return;
-    var theme = mode === 'qcm' ? currentSubject() : ank.theme;
-    var rows = mode === 'qcm' ? qcmChapters : ank.chapters;
-    deleteState = { mode: mode, theme: theme, chapter: row.chapitre, chapters: rows,
-      revision: mode === 'qcm' ? qcmRevision : ank.revision, version: mode === 'qcm' ? qcmLoadVersion : ank.version,
-      scope: mode === 'qcm' ? qcmScopeVersion : ank.chapter, saving: false };
+  function openDeleteChapter(row) {
+    if (!ready() || qcmSaving || dirty()) return;
+    var theme = currentSubject();
+    deleteState = { theme: theme, chapter: row.chapitre, chapters: qcmChapters,
+      revision: qcmRevision, version: qcmLoadVersion, scope: qcmScopeVersion, saving: false };
     $('content-delete-title').textContent = 'Supprimer ' + path(theme, row.chapitre);
     $('content-delete-effects').textContent = row.qcm_count ? plural(row.qcm_count, 'question sera conservée et déplacée', 'questions seront conservées et déplacées') + ' dans le chapitre choisi ci-dessous. Aucune question ne sera supprimée de la banque.' : 'Ce chapitre ne contient aucune question QCM. Il sera retiré de la liste des chapitres.';
-    $('content-delete-ankimie').textContent = 'La collection Ankimie « ' + row.chapitre + ' » sera retirée (' + plural(row.ankimie_count, 'carte', 'cartes') + '). Les autres collections restent conservées.' + (theme === 'chimie' && row.qcm_count ? ' Les questions déplacées rejoignent aussi la collection du chapitre de destination.' : '');
+    $('content-delete-ankimie').textContent = 'Ankimie suit automatiquement : les questions déplacées seront révisables selon l’activation du chapitre de destination.';
     var fallback = row.chapitre === 'Autre' ? 'À classer' : 'Autre';
-    var destinations = rows.filter(function (r) { return r.chapitre !== row.chapitre; }).map(function (r) { return r.chapitre; });
+    var destinations = qcmChapters.filter(function (r) { return r.chapitre !== row.chapitre; }).map(function (r) { return r.chapitre; });
     if (destinations.indexOf(fallback) === -1) destinations.push(fallback);
     $('content-delete-destination').innerHTML = destinations.map(function (ch) { return '<option value="' + esc(ch) + '">' + esc(ch) + '</option>'; }).join('');
     $('content-delete-destination').value = fallback;
@@ -344,27 +302,20 @@
     var controls = Array.from($('content-delete-form').querySelectorAll('button,select'));
     var destination = $('content-delete-destination').value;
     snapshot.saving = true; controls.forEach(function (el) { el.disabled = true; });
-    if (snapshot.mode === 'qcm') { qcmSaving = true; setQcmControls(); } else { ank.saving = true; renderAnkimie(); }
+    qcmSaving = true; setQcmControls();
     try {
       var data = await send('/api/admin/content/' + snapshot.theme + '/chapters', 'DELETE', { chapitre: snapshot.chapter, destination: destination, revision: snapshot.revision });
-      if (snapshot.mode === 'qcm') {
-        qcmSaving = false;
-        if (snapshot.theme === currentSubject() && snapshot.version === qcmLoadVersion && snapshot.scope === qcmScopeVersion) {
-          if (qcmTheme === snapshot.chapter) { qcmTheme = data.chapters.some(function (r) { return r.chapitre === destination; }) ? destination : ''; qcmScopeVersion++; }
-          acceptBank(data, snapshot.theme, snapshot.version, qcmScopeVersion);
-        }
-      } else if (snapshot.theme === ank.theme && snapshot.version === ank.version) {
-        if (ank.chapter === snapshot.chapter) ank.chapter = destination;
-        await loadAnkimie();
-        $('ank-content-status').textContent = 'Chapitre supprimé. Questions et historiques conservés.';
+      qcmSaving = false;
+      if (snapshot.theme === currentSubject() && snapshot.version === qcmLoadVersion && snapshot.scope === qcmScopeVersion) {
+        if (qcmTheme === snapshot.chapter) { qcmTheme = data.chapters.some(function (r) { return r.chapitre === destination; }) ? destination : ''; qcmScopeVersion++; }
+        acceptBank(data, snapshot.theme, snapshot.version, qcmScopeVersion);
       }
       $('content-delete-dialog').close(); deleteState = null;
       showToast('Chapitre supprimé. Questions et historiques conservés.');
     } catch (error) { $('content-delete-error').textContent = error.message; }
     finally {
       snapshot.saving = false; controls.forEach(function (el) { el.disabled = false; });
-      if (snapshot.mode === 'qcm') { qcmSaving = false; setQcmControls(); renderQuestions(); }
-      else if (snapshot.version === ank.version) { ank.saving = false; renderAnkimie(); }
+      qcmSaving = false; setQcmControls(); renderQuestions();
     }
   }
   function clearImport() { importVersion++; importDraft = null; $('qcm-import-result').textContent = ''; $('qcm-import-confirm').disabled = true; }
@@ -406,62 +357,7 @@
     }
     finally { qcmSaving = false; setQcmControls(); }
   }
-  async function loadAnkimie() {
-    var theme = $('ank-admin-subject').value, version = ++ank.version;
-    ank.theme = theme; ank.saving = true; ank.loaded = false;
-    $('ank-content-status').textContent = '';
-    $('ank-current-path').textContent = path(theme, ank.chapter, 'Choisir un chapitre');
-    $('ank-new-chapter').disabled = true;
-    empty($('ank-chapter-overview'), 'Chargement des chapitres…');
-    $('ank-admin-chapter').disabled = true; $('ank-open-picker').disabled = true; empty($('ank-collection-list'), 'Chargement des cartes…');
-    try {
-      var data = await api('/api/admin/ankimie/' + theme + '/collections?chapitre=' + encodeURIComponent(ank.chapter));
-      if (version !== ank.version || theme !== $('ank-admin-subject').value) return;
-      ank.questions = data.questions; ank.chapters = data.chapters; ank.revision = data.revision; ank.byChapter = data.included_by_chapter;
-      if (!ank.chapters.some(function (ch) { return ch.chapitre === ank.chapter; })) ank.chapter = ank.chapters.length ? ank.chapters[0].chapitre : '';
-      $('ank-admin-chapter').innerHTML = ank.chapters.map(function (ch) { return '<option value="' + esc(ch.chapitre) + '">' + esc(ch.chapitre) + ' (' + plural(ch.ankimie_count, 'carte', 'cartes') + ')</option>'; }).join('');
-      $('ank-admin-chapter').value = ank.chapter; ank.included = new Set(ank.byChapter[ank.chapter] || []); ank.page = 0; ank.pickerPage = 0; ank.saving = false; ank.loaded = true; renderAnkimie();
-    } catch (error) { if (version === ank.version) { empty($('ank-collection-list'), error.message + ' Clique sur « Recharger les cartes » pour réessayer.'); $('ank-content-status').textContent = error.message; } }
-    finally { if (version === ank.version) { ank.saving = false; $('ank-new-chapter').disabled = !ank.loaded; $('ank-admin-chapter').disabled = !ank.loaded; $('ank-open-picker').disabled = !ank.loaded || !ank.chapter; } }
-  }
-  async function membership(q, included) {
-    if (ank.saving || !ank.loaded || !ank.chapter) return;
-    var theme = ank.theme, ch = ank.chapter, version = ank.version;
-    ank.saving = true; renderAnkimie();
-    try {
-      await send('/api/admin/ankimie/' + theme + '/collections', 'PUT', { chapitre: ch, qid: q.qid, included: included, revision: ank.revision });
-      if (version === ank.version && theme === $('ank-admin-subject').value) { await loadAnkimie(); $('ank-content-status').textContent = included ? 'Carte ajoutée au chapitre.' : 'Carte retirée de ce chapitre. La banque et l’historique sont conservés.'; }
-    } catch (error) { if (version === ank.version) $('ank-content-status').textContent = error.message; }
-    finally { if (version === ank.version) { ank.saving = false; renderAnkimie(); } }
-  }
-  function renderAnkimie() {
-    var context = path(ank.theme, ank.chapter, 'Choisir un chapitre');
-    if (context !== lastAnkContext) { $('ank-content-status').textContent = ''; lastAnkContext = context; }
-    $('ank-current-path').textContent = context;
-    $('ank-chapters-summary').textContent = 'Chapitres de ' + names[ank.theme] + ' — gérer ou créer';
-    $('ank-picker-title').textContent = 'Ajouter des cartes à ' + context;
-    var search = $('ank-picker-search').value.trim();
-    $('ank-search-summary').textContent = 'Rechercher une carte pour ' + context + (search ? ' — filtre « ' + search + ' »' : '');
-    $('ank-search-clear').hidden = !search;
-    chaptersOverview($('ank-chapter-overview'), ank.chapters, ank.theme, ank.chapter, 'ank', function (ch) {
-      ank.version++; ank.chapter = ch; $('ank-admin-chapter').value = ch; ank.included = new Set(ank.byChapter[ch] || []); ank.page = 0; ank.pickerPage = 0; renderAnkimie();
-    });
-    $('ank-collection-title').textContent = ank.chapter ? ank.chapter + ' — ' + plural(ank.included.size, 'carte', 'cartes') : 'Cartes du chapitre';
-    var selected = ank.questions.filter(function (q) { return ank.included.has(q.qid); });
-    var available = ank.questions.filter(function (q) { return !ank.included.has(q.qid) && matches(q, $('ank-picker-search').value); });
-    [['ank-collection-list', 'ank-collection-pages', selected, 'page', false], ['ank-picker-list', 'ank-picker-pages', available, 'pickerPage', true]].forEach(function (entry) {
-      var target = $(entry[0]); target.innerHTML = ''; var page = Math.min(ank[entry[3]], Math.max(0, Math.ceil(entry[2].length / pageSize) - 1)); ank[entry[3]] = page;
-      if (!entry[2].length) empty(target, entry[4] ? (search ? 'Aucune carte à ajouter ne correspond à cette recherche. Efface la recherche pour voir les autres cartes.' : 'Aucune carte supplémentaire à ajouter. Tu peux créer des questions dans la rubrique QCM.') : 'Ce chapitre ne contient pas encore de carte. Utilise « Ajouter des cartes existantes ».');
-      entry[2].slice(page * pageSize, (page + 1) * pageSize).forEach(function (q) {
-        var card = questionCard(q), actions = document.createElement('div'); actions.className = 'content-toolbar';
-        var b = button(entry[4] ? 'Ajouter au chapitre' : 'Retirer de ce chapitre', function () { membership(q, entry[4]); }); b.disabled = ank.saving || !ank.chapter; actions.appendChild(b); card.appendChild(actions); target.appendChild(card);
-      });
-      paginate($(entry[1]), entry[2].length, page, function (p) { ank[entry[3]] = p; renderAnkimie(); }); typesetMathKatex(target);
-    });
-    $('ank-open-picker').disabled = !ank.loaded || !ank.chapter || ank.saving;
-    $('ank-admin-chapter').disabled = ank.saving || !ank.loaded;
-  }
-  window.contentAdmin = { render: render, canSwitch: canSwitch, hasDraft: dirty, createChapter: createChapter, loadAnkimie: loadAnkimie,
+  window.contentAdmin = { render: render, canSwitch: canSwitch, hasDraft: dirty, createChapter: createChapter,
     busy: function () { setQcmControls(); renderQuestions(); },
     loading: function () { clearImport(); setQcmControls(); updateQcmContext(); empty($('qcm-chapter-overview'), 'Chargement des chapitres…'); empty($('qcm-question-list'), 'Chargement de la banque…'); } };
   document.addEventListener('DOMContentLoaded', function () {
@@ -493,12 +389,5 @@
     $('content-question-form').oninput = function () { if (formState) formState.dirty = true; };
     ['content-question-close', 'content-question-cancel'].forEach(function (id) { $(id).onclick = closeQuestion; });
     $('content-question-dialog').addEventListener('cancel', function (event) { event.preventDefault(); closeQuestion(); });
-    $('ank-admin-subject').onchange = function () { ank.chapter = ''; $('ank-card-picker').hidden = true; loadAnkimie(); };
-    $('ank-admin-chapter').onchange = function () { ank.version++; ank.chapter = $('ank-admin-chapter').value; ank.included = new Set(ank.byChapter[ank.chapter] || []); ank.page = 0; ank.pickerPage = 0; renderAnkimie(); };
-    $('ank-create-chapter').onclick = function () { createChapter('ank'); }; $('ank-reload').onclick = loadAnkimie;
-    $('ank-open-picker').onclick = function () { $('ank-card-picker').hidden = false; renderAnkimie(); $('ank-close-picker').focus(); };
-    $('ank-close-picker').onclick = function () { $('ank-card-picker').hidden = true; };
-    $('ank-picker-search').oninput = function () { ank.pickerPage = 0; renderAnkimie(); };
-    $('ank-search-clear').onclick = function () { $('ank-picker-search').value = ''; ank.pickerPage = 0; renderAnkimie(); $('ank-picker-search').focus(); };
   });
 })();

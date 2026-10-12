@@ -1,4 +1,9 @@
-"""Chapter availability and Ankimie collections, separate from the QCM bank."""
+"""Chapter availability, separate from the QCM bank.
+
+Ankimie ne gere plus de collections : elle pioche automatiquement dans
+toutes les questions des chapitres actifs en QCM. L'interrupteur
+qcm_active pilote donc les deux applications d'un coup.
+"""
 from db import db, ensure_db
 
 
@@ -16,53 +21,37 @@ def settings():
         conn.close()
 
 
-def memberships():
-    ensure_db()
-    conn = db()
-    try:
-        return {(r['theme'], r['chapitre'], r['qid']): bool(r['included'])
-                for r in conn.execute('SELECT * FROM ankimie_memberships')}
-    finally:
-        conn.close()
-
-
 def qcm_is_active(theme, chapter, configuration):
     return bool(configuration.get((theme, chapter_name(chapter)), {}).get('qcm_active', 1))
 
 
-def collection_questions(theme, chapter, questions, associations):
-    """Legacy chemistry membership is implicit; explicit removals override it."""
-    return [q for q in questions if associations.get(
-        (theme, chapter, q['qid']),
-        theme == 'chimie' and chapter_name(q.get('chapitre')) == chapter)]
-
-
 def chapter_overview(theme, questions):
-    configuration, associations = settings(), memberships()
+    configuration = settings()
     chapters = {chapter_name(q.get('chapitre')) for q in questions}
     chapters.update(ch for t, ch in configuration if t == theme)
-    chapters.update(ch for t, ch, _ in associations if t == theme)
     out = []
     for ch in sorted(chapters, key=str.casefold):
         flags = configuration.get((theme, ch), {})
+        count = sum(chapter_name(q.get('chapitre')) == ch for q in questions)
+        active = bool(flags.get('qcm_active', 1))
         out.append({'chapitre': ch,
-                    'qcm_count': sum(chapter_name(q.get('chapitre')) == ch for q in questions),
-                    'ankimie_count': len(collection_questions(theme, ch, questions, associations)),
-                    'qcm_active': bool(flags.get('qcm_active', 1)),
-                    'ankimie_active': bool(flags.get('ankimie_active', theme == 'chimie'))})
+                    'qcm_count': count,
+                    # Collection Ankimie = le chapitre entier, automatiquement.
+                    'ankimie_count': count,
+                    'qcm_active': active,
+                    'ankimie_active': active})
     return out
 
 
 def ankimie_questions(banks, active_only=True):
-    configuration, associations = settings(), memberships()
+    """Toutes les questions des chapitres actifs en QCM, sans gestion."""
+    configuration = settings()
     selected = {}
     for theme, questions in banks.items():
-        chapters = {chapter_name(q.get('chapitre')) for q in questions}
-        chapters.update(ch for t, ch, _ in associations if t == theme)
-        for ch in sorted(chapters, key=str.casefold):
-            if active_only and not configuration.get((theme, ch), {}).get('ankimie_active', theme == 'chimie'):
+        for q in questions:
+            ch = chapter_name(q.get('chapitre'))
+            if active_only and not qcm_is_active(theme, ch, configuration):
                 continue
-            for q in collection_questions(theme, ch, questions, associations):
-                # One FSRS state per question, even if it belongs to two collections.
-                selected.setdefault(q['qid'], {**q, 'chapitre': ch})
+            # One FSRS state per question, even if it belongs to two themes.
+            selected.setdefault(q['qid'], {**q, 'chapitre': ch})
     return list(selected.values())
