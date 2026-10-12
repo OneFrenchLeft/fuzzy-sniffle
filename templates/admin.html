@@ -33,6 +33,9 @@
 .admin-workspace .subtab-bar button[aria-selected=true] {background:var(--surface);color:var(--primary);font-weight:800;box-shadow:0 1px 4px rgba(15,23,42,.10)}
 .admin-workspace .subtab-panel[hidden] {display:none!important}
 .admin-workspace .subtab-panel > .import-box {margin-top:0}
+.admin-workspace .atelier-qcm-head {display:flex;justify-content:space-between;align-items:end;gap:1rem;flex-wrap:wrap;margin-bottom:1rem}
+.admin-workspace .atelier-qcm-head .subtab-bar {margin:0}
+.admin-workspace .atelier-qcm-head .field {margin:0;min-width:160px}
 .admin-workspace .weak-toolbar {display:flex;align-items:center;gap:.9rem;margin-bottom:.6rem;flex-wrap:wrap}
 .admin-workspace .weak-selectall {display:flex;align-items:center;gap:.45rem;font-size:.85rem;font-weight:600;cursor:pointer;color:var(--text)}
 .admin-workspace .weak-sel-count {font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -109,10 +112,13 @@
         </div>
 
         </section><section class="atelier-view" id="atelier-qcm" hidden><div class="atelier-heading"><h2>Questions QCM</h2><p>Gérer la banque, tester un rendu, ou éditer en JSON.</p></div>
+        <div class="atelier-qcm-head">
         <div class="subtab-bar" role="tablist" aria-label="Éditeur QCM">
           <button type="button" role="tab" data-subtab="bank" aria-selected="true">Gérer les questions</button>
           <button type="button" role="tab" data-subtab="preview" aria-selected="false">Tester une question</button>
           <button type="button" role="tab" data-subtab="json" aria-selected="false">Édition avancée (JSON)</button>
+        </div>
+        <div class="field qcm-subject"><label for="qcm-subject-select">Matière</label><select id="qcm-subject-select"><option value="physique">Physique</option><option value="chimie">Chimie</option><option value="maths">Mathématiques</option></select></div>
         </div>
         <div class="subtab-panel" data-pane="bank" role="tabpanel">
         {% include 'admin_qcm_visual.html' %}
