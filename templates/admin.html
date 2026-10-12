@@ -26,6 +26,16 @@
 .admin-workspace .import-box {background:var(--surface)}
 .admin-workspace .btn-save,.admin-workspace .btn-ghost {max-width:max-content}
 .admin-workspace .weak-table {width:100%}
+/* Onglets internes d'un sous-menu (editeur QCM, resultats) */
+.admin-workspace .subtab-bar {display:flex;gap:.25rem;margin:0 0 1rem;padding:.3rem;background:color-mix(in srgb,var(--border) 30%,var(--surface));border-radius:var(--radius-lg);max-width:max-content}
+.admin-workspace .subtab-bar button {border:0;border-radius:var(--radius);padding:.5rem .95rem;font:inherit;font-weight:600;color:var(--muted);background:transparent;cursor:pointer;white-space:nowrap}
+.admin-workspace .subtab-bar button:hover {color:var(--text)}
+.admin-workspace .subtab-bar button[aria-selected=true] {background:var(--surface);color:var(--primary);font-weight:800;box-shadow:0 1px 4px rgba(15,23,42,.10)}
+.admin-workspace .subtab-panel[hidden] {display:none!important}
+.admin-workspace .subtab-panel > .import-box {margin-top:0}
+.admin-workspace .weak-toolbar {display:flex;align-items:center;gap:.9rem;margin-bottom:.6rem;flex-wrap:wrap}
+.admin-workspace .weak-selectall {display:flex;align-items:center;gap:.45rem;font-size:.85rem;font-weight:600;cursor:pointer;color:var(--text)}
+.admin-workspace .weak-sel-count {font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
 .admin-workspace :is(button,select,input,summary):focus-visible {outline:2px solid var(--primary);outline-offset:2px}
 /* Une fois connecte : plus d'effet carte, l'atelier prend presque tout
    l'ecran (marges laterales conservees). Avant connexion, la vue garde
@@ -98,10 +108,17 @@
         <div class="saved-msg" id="saved-msg">Parametres enregistrés</div>
         </div>
 
-        </section><section class="atelier-view" id="atelier-qcm" hidden><div class="atelier-heading"><h2>Banque de questions QCM</h2><p>Choisir une matière et un chapitre, gérer les questions puis décider ce qui est actif pour les élèves.</p></div>
+        </section><section class="atelier-view" id="atelier-qcm" hidden><div class="atelier-heading"><h2>Éditeur QCM</h2><p>La banque de questions : gérer, tester, importer.</p></div>
+        <div class="subtab-bar" role="tablist" aria-label="Éditeur QCM">
+          <button type="button" role="tab" data-subtab="bank" aria-selected="true">Banque de questions</button>
+          <button type="button" role="tab" data-subtab="preview" aria-selected="false">Tester une question</button>
+          <button type="button" role="tab" data-subtab="json" aria-selected="false">JSON avancé</button>
+        </div>
+        <div class="subtab-panel" data-pane="bank" role="tabpanel">
         {% include 'admin_qcm_visual.html' %}
-        <details class="content-advanced" id="qcm-advanced"><summary>Mode avancé — édition JSON</summary>
-        <p class="hint">Réservé aux utilisateurs expérimentés. Une modification incorrecte du JSON peut rendre certaines questions invalides. Pour une modification normale, utilisez l’éditeur visuel ci-dessus. Une liste vide retire les questions du périmètre sélectionné ; les autres chapitres sont conservés.</p>
+        </div>
+        <div class="subtab-panel" data-pane="json" role="tabpanel" hidden>
+        <p class="hint">Réservé aux utilisateurs expérimentés. Une modification incorrecte du JSON peut rendre certaines questions invalides. Pour une modification normale, utilise l’onglet « Banque de questions ». Une liste vide retire les questions du périmètre sélectionné ; les autres chapitres sont conservés.</p>
         <div class="import-box" id="qcm-editor-box">
           <div class="modal-topbar">
             <div>
@@ -146,7 +163,7 @@
             </span>
           </div>
 
-        </div><div class="import-box" id="qcm-preview-box">
+        </div></div><div class="subtab-panel" data-pane="preview" role="tabpanel" hidden><div class="import-box" id="qcm-preview-box">
       <div class="modal-topbar">
         <div>
           <h3>Tester une question QCM</h3>
@@ -205,7 +222,12 @@
           </p>
         </div>
       </div>
-    </div></details></section><section class="atelier-view" id="atelier-qcmstats" hidden><div class="atelier-heading"><h2>Résultats QCM</h2><p>Analyser les questions et retrouver les parties.</p></div><div class="import-box" id="qcm-weak-box">
+    </div></div></section><section class="atelier-view" id="atelier-qcmstats" hidden><div class="atelier-heading"><h2>Résultats QCM</h2><p>Questions à retravailler et historique des parties.</p></div>
+        <div class="subtab-bar" role="tablist" aria-label="Résultats QCM">
+          <button type="button" role="tab" data-subtab="weak" aria-selected="true">Questions les plus ratées</button>
+          <button type="button" role="tab" data-subtab="games" aria-selected="false">Parties récentes</button>
+        </div>
+        <div class="subtab-panel" data-pane="weak" role="tabpanel"><div class="import-box" id="qcm-weak-box">
           <h3>Questions QCM les plus ratées</h3>
           <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">
             Statistiques cumulées de toutes les QCM (tous élèves confondus).
@@ -229,10 +251,11 @@
           </div>
           <button type="button" class="btn-ghost btn-small" onclick="loadWeakQcm()">⟳ Recharger</button>
           <div id="qcm-weak-table" style="margin-top:.75rem"></div>
-        </div><div class="import-box" id="qcm-games-box">
-          <h3>Dernières parties QCM</h3>
+        </div></div><div class="subtab-panel" data-pane="games" role="tabpanel" hidden><div class="import-box" id="qcm-games-box">
+          <h3>Parties récentes</h3>
+          <p class="home-subtitle" style="text-align:left;margin-bottom:.5rem;font-size:.8rem">Les 15 dernières parties, les plus récentes en premier.</p>
           <div id="qcm-games-table" style="margin-top:.5rem"></div>
-        </div></section><section class="atelier-view" id="atelier-students" hidden><div class="atelier-heading"><h2>Élèves &amp; suivi</h2><p>Comptes, decks individuels, jokers et activité.</p></div><div class="import-box" id="eleves-box">
+        </div></div></section><section class="atelier-view" id="atelier-students" hidden><div class="atelier-heading"><h2>Élèves &amp; suivi</h2><p>Comptes, decks individuels, jokers et activité.</p></div><div class="import-box" id="eleves-box">
           <div class="fields-grid">
             <div class="field" style="grid-column:1/-1"><label for="new-prenom">Ajouter un élève</label><input type="text" id="new-prenom" placeholder="Ex: Lea"></div>
           </div>
@@ -279,6 +302,16 @@ function open(key){
   if(key==='ankimie'&&window.contentAdmin)window.contentAdmin.loadAnkimie();
 }
 buttons.forEach(function(b){b.addEventListener('click',function(){open(b.dataset.atelier);});});
+// Onglets internes d'un sous-menu (Éditeur QCM, Résultats QCM).
+root.querySelectorAll('.subtab-bar').forEach(function(bar){
+  var scope=bar.closest('.atelier-view');if(!scope)return;
+  bar.querySelectorAll('[data-subtab]').forEach(function(b){
+    b.addEventListener('click',function(){
+      bar.querySelectorAll('[data-subtab]').forEach(function(x){x.setAttribute('aria-selected',x===b?'true':'false');});
+      scope.querySelectorAll(':scope > .subtab-panel').forEach(function(p){p.hidden=p.dataset.pane!==b.dataset.subtab;});
+    });
+  });
+});
 })();</script></div>
     </div>
   </section>

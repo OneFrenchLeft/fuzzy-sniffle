@@ -1105,7 +1105,12 @@ function renderWeakQcm() {
     box.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">Aucune question pour ce filtre.</p>';
     return;
   }
-  var html = '<table class="weak-table">' +
+  var html = '<div class="weak-toolbar">' +
+    '<label class="weak-selectall"><input type="checkbox" id="weak-select-all"> Tout sélectionner</label>' +
+    '<span class="weak-sel-count" id="weak-sel-count" aria-live="polite"></span>' +
+    '<button class="btn-ghost btn-small" onclick="resetQcmSelection()">Réinitialiser la sélection</button>' +
+    '</div>';
+  html += '<table class="weak-table">' +
     '<thead><tr><th>Question</th><th title="Nombre de fois où la carte a été posée (tous joueurs confondus)">Sorties</th>' +
     '<th>Taux d\'échec</th><th title="Remet les compteurs admin a zero (l\'historique eleve est conserve)">Réinitialiser</th></tr></thead><tbody>';
   weakQcmRows.forEach(function (r) {
@@ -1147,7 +1152,6 @@ function renderWeakQcm() {
       '</tr>';
   });
   html += '</tbody></table>';
-  html += '<p style="margin-top:.4rem"><button class="btn-ghost btn-small" onclick="resetQcmSelection()">Réinitialiser la sélection</button></p>';
   if (weakQcmRows.every(function (r) { return r.sorties === 0; })) {
     html += '<p class="hint" style="margin-top:.4rem">Aucune partie enregistrée pour l\'instant : les compteurs démarrent à la prochaine partie.</p>';
   }
@@ -1156,6 +1160,25 @@ function renderWeakQcm() {
     html += '<p style="margin-top:.4rem"><button class="btn-ghost btn-small" onclick="purgeQcmRetired()">Purger les ' + retiredCount + ' question' + (retiredCount > 1 ? 's' : '') + ' retiree' + (retiredCount > 1 ? 's' : '') + '</button></p>';
   }
   box.innerHTML = html;
+  // « Tout sélectionner » + compteur de sélection (remise a zero des stats).
+  var allCb = document.getElementById('weak-select-all');
+  var rowCbs = box.querySelectorAll('.qcm-reset-cb');
+  function updateWeakSelCount() {
+    var n = box.querySelectorAll('.qcm-reset-cb:checked').length;
+    var el = document.getElementById('weak-sel-count');
+    if (el) el.textContent = n ? (n + ' sélectionnée' + (n > 1 ? 's' : '')) : '';
+    if (allCb) {
+      allCb.checked = n > 0 && n === rowCbs.length;
+      allCb.indeterminate = n > 0 && n < rowCbs.length;
+    }
+  }
+  if (allCb) {
+    allCb.onchange = function () {
+      rowCbs.forEach(function (cb) { cb.checked = allCb.checked; });
+      updateWeakSelCount();
+    };
+  }
+  rowCbs.forEach(function (cb) { cb.addEventListener('change', updateWeakSelCount); });
   typesetMath(box);
 }
 
