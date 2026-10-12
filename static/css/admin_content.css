@@ -60,7 +60,7 @@ html[data-theme=dark] .content-field-error{color:#fda4af}
 .qcm-chapters{position:sticky;top:5rem;border:1px solid var(--border);border-radius:var(--radius);padding:.75rem;background:var(--surface);min-width:0}
 .qcm-chapters h3{margin:0 0 .5rem;font-size:1rem}
 .qcm-chapters .content-toolbar{margin:.75rem 0 0}
-.qcm-chapters .content-overview,.qcm-chapters .content-help{margin:.75rem 0 0}
+.qcm-chapters .content-help{margin:.75rem 0 0}
 .content-chapters-compact{display:grid;grid-template-columns:1fr;gap:.1rem;margin-top:.5rem;max-height:52vh;overflow:auto}
 .chapter-row{display:flex;align-items:center;gap:.35rem;padding:.15rem .25rem;border-radius:var(--radius)}
 .chapter-row:hover{background:color-mix(in srgb,var(--primary) 6%,var(--surface))}

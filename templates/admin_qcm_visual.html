@@ -6,12 +6,11 @@
       <button type="button" class="btn-save btn-small" id="qcm-add-question">＋ Nouvelle question</button>
       <button type="button" class="btn-ghost btn-small" id="qcm-open-import">Importer</button>
       <button type="button" class="btn-ghost btn-small" onclick="if(contentAdmin.canSwitch()) loadQcmEditor()">⟳ Recharger</button>
-      <button type="button" class="btn-ghost btn-small" id="qcm-search-clear" hidden>Effacer la recherche</button>
     </div>
   </div>
   <div class="qcm-body">
     <aside class="qcm-chapters" aria-label="Chapitres">
-      <h3 id="qcm-chapters-summary">Chapitres</h3>
+      <h3>Chapitres</h3>
       <select id="qcm-theme-select" hidden><option value="">Tous les chapitres</option></select>
       <div id="qcm-chapter-overview" class="content-chapters content-chapters-compact"></div>
       <div class="content-toolbar" id="qcm-new-theme-row">
@@ -19,7 +18,6 @@
         <button type="button" class="btn-ghost btn-small" onclick="createQcmTheme()">Créer</button>
       </div>
       <details class="content-help"><summary>Comment fonctionne l’activation ?</summary><p class="hint">Disponible ne signifie pas actif pour les élèves. Désactiver conserve les questions et l’historique. Les nouveaux chapitres sont inactifs. QCM et Ankimie ont des activations indépendantes.</p></details>
-      <details class="content-overview"><summary>Matières disponibles</summary><div id="content-subject-overview" class="content-chapters" aria-label="Matières disponibles"></div></details>
     </aside>
     <div class="qcm-content">
       <div class="qcm-list-head">

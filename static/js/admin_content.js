@@ -4,7 +4,6 @@
   var $ = function (id) { return document.getElementById(id); };
   var names = { physique: 'Physique', chimie: 'Chimie', maths: 'Mathématiques' };
   var pageSize = 20, qPage = 0, lastBuffer = '', importDraft = null, formState = null;
-  var overviewLoaded = false;
   var importVersion = 0, jsonFileVersion = 0;
   var activationPending = { qcm: false, ank: false };
   var deleteState = null;
@@ -142,23 +141,6 @@
       actions.append(view, remove); card.appendChild(actions); target.appendChild(card);
     });
   }
-  function loadSubjectOverview() {
-    if (overviewLoaded) return; overviewLoaded = true;
-    api('/api/admin/content/subjects').then(function (data) {
-      var target = $('content-subject-overview'); target.innerHTML = '';
-      data.subjects.forEach(function (subject) {
-        var card = document.createElement('div'); card.className = 'content-chapter'; card.dataset.subject = subject.theme;
-        var h = document.createElement('h4'); h.textContent = names[subject.theme];
-        var p = document.createElement('p'); p.className = 'hint'; p.textContent = subject.error ? 'Banque à vérifier : ' + subject.error : plural(subject.count, 'question', 'questions') + ' · ' + plural(subject.chapters.length, 'chapitre', 'chapitres'); card.append(h, p); target.appendChild(card);
-      });
-      if (ready()) updateSubjectCount(currentSubject(), qcmFullList.length, qcmChapters.length);
-      if (ank.loaded && ank.theme !== currentSubject()) updateSubjectCount(ank.theme, ank.questions.length, ank.chapters.length);
-    }).catch(function () { overviewLoaded = false; });
-  }
-  function updateSubjectCount(theme, count, chapters) {
-    var card = Array.from($('content-subject-overview').children).find(function (el) { return el.dataset.subject === theme; });
-    if (card) card.querySelector('p').textContent = plural(count, 'question', 'questions') + ' · ' + plural(chapters, 'chapitre', 'chapitres');
-  }
   function setQcmControls() {
     var disabled = !ready() || qcmSaving;
     ['qcm-theme-select', 'qcm-add-question', 'qcm-open-import', 'qcm-question-search', 'qcm-new-theme-input'].forEach(function (id) { $(id).disabled = disabled; });
@@ -167,7 +149,7 @@
   }
   function renderQuestions() {
     var target = $('qcm-question-list'); target.innerHTML = '';
-    updateQcmContext();
+    updateQcmContext(); $('qcm-search-summary').textContent = '';
     if (!ready()) { empty(target, 'La banque n’a pas été chargée. Clique sur « Recharger la banque » pour réessayer.'); return; }
     var questions = qcmFullList.filter(function (q) { return !qcmTheme || chapter(q) === qcmTheme; });
     if (dirty()) {
@@ -178,8 +160,10 @@
       catch (_) { empty(target, 'Les modifications avancées ne peuvent pas être prévisualisées. Corrige-les ou recharge la banque.'); return; }
     }
     questions = questions.filter(function (q) { return q && typeof q === 'object' && matches(q, $('qcm-question-search').value); });
+    var search = $('qcm-question-search').value.trim();
+    if (search) $('qcm-search-summary').textContent = plural(questions.length, 'résultat', 'résultats') + ' pour « ' + search + ' »';
     qPage = Math.min(qPage, Math.max(0, Math.ceil(questions.length / pageSize) - 1));
-    if (!questions.length) empty(target, $('qcm-question-search').value.trim() ? 'Aucune question ne correspond à cette recherche. Efface la recherche pour retrouver les questions du chapitre.' : 'Aucune question dans ce périmètre. Ajoute une question ou importe un fichier.');
+    if (!questions.length) empty(target, search ? 'Aucune question ne correspond à cette recherche. Efface la recherche pour retrouver les questions du chapitre.' : 'Aucune question dans ce périmètre. Ajoute une question ou importe un fichier.');
     questions.slice(qPage * pageSize, (qPage + 1) * pageSize).forEach(function (q) {
       var card = questionCard(q), actions = document.createElement('div'); actions.className = 'content-toolbar';
       var edit = button('Modifier', function () { openQuestion(q, false); });
@@ -194,19 +178,13 @@
     lastBuffer = $('qcm-json-editor').value; qPage = 0; clearImport();
     var searchScope = path(currentSubject(), qcmTheme);
     if (searchScope !== qSearchScope) { $('qcm-question-search').value = ''; qSearchScope = searchScope; }
-    setQcmControls(); loadSubjectOverview(); updateSubjectCount(currentSubject(), qcmFullList.length, qcmChapters.length);
-    updateQcmContext();
+    setQcmControls();
     chaptersOverview($('qcm-chapter-overview'), qcmChapters, currentSubject(), qcmTheme, 'qcm', function (ch) {
       if (!canSwitch()) return; qcmTheme = ch; qcmScopeVersion++; $('qcm-theme-select').value = ch; renderQcmEditorBuffer();
     }); renderQuestions();
   }
   function updateQcmContext() {
-    var context = path(currentSubject(), qcmTheme);
-    $('qcm-current-path').textContent = context;
-    var search = $('qcm-question-search').value.trim();
-    $('qcm-search-summary').textContent = 'Rechercher dans ' + context + (search ? ' — filtre « ' + search + ' »' : '');
-    $('qcm-search-clear').hidden = !search;
-    $('qcm-chapters-summary').textContent = 'Chapitres de ' + names[currentSubject()] + ' — gérer ou créer';
+    $('qcm-current-path').textContent = path(currentSubject(), qcmTheme);
   }
   function canSwitch() { return !dirty() || confirm('Des modifications avancées ne sont pas enregistrées. Les abandonner pour changer de matière ou de chapitre ?'); }
   function acceptBank(data, subject, version, scope) {
@@ -457,7 +435,6 @@
     finally { if (version === ank.version) { ank.saving = false; renderAnkimie(); } }
   }
   function renderAnkimie() {
-    updateSubjectCount(ank.theme, ank.questions.length, ank.chapters.length);
     var context = path(ank.theme, ank.chapter, 'Choisir un chapitre');
     if (context !== lastAnkContext) { $('ank-content-status').textContent = ''; lastAnkContext = context; }
     $('ank-current-path').textContent = context;
@@ -491,7 +468,6 @@
     if (!$('qcm-visual')) return;
     $('qcm-add-question').onclick = function () { openQuestion(null, false); };
     $('qcm-question-search').oninput = function () { qPage = 0; renderQuestions(); };
-    $('qcm-search-clear').onclick = function () { $('qcm-question-search').value = ''; qPage = 0; renderQuestions(); $('qcm-question-search').focus(); };
     $('qcm-json-editor').addEventListener('input', function () { setQcmControls(); renderQuestions(); });
     $('content-question-chapter').onchange = questionTitle;
     $('content-delete-form').onsubmit = deleteChapter;
