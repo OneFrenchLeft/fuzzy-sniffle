@@ -46,23 +46,38 @@ html[data-theme=dark] .content-field-error{color:#fda4af}
 #qcm-editor-status{min-height:1.5rem;text-align:left}
 #qcm-import-result{margin:1rem 0}
 #qcm-visual button:disabled,#ank-content button:disabled{opacity:.5;cursor:wait}
-/* Editeur QCM « Gerer les questions » : contenu a gauche, chapitres a droite */
-.qcm-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:1.2rem;align-items:start}
-.qcm-main{min-width:0}
-.qcm-context{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.75rem;align-items:end}
-.qcm-context .field{margin:0}
-.qcm-actions{margin:.6rem 0 .75rem}
-.qcm-side{position:sticky;top:5rem;display:grid;gap:.75rem;align-content:start;min-width:0}
-.qcm-side-card{border:1px solid var(--border);border-radius:var(--radius);padding:1rem;background:var(--surface)}
-.qcm-side-card h3{margin:0 0 .75rem;font-size:1rem}
-.qcm-side .content-chapters{grid-template-columns:1fr;max-height:46vh;overflow:auto;margin-top:.5rem}
-.qcm-side .content-toolbar{margin:.25rem 0}
-.qcm-side .content-overview,.qcm-side .content-help{margin:0}
+/* Editeur QCM « Gerer les questions » : barre d'outils en haut, chapitres a gauche, questions a droite */
+.qcm-toolbar{display:flex;align-items:end;gap:.6rem;flex-wrap:wrap;margin:0 0 1rem}
+.qcm-toolbar .field{margin:0}
+.qcm-toolbar button{min-height:44px}
+.qcm-subject{min-width:150px}
+.qcm-search{flex:1;min-width:min(100%,200px)}
+.qcm-toolbar-actions{display:flex;gap:.6rem;flex-wrap:wrap;align-items:end}
+.qcm-body{display:grid;grid-template-columns:280px minmax(0,1fr);gap:1.2rem;align-items:start}
+.qcm-content{min-width:0}
+.qcm-list-head{display:flex;justify-content:space-between;align-items:baseline;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem}
+.qcm-list-head .content-path,.qcm-list-head .hint{margin:0}
+.qcm-chapters{position:sticky;top:5rem;border:1px solid var(--border);border-radius:var(--radius);padding:.75rem;background:var(--surface);min-width:0}
+.qcm-chapters h3{margin:0 0 .5rem;font-size:1rem}
+.qcm-chapters .content-toolbar{margin:.75rem 0 0}
+.qcm-chapters .content-overview,.qcm-chapters .content-help{margin:.75rem 0 0}
+.content-chapters-compact{display:grid;grid-template-columns:1fr;gap:.1rem;margin-top:.5rem;max-height:52vh;overflow:auto}
+.chapter-row{display:flex;align-items:center;gap:.35rem;padding:.15rem .25rem;border-radius:var(--radius)}
+.chapter-row:hover{background:color-mix(in srgb,var(--primary) 6%,var(--surface))}
+.chapter-row.selected{background:color-mix(in srgb,var(--primary) 10%,var(--surface));box-shadow:inset 3px 0 0 var(--primary)}
+.chapter-pick{flex:1;display:flex;justify-content:space-between;align-items:center;gap:.5rem;border:0;background:none;font:inherit;color:inherit;cursor:pointer;text-align:left;padding:.45rem .4rem;min-height:40px;min-width:0}
+.chapter-pick:disabled{cursor:default}
+.chapter-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chapter-count{flex-shrink:0;font-size:.8rem;color:var(--muted);background:var(--bg);border:1px solid var(--border);border-radius:999px;padding:.05rem .5rem}
+.chapter-toggle{display:flex;align-items:center;flex-shrink:0;cursor:pointer;min-height:44px;padding:0 .15rem}
+.chapter-toggle input{width:18px;height:18px;accent-color:var(--primary)}
+.chapter-del{visibility:hidden;flex-shrink:0;border:0;background:none;font-size:1.1rem;line-height:1;cursor:pointer;padding:.3rem .45rem;border-radius:var(--radius)}
+.chapter-row:hover .chapter-del,.chapter-row:focus-within .chapter-del{visibility:visible}
 #content-question-dialog button:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:1000px){
-  .qcm-grid{grid-template-columns:1fr}
-  .qcm-side{position:static}
-  .qcm-side .content-chapters{max-height:none}
+  .qcm-body{grid-template-columns:1fr}
+  .qcm-chapters{position:static}
+  .content-chapters-compact{max-height:none}
   #admin-form .admin-workspace .atelier-shell{grid-template-columns:minmax(0,1fr)}
   #admin-form .admin-workspace .atelier-nav{display:flex;flex-wrap:nowrap;gap:.4rem;align-items:center;overflow-x:auto;max-height:none;position:sticky;top:4.3125rem;z-index:9;padding:.5rem;overscroll-behavior-x:contain}
   #admin-form .admin-workspace .atelier-nav h2,#admin-form .admin-workspace .atelier-nav small{display:none}

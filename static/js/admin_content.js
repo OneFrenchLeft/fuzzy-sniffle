@@ -63,6 +63,52 @@
   function chaptersOverview(target, rows, theme, selected, mode, choose) {
     target.innerHTML = '';
     if (!rows.length) { empty(target, 'Aucun chapitre disponible. Crée le premier chapitre ci-dessous.'); return; }
+    if (target.classList.contains('content-chapters-compact')) {
+      var total = rows.reduce(function (sum, row) { return sum + row.qcm_count; }, 0);
+      var allRow = document.createElement('div'); allRow.className = 'chapter-row' + (selected === '' ? ' selected' : '');
+      var allPick = document.createElement('button'); allPick.type = 'button'; allPick.className = 'chapter-pick';
+      allPick.disabled = selected === '';
+      allPick.onclick = function () { if (mode !== 'ank' || !ank.saving) choose(''); };
+      var allName = document.createElement('span'); allName.className = 'chapter-name'; allName.textContent = 'Tous les chapitres';
+      var allCount = document.createElement('span'); allCount.className = 'chapter-count'; allCount.textContent = plural(total, 'question', 'questions');
+      allPick.append(allName, allCount); allRow.appendChild(allPick); target.appendChild(allRow);
+      rows.forEach(function (row) {
+        var line = document.createElement('div'); line.className = 'chapter-row' + (row.chapitre === selected ? ' selected' : '');
+        var pick = document.createElement('button'); pick.type = 'button'; pick.className = 'chapter-pick';
+        pick.disabled = row.chapitre === selected;
+        pick.onclick = function () { if (mode !== 'ank' || !ank.saving) choose(row.chapitre); };
+        var name = document.createElement('span'); name.className = 'chapter-name'; name.textContent = row.chapitre;
+        var count = document.createElement('span'); count.className = 'chapter-count'; count.textContent = row.qcm_count;
+        pick.append(name, count); line.appendChild(pick);
+        var label = document.createElement('label'); label.className = 'chapter-toggle'; label.title = 'Actif pour les élèves (' + (mode === 'qcm' ? 'QCM' : 'Ankimie') + ')';
+        var toggle = document.createElement('input'); toggle.type = 'checkbox';
+        var flag = mode === 'qcm' ? 'qcm_active' : 'ankimie_active'; toggle.checked = row[flag];
+        toggle.disabled = activationPending[mode];
+        label.appendChild(toggle); line.appendChild(label);
+        toggle.onchange = async function () {
+          if (activationPending[mode]) return;
+          var value = toggle.checked, version = mode === 'qcm' ? qcmLoadVersion : ank.version;
+          activationPending[mode] = true;
+          target.querySelectorAll('input[type=checkbox]').forEach(function (input) { input.disabled = true; });
+          try {
+            var payload = { chapitre: row.chapitre }; payload[flag] = value;
+            var data = await send('/api/admin/content/' + theme + '/chapters', 'PUT', payload);
+            if (mode === 'qcm' && version === qcmLoadVersion && theme === currentSubject()) {
+              qcmChapters = data.chapters; chaptersOverview(target, qcmChapters, theme, qcmTheme, mode, choose);
+            } else if (mode === 'ank' && version === ank.version && theme === ank.theme) {
+              ank.chapters = data.chapters; renderAnkimie();
+            }
+            showToast(value ? 'Chapitre activé pour les élèves.' : 'Chapitre désactivé. Contenu et historique conservés.');
+          } catch (error) { toggle.checked = !value; showToast(error.message); }
+          finally { activationPending[mode] = false; target.querySelectorAll('input[type=checkbox]').forEach(function (input) { input.disabled = false; }); }
+        };
+        var del = document.createElement('button'); del.type = 'button'; del.className = 'chapter-del content-danger'; del.textContent = '×'; del.title = 'Supprimer le chapitre';
+        del.onclick = function () { openDeleteChapter(row, mode); };
+        del.disabled = mode === 'qcm' ? qcmSaving || dirty() : ank.saving;
+        line.appendChild(del); target.appendChild(line);
+      });
+      return;
+    }
     rows.forEach(function (row) {
       var card = document.createElement('article'); card.className = 'content-chapter' + (row.chapitre === selected ? ' selected' : '');
       var h = document.createElement('h4'); h.textContent = row.chapitre;
