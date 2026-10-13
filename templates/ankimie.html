@@ -6,6 +6,7 @@
       <h1 class="page-title">Ankimie</h1>
       <div class="page-header-actions">
         <div class="ank-count" id="ank-progress" role="status" aria-live="polite"></div>
+        <button id="ank-undo" class="btn-ghost btn-small" type="button" style="display:none" onclick="undoAnkReview()" title="Annuler la dernière note (Ctrl+Z)">↩ Annuler</button>
         <button class="info-btn" type="button" onclick="openAnkimieInfoModal()" aria-label="Aide Ankimie">i</button>
       </div>
     </div>
@@ -17,6 +18,9 @@
   </section>
 {% endblock %}
 {% block modals %}
+<div class="modal-overlay" id="img-zoom-overlay" onclick="cm('img-zoom-overlay')" style="cursor:zoom-out">
+  <img id="img-zoom-img" src="" alt="Image agrandie" style="max-width:94vw;max-height:92vh;object-fit:contain;border-radius:var(--radius);background:var(--surface);padding:.5rem">
+</div>
 <div class="modal-overlay" id="ank-info-overlay">
   <div class="modal-box">
     <div class="modal-topbar">
@@ -27,7 +31,8 @@
     <p style="margin-bottom:1rem;line-height:1.55">
       Lis la question, réponds dans ta tête, puis révèle la bonne réponse et compare.
       Évalue honnêtement ta réussite : la carte reviendra au moment où tu risques de l'oublier.
-      Astuce : <strong>Espace</strong> pour révéler, <strong>1 à 4</strong> pour noter.
+      Astuce : <strong>Espace</strong> pour révéler, <strong>1 à 4</strong> pour noter,
+      <strong>Ctrl+Z</strong> pour annuler la dernière note en cas de misclic.
     </p>
 
     <div class="sr-help-grid">

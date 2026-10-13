@@ -306,6 +306,25 @@ def init_db():
     if 'choice' not in qcm_ans_cols:
         conn.execute("ALTER TABLE qcm_answers ADD COLUMN choice INTEGER")
 
+    qcm_rev_cols = [r[1] for r in conn.execute("PRAGMA table_info(qcm_sr_reviews)").fetchall()]
+    if 'duration_seconds' not in qcm_rev_cols:
+        conn.execute("ALTER TABLE qcm_sr_reviews ADD COLUMN duration_seconds INTEGER")
+
+    # Undo Ankimie : etat FSRS precedent la derniere review de chaque eleve
+    # (une seule profondeur) pour "annuler la derniere note".
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ankimie_undo ("
+        "prenom TEXT PRIMARY KEY,"
+        "review_id INTEGER NOT NULL,"
+        "qid TEXT NOT NULL,"
+        "prev_stability REAL, prev_difficulty REAL, prev_state TEXT,"
+        "prev_last_review TEXT, prev_next_review TEXT,"
+        "prev_repetitions INTEGER, prev_lapses INTEGER,"
+        "prev_last_retrievability REAL,"
+        "created_at TEXT NOT NULL"
+        ")"
+    )
+
     conn.execute('CREATE INDEX IF NOT EXISTS idx_reviews_prenom_date ON reviews(prenom, created_at)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_qcm_prenom_ok ON qcm_answers(prenom, ok)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_streak_prenom_day ON sr_daily_streak(prenom, day)')

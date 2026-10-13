@@ -605,7 +605,12 @@ def admin_suivi_eleve(prenom):
 
     ank = conn.execute(
         "SELECT COUNT(*) AS total, SUM(correct) AS bonnes, "
-        "SUM(CASE WHEN substr(created_at,1,10)=? THEN 1 ELSE 0 END) AS today "
+        "SUM(CASE WHEN substr(created_at,1,10)=? THEN 1 ELSE 0 END) AS today, "
+        "SUM(CASE WHEN result='again' THEN 1 ELSE 0 END) AS again, "
+        "SUM(CASE WHEN result='hard' THEN 1 ELSE 0 END) AS hard, "
+        "SUM(CASE WHEN result='good' THEN 1 ELSE 0 END) AS good, "
+        "SUM(CASE WHEN result='easy' THEN 1 ELSE 0 END) AS easy, "
+        "AVG(duration_seconds) AS avg_dur, SUM(duration_seconds) AS total_dur "
         "FROM qcm_sr_reviews WHERE prenom=?", (today_s, prenom)).fetchone()
     ank_due = conn.execute(
         "SELECT COUNT(*) AS c FROM qcm_sr_state WHERE prenom=? AND (next_review IS NULL OR next_review<=?)",
@@ -657,6 +662,10 @@ def admin_suivi_eleve(prenom):
         'ankimie': {
             'total': ank['total'], 'today': ank['today'] or 0,
             'taux': pct(ank['bonnes'], ank['total']), 'due': ank_due,
+            'again': ank['again'] or 0, 'hard': ank['hard'] or 0,
+            'good': ank['good'] or 0, 'easy': ank['easy'] or 0,
+            'avg_duration': round(ank['avg_dur']) if ank['avg_dur'] is not None else None,
+            'total_minutes': round((ank['total_dur'] or 0) / 60),
         },
         'qcm': {
             'total': qcm['total'], 'today': qcm['today'] or 0,

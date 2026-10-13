@@ -632,6 +632,8 @@ html[data-theme=dark] .search-wrap:focus-within{box-shadow:0 0 0 3px rgba(45,212
 .rate-interval{font-size:.72rem;font-weight:500;opacity:.75;font-variant-numeric:tabular-nums;min-height:.9em}
 .ank-end{max-width:680px;margin:2rem auto;text-align:center;padding:2rem 1rem;border:1.5px dashed var(--border);border-radius:1rem}
 .ank-end-title{font-size:1.25rem;font-weight:700;margin-bottom:.5rem}
+.ank-end-grades{display:flex;gap:.9rem;justify-content:center;flex-wrap:wrap;margin:.6rem 0}
+.ank-end-grade{font-weight:800;font-size:1.05rem;font-variant-numeric:tabular-nums;padding:.2rem .55rem;border-radius:.6rem;background:var(--surface);border:1px solid var(--border)}
 
 /* Shared usability: preserve the existing cards, colours and page structure. */
 .panel,.sr-item,.public-card,.ank-card,.field{min-width:0}
