@@ -185,7 +185,7 @@ def review_questions(prenom, themes, n, chapitres=None):
     pool.sort(key=lambda q: last_wrong.get(q.get('qid'), ''), reverse=True)
     return pool[:n]
 
-def pick_questions(themes=None, n=QCM_QUESTIONS_PER_MATCH, chapitres=None):
+def pick_questions(themes=None, n=QCM_QUESTIONS_PER_MATCH, chapitres=None, exclude=None):
     if not themes:
         themes = list(QCM_FILES)
     pool = []
@@ -201,6 +201,13 @@ def pick_questions(themes=None, n=QCM_QUESTIONS_PER_MATCH, chapitres=None):
                 wanted.add((str(pair[0]), str(pair[1])))
         pool = [(t, q) for t, q in pool if (t, q.get('chapitre', 'Autre')) in wanted]
     questions = [q for _, q in pool]
+    if exclude:
+        # Anti-repetition entre parties du meme lobby : on ecarte les questions
+        # posees recemment, mais seulement si le pool restant permet encore de
+        # faire une partie complete (sinon mieux vaut une repetition).
+        fresh = [q for q in questions if q.get('qid') not in exclude]
+        if len(fresh) >= n:
+            questions = fresh
     random.shuffle(questions)
     return questions[:n]
 
@@ -276,6 +283,10 @@ class Lobby:
         self.nb_questions = QCM_QUESTIONS_PER_MATCH
         self.etat = 'attente'
         self.game = None
+        # qids des questions posees lors des 2 dernieres parties (anti-
+        # repetition ; ne s'applique pas au mode revision, volontairement
+        # centre sur les erreurs passees).
+        self.recent_qids = []
 
     def room(self):
         return f'room_{self.lid}'
@@ -350,9 +361,30 @@ class Game:
         self.delayed = getattr(lobby, 'delayed_feedback', False)
         self.retry_queue = []
         self.feedback_buffer = []
+        # Anti-triche : chaque joueur voit les boutons dans un ordre different.
+        # perms[prenom][qindex] = permutation, position affichee i -> index
+        # d'origine perm[i]. Generee paresseusement (les reposes en fin de
+        # session ont droit a un nouvel ordre).
+        self.perms = {}
+
+    def _perm_for(self, prenom, qindex):
+        per_player = self.perms.setdefault(prenom, {})
+        perm = per_player.get(qindex)
+        if perm is None:
+            perm = list(range(len(self.questions[qindex]['choices'])))
+            random.shuffle(perm)
+            per_player[qindex] = perm
+        return perm
 
     def send_all(self, event, payload):
         io.emit(event, payload, room=self.gid)
+
+    def send_each(self, event, payload_fn):
+        """Envoie un payload personnalise a chaque joueur (via son sid)."""
+        for player in list(self.joueurs):
+            sid = PRESENT.get(player, {}).get('sid')
+            if sid:
+                io.emit(event, payload_fn(player), room=sid)
 
     def remove_player(self, prenom):
         if prenom in self.joueurs:
@@ -360,13 +392,15 @@ class Game:
             self.answers.pop(prenom, None)
             self.scores.pop(prenom, None)
 
-    def current_payload(self):
+    def current_payload(self, prenom):
         if not (0 <= self.qindex < len(self.questions)):
             return None
         question = self.questions[self.qindex]
+        perm = self._perm_for(prenom, self.qindex)
         return {
             'gid': self.gid, 'q': self.qindex + 1, 'total': len(self.questions),
-            'question': question['question'], 'choix': question['choices'],
+            'question': question['question'],
+            'choix': [question['choices'][i] for i in perm],
             'temps': question['time'], 'image': question['image'],
             'phase': 'ouverture' if self.opened else 'lecture',
             'ends_at': self.open_end, 'now': time.time(),
@@ -392,7 +426,8 @@ class Game:
 
                 self.open_end = time.time() + QCM_READ_TIME_S + question['time']
 
-                self.send_all('qcm_question', {**self.current_payload(), 'phase': 'lecture'})
+                self.send_each('qcm_question',
+                               lambda p: {**self.current_payload(p), 'phase': 'lecture'})
                 print(f'[qcm-web] {self.gid} q{self.qindex + 1}/{len(self.questions)} lecture')
                 io.sleep(QCM_READ_TIME_S)
                 if not self.alive or not self.joueurs:
@@ -402,7 +437,8 @@ class Game:
                 self.qstart = time.monotonic()
 
                 self.open_end = time.time() + question['time']
-                self.send_all('qcm_question', {**self.current_payload(), 'phase': 'ouverture'})
+                self.send_each('qcm_question',
+                               lambda p: {**self.current_payload(p), 'phase': 'ouverture'})
                 print(f'[qcm-web] {self.gid} q{self.qindex + 1} ouverture ({question["time"]} s)')
 
                 remaining = self.open_end - time.time()
@@ -447,13 +483,17 @@ class Game:
                         'explication': question.get('explication', ''),
                     })
                 else:
-                    self.send_all('qcm_reveal', {
-                        'gid': self.gid, 'q': self.qindex + 1, 'correct': correct,
-                        'bonne': question['choices'][correct], 'detail': detail,
-                        'scores': self.scores,
-                        'cloturee_tot': cloturee_tot,
-                        'explication': question.get('explication', ''),
-                    })
+                    def reveal_payload(player, question=question, correct=correct,
+                                       detail=detail, cloturee_tot=cloturee_tot):
+                        return {
+                            'gid': self.gid, 'q': self.qindex + 1,
+                            'correct': self._perm_for(player, self.qindex).index(correct),
+                            'bonne': question['choices'][correct], 'detail': detail,
+                            'scores': self.scores,
+                            'cloturee_tot': cloturee_tot,
+                            'explication': question.get('explication', ''),
+                        }
+                    self.send_each('qcm_reveal', reveal_payload)
                     print(f'[qcm-web] {self.gid} q{self.qindex + 1} reveal '
                           f'(anticipée={cloturee_tot}), scores={self.scores}')
                 self.qindex += 1
@@ -477,11 +517,21 @@ class Game:
                                  [{'prenom': p, 'score': s} for p, s in classement])
                 except Exception:
                     pass
-            self.send_all('qcm_fin', {
-                'gid': self.gid,
-                'podium': [{'prenom': p, 'score': s} for p, s in classement],
-                'corrections': self.feedback_buffer,
-            })
+            podium = [{'prenom': p, 'score': s} for p, s in classement]
+
+            def fin_payload(player, podium=podium):
+                # Feedback differe : l'index de la bonne reponse est traduit
+                # dans l'ordre d'affichage propre a ce joueur.
+                corrections = []
+                for item in self.feedback_buffer:
+                    corrections.append({
+                        'q': item['q'],
+                        'correct': self._perm_for(player, item['q'] - 1).index(item['correct']),
+                        'explication': item['explication'],
+                    })
+                return {'gid': self.gid, 'podium': podium, 'corrections': corrections}
+
+            self.send_each('qcm_fin', fin_payload)
             print(f'[qcm-web] {self.gid} fin: {classement}')
         except Exception as exc:
             import traceback
@@ -512,7 +562,18 @@ def try_start_lobby(lobby):
     if lobby.review_mode:
         questions = review_questions(lobby.leader, lobby.themes, lobby.nb_questions, lobby.chapitres)
     else:
-        questions = pick_questions(lobby.themes, lobby.nb_questions, lobby.chapitres)
+        exclude = set().union(*lobby.recent_qids) if lobby.recent_qids else set()
+        questions = pick_questions(lobby.themes, lobby.nb_questions, lobby.chapitres, exclude=exclude)
+    if not questions:
+        cible = ' + '.join(lobby.themes) if lobby.themes else 'tous thèmes'
+        if lobby.chapitres:
+            cible += ' · ' + ' + '.join(f'{t} : {c}' for t, c in lobby.chapitres)
+        io.emit('qcm_error',
+                {'message': f"Aucune question valide pour {cible}."},
+                room=lobby.room())
+        return
+    lobby.recent_qids.append({q['qid'] for q in questions if q.get('qid')})
+    lobby.recent_qids[:] = lobby.recent_qids[-2:]
     if not questions:
         cible = ' + '.join(lobby.themes) if lobby.themes else 'tous thèmes'
         if lobby.chapitres:
@@ -591,7 +652,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
                 'total': len(game.questions), 'theme': game.theme,
                 'media': questions_media(game.questions), 'resync': True,
             }, room=request.sid)
-            payload = game.current_payload()
+            payload = game.current_payload(prenom)
             if payload:
                 payload['deja_repondu'] = prenom in game.answers
                 io.emit('qcm_question', payload, room=request.sid)
@@ -872,13 +933,17 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
             return {'ok': False, 'raison': 'phase de lecture'}
         if prenom in game.answers:
             return {'ok': False, 'raison': 'déjà répondu'}
-        if not (0 <= choice < len(question['choices'])):
+        # Le client envoie la POSITION du bouton chez lui ; on la traduit en
+        # index du choix d'origine via sa permutation personnelle.
+        perm = game._perm_for(prenom, game.qindex)
+        if not (0 <= choice < len(perm)):
             return {'ok': False, 'raison': 'choix invalide'}
+        original = perm[choice]
         elapsed = time.monotonic() - game.qstart
         if elapsed > question['time'] + 1.5:
             return {'ok': False, 'raison': 'trop tard'}
-        game.answers[prenom] = (choice, elapsed)
-        print(f'[qcm-web] {game.gid} réponse de {prenom}: choix {choice} en {elapsed:.1f} s')
+        game.answers[prenom] = (original, elapsed)
+        print(f'[qcm-web] {game.gid} réponse de {prenom}: choix {original} en {elapsed:.1f} s')
 
         if len(game.answers) >= len(game.joueurs):
             game.answer_event.set()
