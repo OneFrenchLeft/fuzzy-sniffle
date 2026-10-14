@@ -1,22 +1,43 @@
 # -*- coding: utf-8 -*-
 """Pages publiques, erreurs, entetes de securite, fichiers servis."""
 from flask import Blueprint, render_template, request, jsonify, session, send_from_directory, make_response, abort
-from config import TEMPLATES, STATIC, DATA, UPLOADS, read_params, write_params, CHAPITRES
+from config import TEMPLATES, STATIC, DATA, UPLOADS, read_params, write_params, CHAPITRES, module_enabled
 import os
 from auth import require_admin
 
 bp = Blueprint('views', __name__)
 
+@bp.app_context_processor
+def inject_modules():
+    """Interrupteurs de modules disponibles dans tous les templates (nav)."""
+    p = read_params()
+    return {'modules': {
+        'forgecards': bool(p.get('module_forgecards', 1)),
+        'ankimie': bool(p.get('module_ankimie', 1)),
+        'qcm': bool(p.get('module_qcm', 1)),
+    }}
+
+def _module_off(module, label):
+    if module_enabled(module):
+        return None
+    return render_template('module_off.html', active='', module_label=label)
+
 @bp.route('/')
 def home():
+    off = _module_off('forgecards', 'Les Forgecards')
+    if off: return off
     return render_template('index.html', active='tirage')
 
 @bp.route('/sr')
 def page_sr():
+    off = _module_off('forgecards', 'Les Forgecards')
+    if off: return off
     return render_template('sr.html', active='sr')
 
 @bp.route('/liste')
 def page_liste():
+    off = _module_off('forgecards', 'Les Forgecards')
+    if off: return off
     return render_template('liste.html', active='liste')
 
 @bp.route('/compte')
@@ -35,6 +56,8 @@ def favicon():
 def qcm_page():
     if not session.get('sr_user'):
         return render_template('index.html')
+    off = _module_off('qcm', 'Les QCM')
+    if off: return off
     return render_template('qcm.html', prenom=session['sr_user'], active='qcm')
 
 
@@ -42,6 +65,8 @@ def qcm_page():
 def page_ankimie():
     if not session.get('sr_user'):
         return render_template('index.html')
+    off = _module_off('ankimie', 'Ankimie')
+    if off: return off
     return render_template('ankimie.html', active='ankimie')
 
 @bp.route('/qcm-images/<path:filename>')

@@ -33,7 +33,7 @@
   };
   </script>
   <script defer src="{{ url_for('static', filename='mathjax/tex-svg.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/app.js', v=43) }}" defer></script>
+  <script src="{{ url_for('static', filename='js/app.js', v=44) }}" defer></script>
   {% block extra_head %}{% endblock %}
 </head>
 <body data-page="{{ active }}"{% if active != 'admin' %} class="public-app"{% endif %}>
@@ -45,11 +45,17 @@
 </button>
 <nav class="nav" id="main-nav">
 <div class="nav-title">Forgecards</div>
+{% if modules.forgecards %}
 <a class="nav-btn {{ 'active' if active == 'tirage' }}" href="/" {{ 'aria-current=page' if active == 'tirage' }}>Simulation de kholle</a>
 <a class="nav-btn {{ 'active' if active == 'liste' }}" href="/liste" {{ 'aria-current=page' if active == 'liste' }}>Forgecards</a>
 <a class="nav-btn auth-only {{ 'active' if active == 'sr' }}" href="/sr" {{ 'aria-current=page' if active == 'sr' }} hidden>Répétition espacée</a>
+{% endif %}
+{% if modules.ankimie %}
 <a class="nav-btn auth-only {{ 'active' if active == 'ankimie' }}" href="/ankimie" {{ 'aria-current=page' if active == 'ankimie' }} hidden>Ankimie</a>
+{% endif %}
+{% if modules.qcm %}
 <a class="nav-btn auth-only" href="/qcm" hidden>QCM</a>
+{% endif %}
 <div class="nav-separator"></div>
 <a class="nav-btn {{ 'active' if active == 'compte' }}" data-view="compte" href="/compte" {{ 'aria-current=page' if active == 'compte' }}>Espace compte</a>
 <button class="nav-btn auth-only" onclick="logoutSr()" hidden>Déconnexion</button>

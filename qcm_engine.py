@@ -560,6 +560,9 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_join_page')
     def on_join_page():
+        from config import module_enabled
+        if not module_enabled('qcm'):
+            return False
         prenom = session.get('sr_user')
         print(f'[qcm-web] join: prenom={prenom!r} sid={request.sid}')
         if not prenom:

@@ -3,7 +3,7 @@
 from flask import Blueprint, render_template, request, session, redirect
 import secrets
 from datetime import datetime, timedelta
-from config import QCM_INVITE_TTL_MINUTES, now_paris
+from config import QCM_INVITE_TTL_MINUTES, now_paris, module_enabled
 from db import db, ensure_db, log_event
 
 bp = Blueprint('qcm_invites', __name__)
@@ -100,6 +100,8 @@ def get_valid_qcm_invite(token):
 @bp.route('/qcm/join/<token>', methods=['GET'])
 def qcm_join_with_invite(token):
     # Small: GET only checks the token; it must not consume it.
+    if not module_enabled('qcm'):
+        return render_template('module_off.html', active='', module_label='Les QCM'), 404
     row, error, status = get_valid_qcm_invite(token)
 
     if error:
@@ -117,6 +119,8 @@ def qcm_join_with_invite(token):
 @bp.route('/qcm/join/<token>', methods=['POST'])
 def consume_qcm_invite(token):
     # Ethan: Actual consumption belongs here, not in the confirmation page.
+    if not module_enabled('qcm'):
+        return render_template('module_off.html', active='', module_label='Les QCM'), 404
     ensure_db()
 
     now = now_paris()

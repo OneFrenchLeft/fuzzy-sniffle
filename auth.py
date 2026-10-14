@@ -61,6 +61,21 @@ def require_sr_user(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+def require_module(name):
+    """404 JSON si le module est desactive dans les parametres admin.
+
+    L'admin garde toujours acces (ses routes de stats/gestion ne sont pas
+    bloquees) : le toggle ne concerne que l'usage eleve.
+    """
+    def deco(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if not config.module_enabled(name):
+                return jsonify({'ok': False, 'error': 'module désactivé'}), 404
+            return fn(*args, **kwargs)
+        return wrapper
+    return deco
+
 @bp.route('/api/login', methods=['POST'])
 def login():
     ip = request.remote_addr or 'unknown'

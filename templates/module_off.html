@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Module désactivé{% endblock %}
+{% block content %}
+  <section class="view active">
+    <div class="ank-end" style="margin-top:3rem">
+      <div class="ank-end-title">🚧 {{ module_label }} ne sont pas activés</div>
+      <p>Ce module a été désactivé par l'enseignant pour cette classe.</p>
+      <p class="meta"><a href="/compte">Aller à l'espace compte</a></p>
+    </div>
+  </section>
+{% endblock %}

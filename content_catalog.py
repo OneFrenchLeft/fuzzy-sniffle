@@ -1,14 +1,27 @@
 """Chapter availability, separate from the QCM bank.
 
 Ankimie ne gere plus de collections : elle pioche automatiquement dans
-toutes les questions des chapitres actifs en QCM. L'interrupteur
-qcm_active pilote donc les deux applications d'un coup.
+toutes les questions des chapitres actifs en QCM, dans les matieres
+choisies dans les parametres admin. L'interrupteur qcm_active pilote
+donc les deux applications d'un coup.
 """
 from db import db, ensure_db
+from config import read_params
 
 
 def chapter_name(value):
     return str(value or '').strip() or 'Autre'
+
+
+def ankimie_subjects():
+    """Matieres piochees par Ankimie (parametre admin, defaut ['chimie'])."""
+    try:
+        subs = read_params().get('ankimie_subjects', ['chimie'])
+        if isinstance(subs, list):
+            return subs
+    except Exception:
+        pass
+    return ['chimie']
 
 
 def settings():
@@ -27,6 +40,7 @@ def qcm_is_active(theme, chapter, configuration):
 
 def chapter_overview(theme, questions):
     configuration = settings()
+    in_ankimie = theme in ankimie_subjects()
     chapters = {chapter_name(q.get('chapitre')) for q in questions}
     chapters.update(ch for t, ch in configuration if t == theme)
     out = []
@@ -36,23 +50,22 @@ def chapter_overview(theme, questions):
         active = bool(flags.get('qcm_active', 1))
         out.append({'chapitre': ch,
                     'qcm_count': count,
-                    # Collection Ankimie = le chapitre entier, chimie uniquement.
-                    'ankimie_count': count if theme == 'chimie' else 0,
+                    # Collection Ankimie = le chapitre entier, matieres choisies.
+                    'ankimie_count': count if in_ankimie else 0,
                     'qcm_active': active,
-                    'ankimie_active': active if theme == 'chimie' else False})
+                    'ankimie_active': active if in_ankimie else False,
+                    'ankimie_theme': in_ankimie})
     return out
 
 
 def ankimie_questions(banks, active_only=True):
-    """Toutes les questions CHIMIE des chapitres actifs en QCM, sans gestion.
-
-    Ankimie est et reste un deck chimie : les autres matieres ne sont jamais
-    piochees, meme si leurs chapitres sont actifs en QCM.
-    """
+    """Toutes les questions des chapitres actifs en QCM, dans les matieres
+    Ankimie choisies par l'admin (parametre ankimie_subjects)."""
     configuration = settings()
+    subjects = set(ankimie_subjects())
     selected = {}
     for theme, questions in banks.items():
-        if theme != 'chimie':
+        if theme not in subjects:
             continue
         for q in questions:
             ch = chapter_name(q.get('chapitre'))

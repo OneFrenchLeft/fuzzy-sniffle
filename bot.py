@@ -33,7 +33,7 @@ NOTIF_ROLE_NAME = os.environ.get('MADEC_NOTIF_ROLE', 'Notifications')
 REMINDER_HOUR = int(os.environ.get('MADEC_REMINDER_HOUR', '21'))
 GUILD_ID = os.environ.get('MADEC_GUILD_ID')
 SITE_URL = os.environ.get('MADEC_SITE_URL', 'https://madec.moyart.net')
-DEFAULT_PARAMS = {'max_active_num': 36, 'daily_new_limit': 3, 'daily_review_limit': 3}
+DEFAULT_PARAMS = {'max_active_num': 36, 'daily_new_limit': 3, 'daily_review_limit': 3, 'reminder_hour': None}
 JOKER_CAP = 2
 JOKER_EVERY = 4
 BOT_EXCLUDED_PRENOMS = frozenset({'admin'})
@@ -1051,9 +1051,16 @@ async def _post(path, payload, timeout=10):
     return await asyncio.to_thread(_do)
 
 
-@tasks.loop(time=dtime(hour=REMINDER_HOUR, minute=1, tzinfo=TZ_PARIS))
+# La boucle se reveille a chaque heure:01 et relit l'heure cible dans
+# params.json a chaque reveil : le reglage admin (onglet Parametres) est
+# pris en compte sans redemarrage du bot. Fallback : MADEC_REMINDER_HOUR.
+@tasks.loop(time=[dtime(hour=h, minute=1, tzinfo=TZ_PARIS) for h in range(24)])
 async def daily_reminder():
     params = read_params()
+    configured = params.get('reminder_hour')
+    target_hour = configured if isinstance(configured, int) else REMINDER_HOUR
+    if datetime.now(TZ_PARIS).hour != target_hour:
+        return
     conn = fc_db()
     bots = bot_db()
     links = bots.execute(
@@ -1200,7 +1207,7 @@ async def rotate_status():
         msg_count = "1 personne n'a pas fait ses cartes aujourd'hui"
     else:
         msg_count = f"{n} personnes n'ont pas fait leurs cartes aujourd'hui"
-    messages = [msg_count, 'Va bosser → https://madec.moyart.net']
+    messages = [msg_count, f'Va bosser → {SITE_URL}']
     rotate_status.i = (getattr(rotate_status, 'i', 0) + 1) % len(messages)
     await client.change_presence(activity=discord.CustomActivity(name=messages[rotate_status.i]))
 

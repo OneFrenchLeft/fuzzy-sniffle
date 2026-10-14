@@ -2,12 +2,19 @@
 """Weighted random draw of cards."""
 from flask import Blueprint, jsonify, request, session
 import random
-from config import read_params, DRAW_HISTORY_KEEP, now_paris
+from config import read_params, DRAW_HISTORY_KEEP, now_paris, module_enabled
 from db import db, ensure_db, log_event
 from helpers import card_label, interleave_by_chapitre
 from auth import rate_limited
 
 bp = Blueprint('draw', __name__)
+
+@bp.before_request
+def _module_guard():
+    """Interrupteur admin : le tirage depend du module forgecards."""
+    if not module_enabled('forgecards'):
+        return jsonify({'ok': False, 'error': 'module désactivé'}), 404
+    return None
 
 # Impulse: The draw page is public by design, but every draw writes to
 # draw_history (weekly recap stats) and events. A generous per-IP budget

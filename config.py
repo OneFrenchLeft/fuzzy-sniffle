@@ -56,6 +56,15 @@ DEFAULT_PARAMS = {
     # Retention cible propre a Ankimie (le deck QCM a des cartes plus petites
     # que les forgecards : on peut viser un rythme different).
     'ankimie_retention': 0.90,
+    # Heure du rappel Discord quotidien (lues par le bot a chaque declenchement).
+    'reminder_hour': 21,
+    # Interrupteurs de modules (export multi-classes : chaque classe active
+    # ce qu'elle utilise). 1 = actif, 0 = desactive.
+    'module_forgecards': 1,
+    'module_ankimie': 1,
+    'module_qcm': 1,
+    # Matieres piochees par Ankimie (sous-ensemble des cles de QCM_FILES).
+    'ankimie_subjects': ['chimie'],
     "previous_chapter_bonus": 0.2,
     "last_chapter_bonus": 0.9,
     "teacher_difficulty_weight": 0.15
@@ -135,6 +144,17 @@ def read_params():
                 out[k] = max(0, int(data.get(k, default)))
             elif k in ('fsrs_retention', 'ankimie_retention'):
                 out[k] = min(max(float(data.get(k, default)), 0.80), 0.97)
+            elif k == 'reminder_hour':
+                out[k] = min(max(int(data.get(k, default)), 0), 23)
+            elif k in ('module_forgecards', 'module_ankimie', 'module_qcm'):
+                out[k] = 1 if int(data.get(k, default)) else 0
+            elif k == 'ankimie_subjects':
+                raw = data.get(k, default)
+                if not isinstance(raw, list):
+                    raw = default
+                # Ne garder que les matieres connues ; liste vide = deck vide
+                # (choix admin explicite), valeur invalide = repli au defaut.
+                out[k] = [t for t in raw if t in QCM_FILES]
             else:
                 out[k] = float(data.get(k, default))
         except (TypeError, ValueError):
@@ -182,4 +202,12 @@ def write_params(data):
 
 def gen_emoji_password():
     return [secrets.choice(EMOJI_KEYPAD) for _ in range(EMOJI_PW_LENGTH)]
+
+
+def module_enabled(name):
+    """Interrupteur de module ('forgecards', 'ankimie', 'qcm'). Defaut : actif."""
+    try:
+        return bool(int(read_params().get('module_' + name, 1)))
+    except (TypeError, ValueError):
+        return True
 

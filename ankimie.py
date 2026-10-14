@@ -14,13 +14,17 @@ from flask import Blueprint, jsonify, request, session
 from config import QCM_FILES, GRADE_MAP_FR, now_paris, read_params
 from db import db, ensure_db, log_event
 from fsrs import apply_review, preview_all_grades, humanize_interval
-from auth import require_sr_user, require_admin
+from auth import require_sr_user, require_admin, require_module
 import qcm_engine
 
 bp = Blueprint('ankimie', __name__)
 
-# Deck fixe : chimie uniquement (voir content_catalog.ankimie_questions).
-ANKIMIE_DECK = 'chimie'
+
+def _deck_label():
+    """Label informatif du deck (matieres piochees), pour les reponses API."""
+    from content_catalog import ankimie_subjects
+    subs = ankimie_subjects()
+    return '/'.join(subs) if subs else 'aucune'
 
 # preview_all_grades est clefe par ses labels internes ; l'API expose les cles
 # FR attendues par le client (boutons d'auto-evaluation).
@@ -63,6 +67,7 @@ def _ensure_states(conn, prenom, today):
 
 
 @bp.route('/api/ankimie/today', methods=['GET'])
+@require_module('ankimie')
 @require_sr_user
 def ankimie_today():
     """File du jour : toutes les revisions dues + nouvelles dans la limite du quota.
@@ -107,7 +112,7 @@ def ankimie_today():
         })
     return jsonify({
         'ok': True,
-        'deck': ANKIMIE_DECK,
+        'deck': _deck_label(),
         'cards': cards,
         'new_done_today': new_done,
         'new_limit': new_limit,
@@ -116,6 +121,7 @@ def ankimie_today():
 
 
 @bp.route('/api/ankimie/<qid>/answer', methods=['GET'])
+@require_module('ankimie')
 @require_sr_user
 def ankimie_answer(qid):
     """Revelation : bonne reponse + explication + intervalles prevus.
@@ -154,6 +160,7 @@ def ankimie_answer(qid):
 
 
 @bp.route('/api/ankimie/<qid>/review', methods=['POST'])
+@require_module('ankimie')
 @require_sr_user
 def ankimie_review(qid):
     """Auto-evaluation 4 boutons -> FSRS. `chosen` = index du choix de l'eleve."""
@@ -230,6 +237,7 @@ def ankimie_review(qid):
 
 
 @bp.route('/api/ankimie/undo', methods=['POST'])
+@require_module('ankimie')
 @require_sr_user
 def ankimie_undo():
     """Annule la derniere review de l'eleve : restaure l'etat FSRS d'avant
@@ -394,6 +402,6 @@ def ankimie_stats():
     forecast = [{'d': d, 'n': n} for d, n in sorted(buckets.items())]
 
     conn.close()
-    return jsonify({'ok': True, 'deck': ANKIMIE_DECK, 'students': students,
+    return jsonify({'ok': True, 'deck': _deck_label(), 'students': students,
                     'chapters': chapters, 'questions': weak,
                     'retention_reelle': retention_reelle, 'forecast': forecast})

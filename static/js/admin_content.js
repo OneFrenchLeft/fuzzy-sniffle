@@ -76,7 +76,7 @@
       var name = document.createElement('span'); name.className = 'chapter-name'; name.textContent = row.chapitre;
       var count = document.createElement('span'); count.className = 'chapter-count'; count.textContent = row.qcm_count;
       pick.append(name, count); line.appendChild(pick);
-      var label = document.createElement('label'); label.className = 'chapter-toggle'; label.title = 'Actif pour les élèves (' + (theme === 'chimie' ? 'QCM et Ankimie' : 'QCM') + ')';
+      var label = document.createElement('label'); label.className = 'chapter-toggle'; label.title = 'Actif pour les élèves (' + (rows.some(function (r) { return r.ankimie_theme; }) ? 'QCM et Ankimie' : 'QCM') + ')';
       var toggle = document.createElement('input'); toggle.type = 'checkbox';
       toggle.checked = row.qcm_active;
       toggle.disabled = activationPending;
@@ -91,7 +91,7 @@
           if (version === qcmLoadVersion && theme === currentSubject()) {
             qcmChapters = data.chapters; chaptersOverview(target, qcmChapters, theme, qcmTheme, choose);
           }
-          showToast(value ? (theme === 'chimie' ? 'Chapitre activé pour les élèves (QCM et Ankimie).' : 'Chapitre activé pour les élèves.') : 'Chapitre désactivé partout. Contenu et historique conservés.');
+          showToast(value ? (data.chapters.some(function (r) { return r.ankimie_theme; }) ? 'Chapitre activé pour les élèves (QCM et Ankimie).' : 'Chapitre activé pour les élèves.') : 'Chapitre désactivé partout. Contenu et historique conservés.');
         } catch (error) { toggle.checked = !value; showToast(error.message); }
         finally { activationPending = false; target.querySelectorAll('input[type=checkbox]').forEach(function (input) { input.disabled = false; }); }
       };

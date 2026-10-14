@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, request, session
 from fsrs import apply_review, preview_all_grades, humanize_interval
 from config import (GRADE_MAP_FR, MAX_NOTE_LENGTH, QCM_FILES, QCM_WEAK_LIMIT,
-                    now_paris, read_params)
+                    now_paris, read_params, module_enabled)
 from db import db, ensure_db, log_event, csv_safe, csv_response
 from helpers import card_label, card_exists, interleave_by_chapitre, parse_duration_seconds
 from replay import replay_reviews, get_user_weights
@@ -14,6 +14,15 @@ import qcm_engine
 import io, csv
 
 bp = Blueprint('sr', __name__)
+
+@bp.before_request
+def _module_guard():
+    """Interrupteurs admin : les routes SR relevant des forgecards, les
+    sous-routes /qcm/ relevant du module QCM."""
+    mod = 'qcm' if (request.path.startswith('/api/sr/qcm/') or request.path == '/api/qcm/last-states') else 'forgecards'
+    if not module_enabled(mod):
+        return jsonify({'ok': False, 'error': 'module désactivé'}), 404
+    return None
 
 def ensure_sr_row(conn, prenom, numero):
     # Small: Create the state lazily; no reason to pre-fill the whole table.

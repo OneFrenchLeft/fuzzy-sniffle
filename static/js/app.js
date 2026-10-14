@@ -785,6 +785,17 @@ function loadParams() {
     if (newEl) newEl.value = p.daily_new_limit != null ? p.daily_new_limit : 3;
     var revEl = document.getElementById('f-daily-review');
     if (revEl) revEl.value = p.daily_review_limit != null ? p.daily_review_limit : 3;
+    var rhEl = document.getElementById('f-reminder-hour');
+    if (rhEl) rhEl.value = p.reminder_hour != null ? p.reminder_hour : 21;
+    ['forgecards', 'ankimie', 'qcm'].forEach(function (m) {
+      var el = document.getElementById('f-module-' + m);
+      if (el) el.checked = p['module_' + m] !== 0;
+    });
+    var subs = p.ankimie_subjects || ['chimie'];
+    ['physique', 'chimie', 'maths'].forEach(function (t) {
+      var el = document.getElementById('f-ank-subj-' + t);
+      if (el) el.checked = subs.indexOf(t) !== -1;
+    });
   }).catch(function (e) { console.error(e); });
 }
 function saveParams() {
@@ -803,6 +814,17 @@ function saveParams() {
     daily_new_limit: newEl ? newEl.value : 3,
     daily_review_limit: reviewEl ? reviewEl.value : 3,
   };
+  var rhEl = document.getElementById('f-reminder-hour');
+  if (rhEl && rhEl.value !== '') body.reminder_hour = parseInt(rhEl.value, 10);
+  ['forgecards', 'ankimie', 'qcm'].forEach(function (m) {
+    var el = document.getElementById('f-module-' + m);
+    if (el) body['module_' + m] = el.checked ? 1 : 0;
+  });
+  var ankSubs = ['physique', 'chimie', 'maths'].filter(function (t) {
+    var el = document.getElementById('f-ank-subj-' + t);
+    return el && el.checked;
+  });
+  if (document.getElementById('f-ank-subj-chimie')) body.ankimie_subjects = ankSubs;
   fetchJson('/api/params', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function () {
       ['saved-msg', 'ank-saved-msg'].forEach(function (id) {
