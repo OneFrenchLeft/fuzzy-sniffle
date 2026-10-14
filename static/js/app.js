@@ -70,9 +70,18 @@ function fetchJson(url, opts) {
 }
 
 function fetchWithStatus(url, opts) {
-  return fetch(url, opts).then(function (r) {
-    return r.json().then(function (d) { return { status: r.status, data: d }; });
-  });
+  var controller = new AbortController();
+  var timer = setTimeout(function () { controller.abort(); }, 10000);
+  return fetch(url, Object.assign({}, opts, { signal: controller.signal })).then(function (r) {
+    return r.json().catch(function () {
+      // Un proxy ou une page d'erreur Flask peut répondre en HTML.
+      // Ne pas afficher le contenu reçu, ni perdre les modifications locales.
+      var message = r.status === 401 ? 'Session admin expirée : reconnecte-toi.'
+        : r.status >= 400 ? 'Réponse du serveur incorrecte (erreur ' + r.status + '). Réessaie sans fermer tes modifications.'
+        : 'Réponse invalide du serveur. Réessaie sans fermer tes modifications.';
+      return { ok: false, error: message };
+    }).then(function (d) { return { status: r.status, data: d }; });
+  }).finally(function () { clearTimeout(timer); });
 }
 
 function adminAction(url, method, onOk, failMsg) {
@@ -191,7 +200,7 @@ function flashStatus(elId, message, isError, ms) {
   el.style.color = isError ? '#c0392b' : 'var(--primary)';
   el.classList.add('show');
   clearTimeout(flashTimers[elId]);
-  flashTimers[elId] = setTimeout(function () { el.classList.remove('show'); }, ms);
+  if (ms > 0) flashTimers[elId] = setTimeout(function () { el.classList.remove('show'); }, ms);
 }
 
 function om(id) { var el = document.getElementById(id); if (el) el.classList.add('open'); }
@@ -240,8 +249,10 @@ function closeMobileNav() {
 }
 
 function loadCompteDashboard() {
-  loadSrQcmErrors();
   if (PAGE !== 'compte' || !currentSrUser) return;
+  loadSrQcmErrors();
+  // Ces blocs ne sont rendus que lorsque leurs modules sont activés.
+  if (!document.getElementById('compte-dash')) return;
   fetchJson('/api/sr/dashboard').then(function (d) {
     if (!d || !d.ok) return;
     var set = function (id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
@@ -526,7 +537,7 @@ function checkPw() {
       document.getElementById('view-admin').classList.add('admin-on');
 
       loadChapitres().then(function () {
-        loadParams();
+        loadParams().then(function (loaded) { if (loaded) loadQcmEditor(); });
         loadAdminList();
         loadStats();
         loadWeakCards();
@@ -548,7 +559,6 @@ function checkPw() {
             qcmTheme = themeSelect.value; qcmScopeVersion++; renderQcmEditorBuffer();
           });
         }
-        loadQcmEditor();
       });
 
       loadWeakQcm();
@@ -768,7 +778,7 @@ function loadQcmPreviewExample() {
 }
 
 function loadParams() {
-  fetchJson('/api/params').then(function (p) {
+  return fetchJson('/api/params').then(function (p) {
     params = p;
     document.getElementById('f-max-active').value = p.max_active_num;
     var hsMaxEl = document.getElementById('f-max-hs');
@@ -832,7 +842,12 @@ function loadParams() {
         ankBox.appendChild(lab);
       });
     }
-  }).catch(function (e) { console.error(e); });
+    return p;
+  }).catch(function (e) {
+    console.error(e);
+    qcmEditorStatus('Impossible de charger les matières et les réglages. Recharge la page pour réessayer.', true);
+    return null;
+  });
 }
 function saveParams() {
   var retentionEl = document.getElementById('f-fsrs-retention');
@@ -882,7 +897,17 @@ function saveParams() {
     });
 }
 
-function qcmEditorStatus(message, isError) { flashStatus('qcm-editor-status', message, isError, 6000); }
+function qcmEditorStatus(message, isError) { flashStatus('qcm-editor-status', message, isError, isError ? 0 : 6000); }
+
+function qcmEditorLoadFailed() {
+  if (typeof window !== 'undefined' && window.contentAdmin) window.contentAdmin.loadFailed();
+}
+
+function qcmRequestError(error) {
+  return error && error.name === 'AbortError'
+    ? 'Le serveur a mis trop de temps à répondre. Réessaie sans fermer tes modifications.'
+    : 'Connexion impossible. Réessaie sans fermer tes modifications.';
+}
 
 function qcmEditorFail(status, d) {
   qcmEditorStatus(status === 401
@@ -967,6 +992,7 @@ function loadQcmEditor() {
   var editor = document.getElementById('qcm-json-editor');
   if (!subjEl || !editor) return;
   var subject = subjEl.value;
+  if (!subject) { qcmEditorStatus('Chargement des matières…', false); return; }
   var version = ++qcmLoadVersion;
   qcmLoadedSubject = null;
   qcmRevision = null;
@@ -976,7 +1002,7 @@ function loadQcmEditor() {
     .then(function (res) {
       if (version !== qcmLoadVersion || subjEl.value !== subject) return;
       var d = res.data || {};
-      if (!d.ok) { qcmEditorFail(res.status, d); return; }
+      if (!d.ok) { qcmEditorFail(res.status, d); qcmEditorLoadFailed(); return; }
       var loaded;
       try {
         loaded = JSON.parse(d.raw);
@@ -985,6 +1011,7 @@ function loadQcmEditor() {
         })) throw new Error('une liste de questions est attendue');
       } catch (e) {
         qcmEditorStatus('Fichier QCM invalide : ' + e.message, true);
+        qcmEditorLoadFailed();
         return;
       }
       qcmFullList = loaded.map(canonicalQcmImage);
@@ -998,7 +1025,8 @@ function loadQcmEditor() {
     })
     .catch(function (e) {
       if (version === qcmLoadVersion && subjEl.value === subject) {
-        qcmEditorStatus('Erreur réseau : ' + e, true);
+        qcmEditorStatus(qcmRequestError(e), true);
+        qcmEditorLoadFailed();
       }
     });
 }
@@ -1089,7 +1117,7 @@ function saveQcmEditor() {
       if (typeof window !== 'undefined' && window.contentAdmin) window.contentAdmin.busy();
       if (spinner) spinner.style.display = 'none';
       if (version === qcmLoadVersion && subjEl.value === subject && scopeVersion === qcmScopeVersion) {
-        qcmEditorStatus('Erreur réseau : ' + e, true);
+        qcmEditorStatus(qcmRequestError(e), true);
       }
     });
 }
@@ -1255,11 +1283,19 @@ function renderWeakQcm() {
 // volet, pas à chaque chargement de la page admin.
 var probaHsOn = false;
 var probaLoaded = false;
+var probaLoading = false;
 
 function loadProbaSim() {
   var chart = document.getElementById('proba-chart');
   var status = document.getElementById('proba-status');
-  if (!chart || !status) return;
+  if (!chart || !status || probaLoading) return;
+  var sw = document.getElementById('proba-hs-switch');
+  var retry = document.getElementById('proba-retry');
+  probaLoading = true;
+  probaLoaded = false;
+  if (sw) sw.disabled = true;
+  if (retry) retry.disabled = true;
+  chart.setAttribute('aria-busy', 'true');
   status.textContent = 'Simulation en cours…';
   chart.innerHTML = '';
   fetchJson('/api/probabilites/data?hors_serie=' + (probaHsOn ? '1' : '0'))
@@ -1268,6 +1304,7 @@ function loadProbaSim() {
         status.textContent = (d && d.error) || 'Simulation impossible.';
         return;
       }
+      probaLoaded = true;
       document.getElementById('proba-sims').textContent = d.sims.toLocaleString('fr-FR');
       if (!d.rows.length) {
         status.textContent = 'Aucune fiche éligible à la simulation de kholle.';
@@ -1326,7 +1363,18 @@ function loadProbaSim() {
       status.innerHTML = d.rows.length + ' fiches éligibles — probabilité d’apparaître dans un tirage' +
         (crossedAt >= 0 ? ' (barres estompées = l’autre moitié du tirage)' : '') + ' :';
     })
-    .catch(function () { status.textContent = 'Erreur réseau.'; });
+    .catch(function (error) {
+      probaLoaded = false;
+      if (error.data && error.data.error) status.textContent = error.data.error;
+      else if (error.status) status.textContent = 'Simulation impossible (erreur ' + error.status + '). Réessaie dans un instant.';
+      else if (error.name === 'AbortError') status.textContent = 'La simulation a pris trop de temps. Réessaie.';
+      else status.textContent = 'Connexion impossible. Vérifie ta connexion puis réessaie.';
+    }).finally(function () {
+      probaLoading = false;
+      if (sw) sw.disabled = false;
+      if (retry) retry.disabled = false;
+      chart.setAttribute('aria-busy', 'false');
+    });
 }
 
 function initProbaBox() {
@@ -1339,7 +1387,7 @@ function initProbaBox() {
       probaHsOn = !probaHsOn;
       sw.classList.toggle('on', probaHsOn);
       sw.setAttribute('aria-checked', String(probaHsOn));
-      if (probaLoaded) loadProbaSim();
+      loadProbaSim();
     });
   }
   // Le volet n'est plus repliable : la simulation se lance a la premiere
@@ -1347,9 +1395,10 @@ function initProbaBox() {
   // de admin.html), jamais au chargement de la page.
   window.loadProbaSimOnce = function () {
     if (probaLoaded) return;
-    probaLoaded = true;
     loadProbaSim();
   };
+  var retry = document.getElementById('proba-retry');
+  if (retry) retry.addEventListener('click', loadProbaSim);
 }
 
 var MAX_UPLOAD_BYTES = 15 * 1024 * 1024;

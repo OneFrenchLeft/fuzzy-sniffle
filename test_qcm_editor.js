@@ -24,6 +24,7 @@ function editor() {
     MutationObserver: class { observe() {} },
   });
   vm.runInContext(source, context);
+  const fetchWithStatus = context.fetchWithStatus;
   const requests = [];
   const messages = [];
   context.fetchWithStatus = (url, options) => new Promise((resolve, reject) => {
@@ -31,8 +32,42 @@ function editor() {
   });
   context.qcmEditorStatus = (message, error) => messages.push({ message, error });
   context.showToast = () => {};
-  return { context, elements, requests, messages };
+  return { context, elements, requests, messages, fetchWithStatus };
 }
+
+test('loading waits for a subject instead of requesting an incomplete API address', () => {
+  const state = editor();
+  state.elements['qcm-subject-select'].value = '';
+  state.context.loadQcmEditor();
+  assert.equal(state.requests.length, 0);
+});
+
+test('HTML or empty API responses become useful errors with their HTTP status', async () => {
+  for (const status of [200, 401, 404, 502]) {
+    const state = editor();
+    Object.assign(state.context, { AbortController, setTimeout, clearTimeout });
+    state.context.fetch = async () => ({ status, json: async () => { throw new SyntaxError('HTML is not JSON'); } });
+    const result = await state.fetchWithStatus('/api/admin/qcm/physique');
+    assert.equal(result.status, status);
+    assert.equal(result.data.ok, false);
+    assert.doesNotMatch(result.data.error, /SyntaxError|HTML/);
+    assert.match(result.data.error, status === 401 ? /reconnecte/ : /modifications/);
+  }
+});
+
+test('failed bank loading leaves a draft intact and exits the loading UI', async () => {
+  const state = editor();
+  let failures = 0;
+  state.context.window = { contentAdmin: { loading() {}, loadFailed() { failures++; } } };
+  state.elements['qcm-json-editor'].value = 'Brouillon à conserver';
+  state.context.loadQcmEditor();
+  state.requests[0].resolve({ status: 502, data: { ok: false, error: 'Serveur indisponible' } });
+  await flush();
+  assert.equal(failures, 1);
+  assert.equal(state.elements['qcm-json-editor'].value, 'Brouillon à conserver');
+  assert.equal(state.context.qcmLoadedSubject, null);
+  assert.equal(state.messages.at(-1).message, 'Serveur indisponible');
+});
 
 async function load(state, questions = [question]) {
   state.context.loadQcmEditor();

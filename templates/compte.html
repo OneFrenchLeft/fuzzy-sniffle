@@ -5,11 +5,12 @@
     <div class="panel">
       <div class="page-header"><h1 class="page-title">Espace compte</h1></div>
       <div id="compte-logged-out">
-        <p class="home-subtitle" style="text-align:left;margin-bottom:1rem">Connecte-toi une seule fois pour débloquer la répétition espacée et les QCM en direct.</p>
+        <p class="home-subtitle" style="text-align:left;margin-bottom:1rem">Connecte-toi pour accéder à ton compte et aux modules disponibles pour ta classe.</p>
         <button class="btn-primary" onclick="openLoginGate()">Se connecter</button>
       </div>
       <div id="compte-logged-in" style="display:none">
         <p class="home-subtitle" style="text-align:left;margin-bottom:1rem">Connecté en tant que <strong id="compte-prenom"></strong>.</p>
+        {% if modules.forgecards %}
         <div class="sr-preference">
           <label for="sr-hs-enabled"><input type="checkbox" id="sr-hs-enabled" disabled aria-describedby="sr-hs-hint sr-hs-warning" onchange="saveSrHsPreference(this)"> Ajouter toutes les hors-séries à mon deck</label>
           <p class="hint" id="sr-hs-hint">Les hors-séries apparaissent quand elles sont dues, sans limite et sans effet sur les quotas ou la série. Ton choix est enregistré sur ton compte.</p>
@@ -32,10 +33,13 @@
           </ul>
           <p class="hint" style="margin:0">Et surtout : tu as le droit d'être fatigué, de prendre un jour de pause, de ne pas pouvoir te connecter. La série est un outil pour t'aider à réviser régulièrement, pas une fin en soi — l'important, c'est les concours. 💪</p>
         </div>
+        {% endif %}
+        {% if modules.qcm %}
         <div class="import-box" style="margin-top:1rem">
           <div class="section-title">Dernieres erreurs QCM</div>
           <div id="compte-qcm-errors"><p class="hint">Chargement…</p></div>
         </div>
+        {% endif %}
         <button class="btn-danger btn-small" id="compte-logout-btn" style="display:none;margin-top:1rem" onclick="logoutSr()">Se déconnecter</button>
       </div>
     </div>

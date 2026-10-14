@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Pages publiques, erreurs, entetes de securite, fichiers servis."""
-from flask import Blueprint, render_template, request, jsonify, session, send_from_directory, make_response, abort
+from flask import Blueprint, render_template, request, jsonify, session, send_from_directory, make_response, abort, redirect, url_for
 from config import TEMPLATES, STATIC, DATA, UPLOADS, read_params, write_params, module_enabled
 from config import get_chapitres as current_chapitres, subject_list
 import os
@@ -31,8 +31,8 @@ def _module_off(module, label):
 
 @bp.route('/')
 def home():
-    off = _module_off('forgecards', 'Les Forgecards')
-    if off: return off
+    if not module_enabled('forgecards'):
+        return redirect(url_for('views.page_compte'))
     return render_template('index.html', active='tirage')
 
 @bp.route('/sr')
@@ -62,7 +62,7 @@ def favicon():
 @bp.route('/qcm')
 def qcm_page():
     if not session.get('sr_user'):
-        return render_template('index.html')
+        return redirect(url_for('views.page_compte'))
     off = _module_off('qcm', 'Les QCM')
     if off: return off
     themes = [[s['key'], s['label'], s['color']] for s in subject_list()]
@@ -72,7 +72,7 @@ def qcm_page():
 @bp.route('/ankimie')
 def page_ankimie():
     if not session.get('sr_user'):
-        return render_template('index.html')
+        return redirect(url_for('views.page_compte'))
     off = _module_off('ankimie', 'Ankimie')
     if off: return off
     return render_template('ankimie.html', active='ankimie')

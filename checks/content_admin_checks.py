@@ -21,7 +21,7 @@ config.PARAMS_PATH = config.DATA / 'params.json'
 config.UPLOADS = config.DATA / 'uploads'
 
 import db as database
-import views, auth, cards, sr, qcm_admin, qcm_engine, ankimie, content_admin
+import views, auth, cards, sr, qcm_admin, qcm_engine, ankimie, content_admin, draw
 from flask import Flask
 
 
@@ -53,7 +53,7 @@ def application():
     app.secret_key = 'content-checks-only'
     app.config['TESTING'] = True
     app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024
-    for module in (views, auth, cards, sr, qcm_admin, ankimie, content_admin):
+    for module in (views, auth, cards, sr, qcm_admin, ankimie, content_admin, draw):
         app.register_blueprint(module.bp)
     @app.route('/__content_checks__')
     def isolated_fixture():
@@ -87,6 +87,47 @@ class ContentAdministration(unittest.TestCase):
             return conn.execute('SELECT COUNT(*) FROM ' + table).fetchone()[0]
         finally:
             conn.close()
+
+    def test_admin_simulation_works_with_forgecards_disabled_without_enabling_public_draw(self):
+        config.write_params({'module_forgecards': 0})
+        response = self.client.get('/api/probabilites/data?sims=1000')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['sims'], 1000)
+        self.assertEqual(data['rows'][0]['pct'], 100.0)
+        self.assertEqual(self.client.get('/api/draw').status_code, 404)
+        anonymous = self.app.test_client()
+        self.assertEqual(anonymous.get('/api/probabilites/data').status_code, 404)
+        with anonymous.session_transaction() as session:
+            session['sr_user'] = 'Élève'
+        self.assertEqual(anonymous.get('/api/probabilites/data').status_code, 404)
+
+    def test_home_and_logged_out_modules_lead_to_account(self):
+        anonymous = self.app.test_client()
+        for enabled in (0, 1):
+            config.write_params({'module_forgecards': enabled})
+            response = anonymous.get('/')
+            self.assertEqual(response.status_code, 200 if enabled else 302)
+            if not enabled:
+                self.assertEqual(response.headers['Location'], '/compte')
+            for route in ('/qcm', '/ankimie'):
+                self.assertEqual(anonymous.get(route).headers['Location'], '/compte')
+
+    def test_account_only_renders_information_for_enabled_modules(self):
+        for forgecards in (0, 1):
+            for qcm in (0, 1):
+                for ankimie_enabled in (0, 1):
+                    with self.subTest(forgecards=forgecards, qcm=qcm, ankimie=ankimie_enabled):
+                        config.write_params({'module_forgecards': forgecards, 'module_qcm': qcm,
+                                             'module_ankimie': ankimie_enabled})
+                        html = self.client.get('/compte').get_data(as_text=True)
+                        for marker in ('id="sr-hs-enabled"', 'id="compte-dash"', 'Comment fonctionnent les jokers'):
+                            self.assertEqual(marker in html, bool(forgecards))
+                        self.assertEqual('id="compte-qcm-errors"' in html, bool(qcm))
+                        self.assertEqual('href="/ankimie"' in html, bool(ankimie_enabled))
+                        self.assertIn('id="compte-logout-btn"', html)
+                        self.assertIn('id="name-gate-overlay"', html)
 
     def test_visual_create_edit_delete_preserve_other_chapters_and_ids(self):
         before = self.questions()

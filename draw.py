@@ -12,6 +12,10 @@ bp = Blueprint('draw', __name__)
 @bp.before_request
 def _module_guard():
     """Interrupteur admin : le tirage depend du module forgecards."""
+    # La simulation reste disponible pour préparer les réglages avant
+    # d'activer le module, sans rouvrir le tirage public aux élèves.
+    if request.endpoint == 'draw.api_probabilites_data' and session.get('admin'):
+        return None
     if not module_enabled('forgecards'):
         return jsonify({'ok': False, 'error': 'module désactivé'}), 404
     return None

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Admin{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/admin_content.css', v=6) }}">
-<script src="{{ url_for('static', filename='js/admin_content.js', v=8) }}" defer></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin_content.css', v=7) }}">
+<script src="{{ url_for('static', filename='js/admin_content.js', v=9) }}" defer></script>
 <script src="{{ url_for('static', filename='js/admin_layout.js', v=1) }}" defer></script>
 {% endblock %}
 {% block content %}
@@ -246,6 +246,7 @@
           </div>
           <div id="proba-status" class="hint admin-status" role="status" aria-live="polite">La simulation se lance à l'ouverture de cet onglet.</div>
           <div id="proba-chart" class="admin-chart"></div>
+          <button type="button" class="btn-ghost btn-small" id="proba-retry">Relancer la simulation</button>
         </div>
             </section>
             <section class="atelier-view" id="atelier-students" hidden>

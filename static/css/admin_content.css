@@ -279,7 +279,9 @@ html[data-theme="dark"] :is(.admin-workspace, .admin-modal, [id="content-questio
   overflow-wrap: anywhere;
 }
 #content-question-dialog::backdrop, #content-delete-dialog::backdrop { background: rgba(0, 0, 0, .45); }
-#content-question-dialog .modal-topbar { align-items: flex-start; gap: .75rem; }
+#content-question-dialog .modal-topbar { align-items: flex-start; flex-wrap: wrap; gap: .75rem; }
+#content-question-dialog .modal-topbar h3 { flex: 1 1 16rem; min-width: 0; margin: 0; }
+#content-question-dialog .modal-topbar .content-toolbar { margin: 0; }
 #content-question-close { flex-shrink: 0; white-space: nowrap; }
 #content-question-chapter-field[hidden] + .field { grid-column: 1 / -1; }
 #content-delete-dialog .field { margin-top: var(--space-4); }
