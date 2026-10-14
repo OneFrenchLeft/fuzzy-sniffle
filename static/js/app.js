@@ -787,15 +787,51 @@ function loadParams() {
     if (revEl) revEl.value = p.daily_review_limit != null ? p.daily_review_limit : 3;
     var rhEl = document.getElementById('f-reminder-hour');
     if (rhEl) rhEl.value = p.reminder_hour != null ? p.reminder_hour : 21;
+    var siteEl = document.getElementById('f-site-name');
+    if (siteEl) siteEl.value = p.site_name || 'Forgecards';
+    var tirEl = document.getElementById('f-tirage-label');
+    if (tirEl) tirEl.value = p.tirage_label || '';
+    var chapEl = document.getElementById('f-chapitres');
+    if (chapEl) chapEl.value = (p.chapitres || []).join('\n');
     ['forgecards', 'ankimie', 'qcm'].forEach(function (m) {
       var el = document.getElementById('f-module-' + m);
       if (el) el.checked = p['module_' + m] !== 0;
     });
-    var subs = p.ankimie_subjects || ['chimie'];
-    ['physique', 'chimie', 'maths'].forEach(function (t) {
-      var el = document.getElementById('f-ank-subj-' + t);
-      if (el) el.checked = subs.indexOf(t) !== -1;
-    });
+    // Registre des matieres (cle '_subjects' exposee par /api/params) :
+    // selects admin, cases Ankimie et labels de admin_content.js en decoulent.
+    var subjects = p._subjects || [];
+    window.qcmSubjects = subjects;
+    var subjSel = document.getElementById('qcm-subject-select');
+    if (subjSel) {
+      var prevSubj = subjSel.value;
+      subjSel.innerHTML = subjects.map(function (s) {
+        return '<option value="' + esc(s.key) + '">' + esc(s.label) + '</option>';
+      }).join('');
+      if (subjects.some(function (s) { return s.key === prevSubj; })) subjSel.value = prevSubj;
+    }
+    var weakSel = document.getElementById('qcm-weak-subject');
+    if (weakSel) {
+      var prevWeak = weakSel.value;
+      weakSel.innerHTML = '<option value="">Toutes</option>' + subjects.map(function (s) {
+        return '<option value="' + esc(s.key) + '">' + esc(s.label) + '</option>';
+      }).join('');
+      if (subjects.some(function (s) { return s.key === prevWeak; })) weakSel.value = prevWeak;
+    }
+    var ankBox = document.getElementById('f-ank-subjects');
+    if (ankBox) {
+      var subs = p.ankimie_subjects || [];
+      ankBox.innerHTML = '';
+      subjects.forEach(function (s) {
+        var lab = document.createElement('label');
+        lab.style.cssText = 'display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.9rem;color:var(--text)';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.style.width = 'auto'; cb.dataset.subject = s.key;
+        cb.checked = subs.indexOf(s.key) !== -1;
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(' ' + s.label));
+        ankBox.appendChild(lab);
+      });
+    }
   }).catch(function (e) { console.error(e); });
 }
 function saveParams() {
@@ -816,15 +852,22 @@ function saveParams() {
   };
   var rhEl = document.getElementById('f-reminder-hour');
   if (rhEl && rhEl.value !== '') body.reminder_hour = parseInt(rhEl.value, 10);
+  var siteEl = document.getElementById('f-site-name');
+  if (siteEl) body.site_name = siteEl.value.trim();
+  var tirEl = document.getElementById('f-tirage-label');
+  if (tirEl) body.tirage_label = tirEl.value.trim();
+  var chapEl = document.getElementById('f-chapitres');
+  if (chapEl) body.chapitres = chapEl.value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
   ['forgecards', 'ankimie', 'qcm'].forEach(function (m) {
     var el = document.getElementById('f-module-' + m);
     if (el) body['module_' + m] = el.checked ? 1 : 0;
   });
-  var ankSubs = ['physique', 'chimie', 'maths'].filter(function (t) {
-    var el = document.getElementById('f-ank-subj-' + t);
-    return el && el.checked;
-  });
-  if (document.getElementById('f-ank-subj-chimie')) body.ankimie_subjects = ankSubs;
+  var ankBox = document.getElementById('f-ank-subjects');
+  if (ankBox) {
+    body.ankimie_subjects = Array.prototype.slice.call(ankBox.querySelectorAll('input[data-subject]'))
+      .filter(function (el) { return el.checked; })
+      .map(function (el) { return el.dataset.subject; });
+  }
   fetchJson('/api/params', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function () {
       ['saved-msg', 'ank-saved-msg'].forEach(function (id) {

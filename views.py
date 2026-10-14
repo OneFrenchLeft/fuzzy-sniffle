@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """Pages publiques, erreurs, entetes de securite, fichiers servis."""
 from flask import Blueprint, render_template, request, jsonify, session, send_from_directory, make_response, abort
-from config import TEMPLATES, STATIC, DATA, UPLOADS, read_params, write_params, CHAPITRES, module_enabled
+from config import TEMPLATES, STATIC, DATA, UPLOADS, read_params, write_params, module_enabled
+from config import get_chapitres as current_chapitres, subject_list
 import os
 from auth import require_admin
 
@@ -9,13 +10,19 @@ bp = Blueprint('views', __name__)
 
 @bp.app_context_processor
 def inject_modules():
-    """Interrupteurs de modules disponibles dans tous les templates (nav)."""
+    """Interrupteurs de modules et textes configurables, dans tous les templates."""
     p = read_params()
-    return {'modules': {
-        'forgecards': bool(p.get('module_forgecards', 1)),
-        'ankimie': bool(p.get('module_ankimie', 1)),
-        'qcm': bool(p.get('module_qcm', 1)),
-    }}
+    return {
+        'modules': {
+            'forgecards': bool(p.get('module_forgecards', 1)),
+            'ankimie': bool(p.get('module_ankimie', 1)),
+            'qcm': bool(p.get('module_qcm', 1)),
+        },
+        'wording': {
+            'site_name': p.get('site_name') or 'Forgecards',
+            'tirage_label': p.get('tirage_label') or 'Simulation de khôlle',
+        },
+    }
 
 def _module_off(module, label):
     if module_enabled(module):
@@ -58,7 +65,8 @@ def qcm_page():
         return render_template('index.html')
     off = _module_off('qcm', 'Les QCM')
     if off: return off
-    return render_template('qcm.html', prenom=session['sr_user'], active='qcm')
+    themes = [[s['key'], s['label'], s['color']] for s in subject_list()]
+    return render_template('qcm.html', prenom=session['sr_user'], active='qcm', subjects=themes)
 
 
 @bp.route('/ankimie')
@@ -130,7 +138,11 @@ def add_security_headers(resp):
 
 @bp.route('/api/params', methods=['GET'])
 def get_params():
-    return jsonify(read_params())
+    out = read_params()
+    # Registre des matieres (config.py) expose en lecture pour les selects
+    # admin et le lobby QCM ; cle '_' : jamais ecrite dans params.json.
+    out['_subjects'] = subject_list()
+    return jsonify(out)
 
 @bp.route('/api/params', methods=['POST'])
 @require_admin
@@ -140,7 +152,7 @@ def post_params():
 
 @bp.route('/api/chapitres', methods=['GET'])
 def get_chapitres():
-    return jsonify(CHAPITRES)
+    return jsonify(current_chapitres())
 
 @bp.route('/papayou')
 def page_papayou():

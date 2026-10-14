@@ -3,6 +3,13 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var names = { physique: 'Physique', chimie: 'Chimie', maths: 'Mathématiques' };
+  // Labels du registre matieres (window.qcmSubjects, rempli par loadParams) ;
+  // repli sur `names` puis sur la cle brute.
+  function labelFor(theme) {
+    var list = window.qcmSubjects || [];
+    for (var i = 0; i < list.length; i++) { if (list[i].key === theme) return list[i].label; }
+    return names[theme] || theme;
+  }
   var pageSize = 20, qPage = 0, lastBuffer = '', importDraft = null, formState = null;
   var importVersion = 0, jsonFileVersion = 0;
   var activationPending = false;
@@ -11,7 +18,7 @@
 
   function chapter(q) { return String(q.chapitre || 'Autre').trim() || 'Autre'; }
   function currentSubject() { return $('qcm-subject-select').value; }
-  function path(theme, ch, emptyLabel) { return names[theme] + ' > ' + (ch || emptyLabel || 'Tous les chapitres'); }
+  function path(theme, ch, emptyLabel) { return labelFor(theme) + ' > ' + (ch || emptyLabel || 'Tous les chapitres'); }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   function ready() { return qcmLoadedSubject === currentSubject(); }
   function dirty() { return $('qcm-json-editor').value !== lastBuffer; }
@@ -178,7 +185,7 @@
     if (!formState) return;
     var action = formState.duplicate ? 'Dupliquer une question dans ' : (formState.qid ? 'Modifier une question dans ' : 'Ajouter une question à ');
     var ch = formState.chapter || $('content-question-chapter').value;
-    $('content-question-title').textContent = action + (ch ? path(formState.subject, ch) : names[formState.subject]);
+    $('content-question-title').textContent = action + (ch ? path(formState.subject, ch) : labelFor(formState.subject));
   }
   function captureChoices() {
     if (!formState) return;
@@ -331,7 +338,7 @@
       var data = await api('/api/admin/qcm/' + subject + '/import/preview', { method: 'POST', body: form });
       if (version !== qcmLoadVersion || scope !== qcmScopeVersion || subject !== currentSubject() || previewVersion !== importVersion) return;
       importDraft = { data: data, subject: subject, version: version, scope: scope, chapter: qcmTheme };
-      var result = $('qcm-import-result'); result.textContent = data.count + ' questions détectées · Matière : ' + names[subject] + ' · Chapitre : ' + data.chapitre + ' · ' + data.valid_count + ' valides · ' + data.errors.length + ' à corriger';
+      var result = $('qcm-import-result'); result.textContent = data.count + ' questions détectées · Matière : ' + labelFor(subject) + ' · Chapitre : ' + data.chapitre + ' · ' + data.valid_count + ' valides · ' + data.errors.length + ' à corriger';
       data.errors.forEach(function (item) { var p = document.createElement('p'); p.className = 'content-field-error'; p.textContent = 'Question ' + item.position + ' : ' + item.question + ' — ' + friendly(item.error); result.appendChild(p); });
       data.questions.slice(0, pageSize).forEach(function (q) { result.appendChild(questionCard(q)); });
       if (data.questions.length > pageSize) { var more = document.createElement('p'); more.className = 'hint'; more.textContent = 'Aperçu des 20 premières questions ; les ' + data.count + ' questions ont toutes été vérifiées.'; result.appendChild(more); }

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="view active" id="view-tirage">
-  <h1 class="home-title">Simulation de khôlle</h1>
-  <p class="home-subtitle2 opacity-100">Tire 1 à 3 fiches pour simuler une khôlle.</p>
+  <h1 class="home-title">{{ wording.tirage_label }}</h1>
+  <p class="home-subtitle2 opacity-100">Tire 1 à 3 fiches au hasard parmi les fiches activées.</p>
   <div class="panel draw-box">
     <div class="hs-toggle" id="kholle-toggle" style="display:none">
       <span class="hs-toggle-label">Mode kholle</span>

@@ -2,7 +2,7 @@
 {% block title %}Admin{% endblock %}
 {% block extra_head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/admin_content.css', v=5) }}">
-<script src="{{ url_for('static', filename='js/admin_content.js', v=7) }}" defer></script>
+<script src="{{ url_for('static', filename='js/admin_content.js', v=8) }}" defer></script>
 {% endblock %}
 {% block content %}
 <style>
@@ -80,11 +80,11 @@
           <div class="field"><label for="up-bareme">Bareme PDF (optionnel)</label><input type="file" id="up-bareme" accept=".pdf"></div>
           <button class="btn-save" onclick="uploadFiche()">Importer <span id="upload-spinner" class="spinner" style="display:none"></span></button>
           <div id="upload-status" style="margin-top:.5rem;font-size:.85rem"></div>
-        </div></section><section class="atelier-view" id="atelier-proba" hidden><div class="atelier-heading"><h2>Probabilités de tirage</h2><p>Simulation de khôlle ; le calcul se lance à l’ouverture de cet onglet.</p></div><div class="import-box" id="proba-box">
+        </div></section><section class="atelier-view" id="atelier-proba" hidden><div class="atelier-heading"><h2>Probabilités de tirage</h2><p>{{ wording.tirage_label }} ; le calcul se lance à l’ouverture de cet onglet.</p></div><div class="import-box" id="proba-box">
           <p class="home-subtitle" style="text-align:left;margin:.5rem 0 1rem;font-size:.85rem">
             Fréquences observées sur <strong id="proba-sims">10 000</strong> simulations du vrai algorithme de tirage
             (mêmes filtres, mêmes poids, même échantillonnage sans remise). Seules les fiches incluses
-            dans la simulation de kholle apparaissent.
+            dans le tirage apparaissent.
           </p>
           <div class="hs-toggle" id="proba-hs-toggle" style="margin-bottom:1rem">
             <span class="hs-toggle-label">Inclure les hors-série</span>
@@ -102,6 +102,12 @@
           <div class="field"><label for="f-daily-review">Revisions dues / jour</label><input type="number" id="f-daily-review" step="1" min="0" max="50"></div>
           <div class="field"><label for="f-reminder-hour">Heure du rappel Discord (0-23)</label><input type="number" id="f-reminder-hour" step="1" min="0" max="23"></div>
         </div>
+        <div class="section-title" style="margin:.9rem 0 .4rem">Personnalisation</div>
+        <div class="fields-grid">
+          <div class="field"><label for="f-site-name">Nom du site (menu, logo)</label><input type="text" id="f-site-name" maxlength="60"></div>
+          <div class="field"><label for="f-tirage-label">Nom du tirage de fiches (menu, accueil)</label><input type="text" id="f-tirage-label" maxlength="60"></div>
+        </div>
+        <div class="field" style="margin-bottom:.75rem"><label for="f-chapitres">Chapitres des forgecards (un par ligne)</label><textarea id="f-chapitres" rows="8" spellcheck="false"></textarea><span class="hint">« Autre » est ajouté automatiquement s'il manque. Renommer un chapitre ne renomme pas les fiches existantes : elles seront rangées dans « Autre » à leur prochaine édition.</span></div>
         <div class="section-title" style="margin:.9rem 0 .4rem">Modules visibles par les élèves</div>
         <div class="fields-grid">
           <div class="field"><label style="display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.9rem;color:var(--text)"><input type="checkbox" id="f-module-forgecards" style="width:auto"> Forgecards (tirage, liste, répétition espacée)</label></div>
@@ -120,7 +126,7 @@
           <button type="button" role="tab" data-subtab="preview" aria-selected="false">Tester une question</button>
           <button type="button" role="tab" data-subtab="json" aria-selected="false">Édition avancée (JSON)</button>
         </div>
-        <div class="field qcm-subject"><select id="qcm-subject-select"><option value="physique">Physique</option><option value="chimie">Chimie</option><option value="maths">Mathématiques</option></select></div>
+        <div class="field qcm-subject"><select id="qcm-subject-select"></select></div>
         </div>
         <div class="subtab-panel" data-pane="bank" role="tabpanel">
         {% include 'admin_qcm_visual.html' %}
@@ -247,9 +253,6 @@
               <label for="qcm-weak-subject">Matière</label>
               <select id="qcm-weak-subject">
                 <option value="">Toutes</option>
-                <option value="physique">Physique</option>
-                <option value="chimie">Chimie</option>
-                <option value="maths">Maths</option>
               </select>
             </div>
             <div class="field">
@@ -287,11 +290,7 @@
             Pour retirer du contenu d'Ankimie, désactive le chapitre dans « Éditeur &amp; aperçu › Gérer les questions » : il disparaît du QCM et d'Ankimie en même temps.
           </p>
           <div class="field" style="margin-bottom:.75rem"><label style="margin-bottom:.3rem">Matières dans Ankimie</label>
-            <div style="display:flex;gap:1.2rem;flex-wrap:wrap">
-              <label style="display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.9rem;color:var(--text)"><input type="checkbox" id="f-ank-subj-physique" style="width:auto"> Physique</label>
-              <label style="display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.9rem;color:var(--text)"><input type="checkbox" id="f-ank-subj-chimie" style="width:auto"> Chimie</label>
-              <label style="display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.9rem;color:var(--text)"><input type="checkbox" id="f-ank-subj-maths" style="width:auto"> Mathématiques</label>
-            </div>
+            <div id="f-ank-subjects" style="display:flex;gap:1.2rem;flex-wrap:wrap"></div>
           </div>
           <div class="fields-grid">
             <div class="field"><label for="f-ankimie-retention">Rétention cible Ankimie (%)</label><input type="number" id="f-ankimie-retention" step="1" min="80" max="97"></div>

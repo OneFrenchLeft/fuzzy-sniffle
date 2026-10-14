@@ -32,7 +32,12 @@ TZ_PARIS = ZoneInfo('Europe/Paris')
 NOTIF_ROLE_NAME = os.environ.get('MADEC_NOTIF_ROLE', 'Notifications')
 REMINDER_HOUR = int(os.environ.get('MADEC_REMINDER_HOUR', '21'))
 GUILD_ID = os.environ.get('MADEC_GUILD_ID')
-SITE_URL = os.environ.get('MADEC_SITE_URL', 'https://madec.moyart.net')
+# URL publique du site, utilisee dans les liens envoyes par Discord (rappels,
+# duels, statut). Vide = aucun lien affiche (le bot reste autonome).
+SITE_URL = os.environ.get('MADEC_SITE_URL', '').rstrip('/')
+# Base des appels internes bot -> site (streak guard, log d'events) : local
+# par defaut car le bot tourne sur la meme machine que le site.
+INTERNAL_API_BASE = os.environ.get('MADEC_INTERNAL_API_BASE', 'http://127.0.0.1:5000').rstrip('/')
 DEFAULT_PARAMS = {'max_active_num': 36, 'daily_new_limit': 3, 'daily_review_limit': 3, 'reminder_hour': None}
 JOKER_CAP = 2
 JOKER_EVERY = 4
@@ -553,11 +558,11 @@ class Duel:
         self.numero = row[0]
         self.state = 'active'
         self.start_mono = time.monotonic()
-        fiche_url = f"{SITE_URL}/uploads/fiche/{self.numero}.pdf"
+        fiche_line = f"\n📄 {SITE_URL}/uploads/fiche/{self.numero}.pdf" if SITE_URL else ""
         for p in self.players():
             try:
                 await p.send(
-                    f"⚔️ **Duel lancé !** Fiche n°{self.numero}\n📄 {fiche_url}\n"
+                    f"⚔️ **Duel lancé !** Fiche n°{self.numero}{fiche_line}\n"
                     f"Clique ✅ « J'ai fini » quand ta copie est prête. À ce moment-là, vous aurez "
                     f"**1 min 30** pour m'envoyer vos copies, puis vous noterez celle de l'autre : "
                     f"c'est la **meilleure note** qui gagne, pas le plus rapide.",
@@ -650,8 +655,10 @@ class Duel:
         if self.state != 'sending':
             return
         self.state = 'grading'
-        corr_url = f"{SITE_URL}/uploads/fiche/{self.numero}-c.pdf"
-        bareme_url = f"{SITE_URL}/uploads/fiche/{self.numero}-b.pdf"
+        links = ""
+        if SITE_URL:
+            links = (f"📄 Corrigé : {SITE_URL}/uploads/fiche/{self.numero}-c.pdf\n"
+                     f"📏 Barème : {SITE_URL}/uploads/fiche/{self.numero}-b.pdf\n\n")
         for p in self.players():
             other = self.other(p)
             files = [discord.File(io.BytesIO(data), filename=name)
@@ -664,7 +671,7 @@ class Duel:
                     else:
                         await p.send(files=files[i:i + 10])
                 await p.send(
-                    f"📄 Corrigé : {corr_url}\n📏 Barème : {bareme_url}\n\n"
+                    f"{links}"
                     f"Note la copie de **{other.display_name}** et envoie-moi simplement "
                     f"le nombre (ex : `14`). Tu as **10 minutes**, et tu devras "
                     f"**confirmer** ta note pour qu'elle compte.\n"
@@ -1044,7 +1051,7 @@ async def qcm(interaction: discord.Interaction):
 async def _post(path, payload, timeout=10):
     """POST interne non bloquant : requests est synchrone, on le pousse dans un thread."""
     def _do():
-        r = requests.post(f"{SITE_URL}{path}",
+        r = requests.post(f"{INTERNAL_API_BASE}{path}",
                           headers={"X-Madec-Internal-Key": INTERNAL_API_KEY},
                           json=payload, timeout=timeout)
         return r.json()
@@ -1075,8 +1082,10 @@ async def daily_reminder():
             continue
         if remaining <= 0:
             continue
-        ok = await dm_user(discord_id,
-                           f"⏰ Il te reste **{plural(remaining, 'carte')}** Forgecards aujourd'hui.\n{SITE_URL}")
+        msg = f"⏰ Il te reste **{plural(remaining, 'carte')}** Forgecards aujourd'hui."
+        if SITE_URL:
+            msg += f"\n{SITE_URL}"
+        ok = await dm_user(discord_id, msg)
         if not ok:
             print(f'[reminder] ECHEC DM pour {prenom} (discord_id={discord_id})')
             continue
@@ -1207,7 +1216,7 @@ async def rotate_status():
         msg_count = "1 personne n'a pas fait ses cartes aujourd'hui"
     else:
         msg_count = f"{n} personnes n'ont pas fait leurs cartes aujourd'hui"
-    messages = [msg_count, f'Va bosser → {SITE_URL}']
+    messages = [msg_count, f'Va bosser → {SITE_URL}' if SITE_URL else 'Va bosser !']
     rotate_status.i = (getattr(rotate_status, 'i', 0) + 1) % len(messages)
     await client.change_presence(activity=discord.CustomActivity(name=messages[rotate_status.i]))
 

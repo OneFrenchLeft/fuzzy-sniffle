@@ -3,7 +3,7 @@
 import io, csv
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
-from config import CHAPITRES, UPLOADS, now_paris, read_params
+from config import get_chapitres, UPLOADS, now_paris, read_params
 from db import db, ensure_db, log_event
 from helpers import (allowed_file, is_real_pdf, parse_teacher_difficulty, hs_sort_key,
                      card_label, filenames_for, remove_pdf_if_exists, card_exists,
@@ -80,7 +80,7 @@ def upload_forgecard():
     # Impulse: Magic bytes, not vibes. A renamed .exe is not a fiche.
     if not is_real_pdf(fiche) or not is_real_pdf(correction) or (bareme and not is_real_pdf(bareme)):
         return jsonify({'ok': False, 'error': 'fichier invalide : ce n\'est pas un vrai PDF'}), 400
-    if chapitre not in CHAPITRES:
+    if chapitre not in get_chapitres():
         chapitre = 'Autre'
     teacher_difficulty = parse_teacher_difficulty(request.form.get('difficulty'))
     hors_serie = 1 if (request.form.get('hors_serie') or '') == '1' else 0
@@ -194,7 +194,7 @@ def edit_forgecard(numero):
     fiche = request.files.get('fiche_pdf')
     correction = request.files.get('correction_pdf')
     bareme = request.files.get('bareme_pdf')
-    if chapitre not in CHAPITRES:
+    if chapitre not in get_chapitres():
         chapitre = 'Autre'
     teacher_difficulty = parse_teacher_difficulty(request.form.get('difficulty'))
     if fiche and not allowed_file(fiche.filename):

@@ -374,7 +374,7 @@ function joueurLine(j,couronne,canKick){
   return line;
 }
 
-var THEMES=[['physique','Physique','#01696f'],['chimie','Chimie','#8e44ad'],['maths','Maths','#2980b9']];
+var THEMES={{ subjects | tojson }};
 function themeLabel(key){var t=THEMES.find(function(x){return x[0]===key;});return t?t[1]:key;}
 function themeColor(key){var t=THEMES.find(function(x){return x[0]===key;});return t?t[2]:'#01696f';}
 function themeChipEl(keys){var list=Array.isArray(keys)?keys:(keys?[keys]:[]);var s=document.createElement('span');s.className='theme-chip';s.style.background=list.length===1?themeColor(list[0]):'#01696f';s.textContent=list.length?list.map(themeLabel).join(' + '):'Tout';return s;}
@@ -495,7 +495,7 @@ function renderCreateAndList(container,data){
     createBtn.className='create-card';
     createBtn.type='button';
     createBtn.innerHTML='<span class="plus">＋</span> Créer un lobby';
-    createBtn.onclick=function(){soc.emit('qcm_lobby_create',{theme:'physique'},function(r){if(r&&!r.ok)toast(r.message||'Impossible de créer.');});};
+    createBtn.onclick=function(){soc.emit('qcm_lobby_create',{theme:(THEMES[0]&&THEMES[0][0])||''},function(r){if(r&&!r.ok)toast(r.message||'Impossible de créer.');});};
     container.appendChild(createBtn);
   }
   if(!currentLobbies.length){

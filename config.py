@@ -22,11 +22,17 @@ DB_PATH = DATA / 'forgecards.db'
 
 PARAMS_PATH = DATA / 'params.json'
 
-QCM_FILES = {
-    'physique': DATA / 'qcm_physique.json',
-    'chimie': DATA / 'qcm_chimie.json',
-    'maths': DATA / 'qcm_maths.json',
+# Registre des matieres : ajouter une matiere = ajouter une entree ici
+# (cle sans accent, label affiche, couleur du lobby QCM, prefixe d'identifiant
+# de question). Tout le reste (fichiers data/qcm_<cle>.json, selects admin,
+# lobby, Ankimie) en decoule.
+SUBJECTS = {
+    'physique': {'label': 'Physique', 'color': '#01696f', 'prefix': 'p'},
+    'chimie': {'label': 'Chimie', 'color': '#8e44ad', 'prefix': 'c'},
+    'maths': {'label': 'Mathématiques', 'color': '#2980b9', 'prefix': 'm'},
 }
+
+QCM_FILES = {key: DATA / f'qcm_{key}.json' for key in SUBJECTS}
 
 QCM_MIN_TIME_S = 10
 
@@ -34,7 +40,7 @@ QCM_MAX_TIME_S = 300
 
 QCM_DEFAULT_TIME_S = 30
 
-QCM_THEME_PREFIX = {'physique': 'p', 'chimie': 'c', 'maths': 'm'}
+QCM_THEME_PREFIX = {key: subj['prefix'] for key, subj in SUBJECTS.items()}
 
 QID_RE = re.compile(r'^[a-z]-[0-9a-f]{12}-[0-9a-f]{8}$')
 
@@ -45,43 +51,9 @@ def now_paris():
 
 ADMIN_PASSWORD = os.environ.get('MADEC_ADMIN_PASSWORD')
 
-DEFAULT_PARAMS = {
-    'max_active_num': 36,
-    'max_hors_serie_num': 6,
-    'max_kholle_num': 12,
-    'fsrs_retention': 0.90,
-    'daily_new_limit': 3,
-    'daily_review_limit': 3,
-    'qcm_daily_new_limit': 10,
-    # Retention cible propre a Ankimie (le deck QCM a des cartes plus petites
-    # que les forgecards : on peut viser un rythme different).
-    'ankimie_retention': 0.90,
-    # Heure du rappel Discord quotidien (lues par le bot a chaque declenchement).
-    'reminder_hour': 21,
-    # Interrupteurs de modules (export multi-classes : chaque classe active
-    # ce qu'elle utilise). 1 = actif, 0 = desactive.
-    'module_forgecards': 1,
-    'module_ankimie': 1,
-    'module_qcm': 1,
-    # Matieres piochees par Ankimie (sous-ensemble des cles de QCM_FILES).
-    'ankimie_subjects': ['chimie'],
-    "previous_chapter_bonus": 0.2,
-    "last_chapter_bonus": 0.9,
-    "teacher_difficulty_weight": 0.15
-}
-
-EMOJI_KEYPAD = ['1', '2', '3', '4', '5', '6', '7', '8']
-
-EMOJI_PW_LENGTH = 4
-
-EMOJI_SEP = '|'
-
-MAX_NOTE_LENGTH = 2000
-
-MAX_REVIEW_DURATION_SECONDS = 6 * 3600
-
-DRAW_HISTORY_KEEP = 200
-
+# Liste par defaut des chapitres de forgecards. L'admin la modifie sans toucher
+# au code (onglet Parametres) : elle est stockee dans params.json ('chapitres')
+# et cette constante ne sert que de valeur initiale / de repli.
 CHAPITRES = [
     'Systèmes ouverts',
     'Diffusion thermique',
@@ -113,6 +85,49 @@ CHAPITRES = [
     'Première année - Electricité',
     'Autre'
 ]
+
+DEFAULT_PARAMS = {
+    'max_active_num': 36,
+    'max_hors_serie_num': 6,
+    'max_kholle_num': 12,
+    'fsrs_retention': 0.90,
+    'daily_new_limit': 3,
+    'daily_review_limit': 3,
+    'qcm_daily_new_limit': 10,
+    # Retention cible propre a Ankimie (le deck QCM a des cartes plus petites
+    # que les forgecards : on peut viser un rythme different).
+    'ankimie_retention': 0.90,
+    # Heure du rappel Discord quotidien (lues par le bot a chaque declenchement).
+    'reminder_hour': 21,
+    # Interrupteurs de modules (export multi-classes : chaque classe active
+    # ce qu'elle utilise). 1 = actif, 0 = desactive.
+    'module_forgecards': 1,
+    'module_ankimie': 1,
+    'module_qcm': 1,
+    # Matieres piochees par Ankimie (sous-ensemble des cles de QCM_FILES).
+    'ankimie_subjects': ['chimie'],
+    # Chapitres proposés a l'import / a l'edition des forgecards (editables
+    # dans l'onglet Parametres).
+    'chapitres': CHAPITRES,
+    # Textes affiches (nom du site dans la nav, nom du tirage de fiches).
+    'site_name': 'Forgecards',
+    'tirage_label': 'Simulation de khôlle',
+    "previous_chapter_bonus": 0.2,
+    "last_chapter_bonus": 0.9,
+    "teacher_difficulty_weight": 0.15
+}
+
+EMOJI_KEYPAD = ['1', '2', '3', '4', '5', '6', '7', '8']
+
+EMOJI_PW_LENGTH = 4
+
+EMOJI_SEP = '|'
+
+MAX_NOTE_LENGTH = 2000
+
+MAX_REVIEW_DURATION_SECONDS = 6 * 3600
+
+DRAW_HISTORY_KEEP = 200
 
 ALLOWED_EXTENSIONS = {'pdf'}
 
@@ -155,6 +170,23 @@ def read_params():
                 # Ne garder que les matieres connues ; liste vide = deck vide
                 # (choix admin explicite), valeur invalide = repli au defaut.
                 out[k] = [t for t in raw if t in QCM_FILES]
+            elif k == 'chapitres':
+                raw = data.get(k, default)
+                if not isinstance(raw, list):
+                    raw = default
+                # Chaines non vides, sans doublons, ordre conserve. 'Autre'
+                # est force : c'est la valeur de repli des imports/editions.
+                seen = []
+                for item in raw:
+                    item = str(item).strip()
+                    if item and item not in seen:
+                        seen.append(item)
+                if 'Autre' not in seen:
+                    seen.append('Autre')
+                out[k] = seen or list(default)
+            elif k in ('site_name', 'tirage_label'):
+                raw = str(data.get(k, default)).strip()
+                out[k] = raw[:60] if raw else default
             else:
                 out[k] = float(data.get(k, default))
         except (TypeError, ValueError):
@@ -210,4 +242,16 @@ def module_enabled(name):
         return bool(int(read_params().get('module_' + name, 1)))
     except (TypeError, ValueError):
         return True
+
+
+def get_chapitres():
+    """Chapitres de forgecards courants (params.json, repli : CHAPITRES)."""
+    chaps = read_params().get('chapitres')
+    return chaps if isinstance(chaps, list) and chaps else list(CHAPITRES)
+
+
+def subject_list():
+    """Matieres connues, pretes pour les templates/API : key, label, color."""
+    return [{'key': k, 'label': v['label'], 'color': v['color']}
+            for k, v in SUBJECTS.items()]
 

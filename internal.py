@@ -108,7 +108,9 @@ def create_qcm_invite_internal():
     except ValueError as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
 
-    base_url = os.environ.get('MADEC_SITE_URL', 'https://madec.moyart.net').rstrip('/')
+    # MADEC_SITE_URL si definie, sinon l'hote qui sert la requete : le lien
+    # d'invitation marche quel que soit le domaine de deploiement.
+    base_url = (os.environ.get('MADEC_SITE_URL') or request.host_url).rstrip('/')
     return jsonify({
         'ok': True,
         'prenom': prenom,
