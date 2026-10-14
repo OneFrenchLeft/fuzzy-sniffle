@@ -1,51 +1,320 @@
-/* Content management only. Existing Forgecard and other admin tools are kept. */
-.content-workspace{min-width:0}
-.content-workspace [hidden],#content-question-dialog [hidden],#content-delete-dialog [hidden]{display:none!important}
-.content-workspace h3{margin:1rem 0 .75rem}
-.content-path{padding:.75rem 1rem;border-left:3px solid var(--primary);background:var(--surface);border-radius:var(--radius);font-weight:700;overflow-wrap:anywhere}
-.content-help{margin:.75rem 0;color:var(--muted);font-size:.875rem}
-.content-help>summary{cursor:pointer;min-height:44px;align-content:center}
-.content-danger{color:#b52b22!important;border-color:currentColor!important}
-html[data-theme=dark] .content-danger{color:#fda4af!important}
-.content-notice{padding:1rem;border-left:3px solid var(--primary);background:var(--bg);border-radius:var(--radius);margin-bottom:1rem}
-.content-overview,.content-advanced{margin:1rem 0;border:1px solid var(--border);border-radius:var(--radius);padding:1rem;background:var(--surface)}
-.content-overview>summary,.content-advanced>summary{cursor:pointer;font-weight:700;min-height:44px;line-height:1.5;align-content:center}
-.content-chapters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:.75rem;margin-top:.75rem}
-.content-chapter,.content-question{border:1px solid var(--border);border-radius:var(--radius);padding:1rem;background:var(--surface);min-width:0;overflow-wrap:anywhere}
-.content-chapter h4,.content-question h4{margin:0 0 .5rem;font-size:1rem;line-height:1.5}
-.content-chapter label{display:flex;align-items:center;gap:.6rem;text-transform:none;font-size:.9rem;min-height:44px;cursor:pointer}
-.content-chapter input[type=checkbox]{width:20px;height:20px;flex-shrink:0;accent-color:var(--primary)}
-.content-chapter.selected{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
-.content-toolbar{display:flex;align-items:end;gap:.6rem;flex-wrap:wrap;margin:1rem 0}
-.content-toolbar button,.content-question button,.content-link{min-height:44px}
-.content-grow{flex:1;min-width:min(100%,200px);display:flex;flex-direction:column;gap:.35rem}
-.content-card-list{display:grid;gap:.75rem}
-.content-question .content-choices{padding-left:1.5rem;margin:.5rem 0;line-height:1.6}
-.content-correct{color:var(--primary);font-weight:700}
-.content-question img{display:block;max-width:100%;max-height:180px;object-fit:contain;border-radius:.5rem;margin:.5rem 0}
-.content-question .hint{margin:.4rem 0;font-size:.875rem;color:var(--muted)}
-.content-question .content-toolbar{margin-bottom:0}
-.content-link{display:inline-flex;align-items:center;text-decoration:none;color:var(--text);margin:.5rem 0}
-.content-field-error{color:#c0392b;font-size:.9rem;line-height:1.5;margin:.35rem 0}
-html[data-theme=dark] .content-field-error{color:#fda4af}
-[aria-invalid=true]{border-color:#c0392b!important}
-.content-empty{padding:1.5rem;border:1px dashed var(--border);border-radius:var(--radius);color:var(--muted)}
-#content-question-dialog,#content-delete-dialog{color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.5rem;margin:auto;width:min(760px,calc(100vw - 2rem));max-height:calc(100dvh - 2rem);overflow:auto;box-shadow:var(--shadow);overflow-wrap:anywhere}
-#content-question-dialog::backdrop,#content-delete-dialog::backdrop{background:rgba(0,0,0,.45)}
-#content-delete-dialog .field{margin:1rem 0}
-#content-question-dialog .field{gap:.4rem;margin:1rem 0}
-#content-question-dialog .modal-topbar{align-items:flex-start;gap:.75rem}
-#content-question-close{flex-shrink:0;white-space:nowrap}
-#content-question-chapter-field[hidden]+.field{grid-column:1/-1}
-.content-field-error:empty{display:none}
-.content-answer-group,.content-choice{border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin:1rem 0;min-width:0}
-.content-answer-group legend{font-weight:700;padding:0 .3rem}
-.content-choice-correct{display:flex;align-items:center;gap:.5rem;min-height:44px;text-transform:none;cursor:pointer}
-.content-choice-correct input{width:20px;height:20px;flex-shrink:0;accent-color:var(--primary)}
-.content-choice textarea{min-height:60px;margin:.4rem 0}
-#qcm-editor-status{min-height:1.5rem;text-align:left}
-#qcm-import-result{margin:1rem 0}
-#qcm-visual button:disabled,#ank-content button:disabled{opacity:.5;cursor:wait}
+/* Administration only: this asset is loaded by admin.html, never student pages. */
+
+/* 1. Shell and navigation. The login retains the site's original panel. */
+.admin-start-hidden { display: none; }
+#view-admin.admin-on { max-width: 1460px; }
+#view-admin.admin-on > .panel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.admin-workspace { color: var(--text); font-family: var(--font); }
+.admin-workspace .atelier-shell {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-8);
+}
+.admin-workspace .atelier-nav {
+  position: sticky;
+  top: 5.5rem;
+  max-height: calc(100dvh - 6.5rem);
+  overflow-y: auto;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  scrollbar-width: thin;
+}
+.admin-nav-title { padding: .25rem .6rem 1rem; font-size: 1rem; font-weight: 800; }
+.admin-nav-group + .admin-nav-group { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--border); }
+.admin-nav-label, .admin-eyebrow {
+  margin: 0 0 .5rem;
+  color: var(--muted);
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+.admin-nav-label { padding-inline: .6rem; }
+.admin-workspace .atelier-nav button {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  width: 100%;
+  min-height: 44px;
+  padding: .65rem .6rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: .9rem;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+.admin-workspace .atelier-nav button:hover { background: var(--bg); }
+.admin-workspace .atelier-nav button[aria-current="page"] {
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+  color: var(--primary);
+  font-weight: 800;
+}
+.atelier-badge {
+  min-width: 1.5rem;
+  padding: .1rem .4rem;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--admin-primary-text, #fff);
+  font-size: .75rem;
+  text-align: center;
+}
+.admin-workspace [hidden],
+#content-question-dialog [hidden],
+#content-delete-dialog [hidden] { display: none !important; }
+.admin-workspace .atelier-main, .content-workspace { min-width: 0; }
+.admin-workspace .atelier-heading { margin-bottom: var(--space-6); padding-bottom: var(--space-6); border-bottom: 1px solid var(--border); }
+.admin-workspace .atelier-heading h2 { margin: 0; color: var(--text); font-size: clamp(1.5rem, 2.4vw, 2rem); font-weight: 800; line-height: 1.25; scroll-margin-top: 6rem; }
+.admin-workspace .atelier-heading > p:last-child { max-width: 72ch; margin: .6rem 0 0; color: var(--muted); font-size: .95rem; line-height: 1.6; }
+.admin-workspace .atelier-heading > .admin-eyebrow { margin: 0 0 .5rem; }
+
+/* 2. Shared surfaces and disclosure. One level for the revision settings. */
+.admin-workspace .import-box,
+.admin-workspace .admin-card,
+.content-overview,
+.content-advanced {
+  min-width: 0;
+  margin: 0 0 var(--space-6);
+  padding: var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: none;
+}
+.admin-workspace .admin-disclosure, .content-overview, .content-advanced { padding: var(--space-4) 1.25rem; scroll-margin-top: 6rem; }
+.admin-workspace h3 { margin: 0 0 var(--space-4); font-size: 1.075rem; font-weight: 700; line-height: 1.4; }
+.admin-workspace h4 { color: var(--text); }
+.admin-workspace .admin-copy { margin: 0 0 var(--space-4); color: var(--muted); font-size: .875rem; line-height: 1.6; text-align: left; }
+.admin-workspace .modal-topbar .admin-copy { margin-bottom: 0; }
+.admin-workspace .admin-results { margin-top: var(--space-4); }
+.admin-workspace .admin-disclosure > summary,
+.content-overview > summary,
+.content-advanced > summary {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  min-height: 44px;
+  list-style: none;
+  font-weight: 700;
+  line-height: 1.45;
+  cursor: pointer;
+}
+.admin-workspace .admin-disclosure > summary::-webkit-details-marker,
+.content-overview > summary::-webkit-details-marker,
+.content-advanced > summary::-webkit-details-marker { display: none; }
+.admin-workspace .admin-disclosure > summary::after,
+.content-overview > summary::after,
+.content-advanced > summary::after { content: "+"; flex: none; margin-left: auto; color: var(--primary); font-size: 1.35rem; font-weight: 500; }
+.admin-workspace .admin-disclosure[open] > summary::after,
+.content-overview[open] > summary::after,
+.content-advanced[open] > summary::after { content: "−"; }
+.admin-disclosure-body { padding-top: var(--space-6); }
+.admin-workspace .admin-disclosure-body > .fields-grid > .field { margin-bottom: 0; }
+.admin-step {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+  color: var(--primary);
+  font-size: .875rem;
+}
+.admin-guidance { margin-top: var(--space-6); padding: var(--space-4); border-left: 3px solid var(--border); color: var(--muted); font-size: .875rem; }
+.admin-guidance > p { margin-bottom: .75rem; }
+.content-path { margin: 0 0 var(--space-4); padding: .8rem 1rem; border-left: 3px solid var(--primary); border-radius: var(--radius); background: var(--surface); font-weight: 700; overflow-wrap: anywhere; }
+.content-help { margin: 0 0 var(--space-4); color: var(--muted); font-size: .875rem; }
+.content-help > summary { min-height: 44px; align-content: center; cursor: pointer; }
+.content-help > p { margin-top: .5rem; }
+.content-notice { margin-bottom: var(--space-4); padding: var(--space-4); border-left: 3px solid var(--primary); border-radius: var(--radius); background: var(--bg); }
+.content-chapters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: var(--space-4); margin-top: var(--space-4); }
+.content-card-list { display: grid; gap: var(--space-4); margin-bottom: var(--space-6); }
+.content-chapter,
+.content-question,
+.admin-workspace .admin-row,
+.admin-workspace .note-item,
+.admin-workspace .eleve-row {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: none;
+  overflow-wrap: anywhere;
+}
+.admin-workspace .eleve-row { padding: 0; }
+.admin-workspace .note-item { padding-right: 4.5rem; }
+.admin-workspace .admin-list { display: grid; gap: var(--space-3); }
+.content-chapter h4, .content-question h4 { margin: 0 0 .5rem; font-size: 1rem; font-weight: 700; line-height: 1.5; }
+.content-chapter.selected { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.content-question .hint { margin: .4rem 0; }
+.content-question .content-choices { margin: .6rem 0; padding-left: 1.5rem; line-height: 1.65; }
+.content-correct { color: var(--primary); font-weight: 700; }
+.content-question img { display: block; max-width: 100%; max-height: 180px; margin: .75rem 0; border-radius: var(--radius); object-fit: contain; }
+.content-empty { padding: var(--space-6); border: 1px dashed var(--border); border-radius: var(--radius); color: var(--muted); font-size: .875rem; }
+
+/* 3. Buttons and actions: primary, secondary, destructive. Login excluded. */
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) {
+  --admin-primary-text: #fff;
+  --admin-danger: #b52b22;
+}
+html[data-theme="dark"] :is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) {
+  --admin-primary-text: #06201f;
+  --admin-danger: #fda4af;
+}
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) :is(.btn-save, .btn-ghost, .btn-danger, .toggle-btn) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .4rem;
+  width: auto;
+  max-width: 100%;
+  min-height: 44px;
+  padding: .65rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: .875rem;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) .btn-save { border-color: var(--primary); background: var(--primary); color: var(--admin-primary-text); }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) :is(.btn-ghost, .toggle-btn) { background: var(--surface); color: var(--text); }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) :is(.btn-danger, .content-danger) { border-color: currentColor !important; background: transparent; color: var(--admin-danger) !important; }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) .btn-save:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) :is(.btn-ghost, .btn-danger, .toggle-btn):hover:not(:disabled) { background: var(--bg); }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) button:disabled { opacity: .5; cursor: not-allowed; }
+#qcm-question-list .content-toolbar > button:last-child { border-color: currentColor; color: var(--admin-danger); }
+.admin-workspace .picker-nav { width: 44px; height: 44px; min-height: 44px; border-radius: var(--radius); }
+.content-toolbar,
+.admin-workspace .admin-row-actions,
+.admin-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.content-toolbar { margin: var(--space-4) 0; }
+.content-question .content-toolbar { margin-bottom: 0; }
+.admin-actions { margin-bottom: var(--space-4); }
+.admin-settings-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); }
+.admin-settings-actions > .saved-msg { margin-top: 0; }
+.content-link { display: inline-flex; align-items: center; min-height: 44px; margin: .5rem 0; color: var(--text); text-decoration: none; }
+
+/* 4. Forms and feedback share spacing, typography and theme tokens. */
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) .field { min-width: 0; margin: 0 0 var(--space-4); gap: .5rem; }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) .fields-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) label { color: var(--text); font-size: .875rem; font-weight: 600; text-transform: none; }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) :is(input, textarea, select) { font-size: .95rem; }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) :is(input[type="text"], input[type="number"], input[type="search"], input[type="file"], select) { min-height: 44px; padding: .65rem .8rem; font-weight: 500; }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) textarea { padding: .75rem .8rem; font-weight: 400; }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) :is(.admin-checkbox, .content-choice-correct, .content-chapter label) { display: flex; align-items: center; gap: .625rem; min-height: 44px; font-weight: 500; cursor: pointer; }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) :is(input[type="checkbox"], input[type="radio"]) { flex: none; width: 20px !important; height: 20px; min-height: 0; accent-color: var(--primary); }
+.admin-workspace input[type="file"]::file-selector-button { margin-right: .75rem; padding: .35rem .6rem; border: 1px solid var(--border); border-radius: .4rem; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+.admin-checkbox-offset { margin-top: 1.75rem; }
+.admin-field-wide { grid-column: 1 / -1; }
+.admin-field-short { max-width: 250px; }
+.content-grow { display: flex; flex: 1; flex-direction: column; gap: .5rem; min-width: min(100%, 200px); }
+.admin-workspace .admin-code-editor { min-height: 440px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .85rem; line-height: 1.65; }
+.admin-workspace .admin-code-preview { min-height: 240px; }
+.admin-workspace .saved-msg:not(.show), .admin-status:empty, #ank-content-status:empty { display: none; }
+.admin-workspace .saved-msg.show,
+.admin-workspace .admin-status:not(:empty),
+#ank-content-status:not(:empty) {
+  margin: var(--space-4) 0;
+  padding: .75rem 1rem;
+  border-left: 3px solid currentColor;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--primary) 5%, var(--surface));
+  color: var(--primary);
+  font-size: .875rem;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: left;
+}
+.content-field-error { margin: .4rem 0; color: var(--admin-danger, #b52b22); font-size: .875rem; line-height: 1.5; }
+.content-field-error:empty { display: none; }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) [aria-invalid="true"] { border-color: var(--admin-danger) !important; }
+.admin-workspace .admin-chart { display: grid; gap: .5rem; margin-top: var(--space-4); }
+:is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) :is(button, a, input, textarea, select, summary):focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+
+/* 5. Data tables scroll inside their own region, including on desktop. */
+.admin-workspace .admin-table-region { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.admin-workspace .weak-table { width: 100%; border-collapse: collapse; font-size: .875rem; line-height: 1.5; }
+.admin-workspace .weak-table :is(th, td) { padding: .85rem .75rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.admin-workspace .weak-table th { background: var(--bg); color: var(--muted); font-size: .8rem; font-weight: 700; white-space: nowrap; }
+.admin-workspace .weak-table tr:last-child td { border-bottom: 0; }
+.admin-workspace .weak-table .meta { margin-top: .35rem; color: var(--muted); font-size: .8rem; }
+.admin-workspace .weak-table button { white-space: nowrap; }
+.admin-workspace .weak-badge { line-height: 1.5; }
+
+/* 6. Admin modals and question choices use the same surfaces and controls. */
+.admin-modal .modal-box { padding: var(--space-6); }
+.admin-modal .modal-topbar h3 { margin: 0; font-size: 1.2rem; }
+.admin-modal .modal-topbar > button { flex: none; }
+.admin-modal .modal-actions { flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-6); }
+#content-question-dialog,
+#content-delete-dialog {
+  width: min(760px, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: var(--space-6);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  overflow-wrap: anywhere;
+}
+#content-question-dialog::backdrop, #content-delete-dialog::backdrop { background: rgba(0, 0, 0, .45); }
+#content-question-dialog .modal-topbar { align-items: flex-start; gap: .75rem; }
+#content-question-close { flex-shrink: 0; white-space: nowrap; }
+#content-question-chapter-field[hidden] + .field { grid-column: 1 / -1; }
+#content-delete-dialog .field { margin-top: var(--space-4); }
+.content-answer-group, .content-choice { min-width: 0; margin: var(--space-4) 0; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); }
+.content-answer-group legend, .content-choice legend { padding: 0 .3rem; font-weight: 700; }
+.content-choice textarea { min-height: 60px; margin: .4rem 0; }
+.content-choice details > summary { min-height: 44px; align-content: center; cursor: pointer; }
+#qcm-import-result { margin: var(--space-4) 0; }
+
+/* 7. A single horizontal navigation on small screens; no nested menus. */
+@media (max-width: 1000px) {
+  .admin-workspace .atelier-shell { grid-template-columns: minmax(0, 1fr); gap: var(--space-6); }
+  .admin-workspace .atelier-nav { display: flex; flex-wrap: nowrap; gap: .5rem; position: sticky; top: 4.3125rem; z-index: 9; max-height: none; padding: .5rem; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
+  .admin-workspace .admin-nav-group { display: contents; }
+  .admin-workspace .admin-nav-title, .admin-workspace .admin-nav-label { display: none; }
+  .admin-workspace .atelier-nav button { flex: none; width: auto; white-space: nowrap; }
+  .admin-workspace .atelier-heading h2 { scroll-margin-top: 9rem; }
+}
+@media (max-width: 600px) {
+  .admin-workspace .import-box, .admin-workspace .admin-card, .content-overview, .content-advanced { padding: var(--space-4); margin-bottom: var(--space-4); }
+  .admin-workspace .atelier-heading { padding-bottom: var(--space-4); margin-bottom: var(--space-4); }
+  :is(.admin-workspace, .admin-modal, [id="content-question-dialog"], [id="content-delete-dialog"]) .fields-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-checkbox-offset { margin-top: 0; }
+  .content-toolbar { align-items: stretch; }
+  .content-toolbar button { flex: 1; }
+  .admin-settings-actions { align-items: stretch; }
+  .admin-settings-actions > .btn-save { width: 100%; }
+  .admin-workspace .admin-code-editor { min-height: 300px !important; }
+  .admin-workspace .admin-code-preview { min-height: 180px !important; }
+  .admin-workspace .weak-table { min-width: 540px; }
+  .admin-modal .modal-box, #content-question-dialog, #content-delete-dialog { padding: var(--space-4); }
+  #content-question-dialog, #content-delete-dialog { width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem); }
+}
+
+/* 8. QCM explorer and internal navigation. */
 /* Editeur QCM « Gerer les questions » : barre d'outils en haut, chapitres a gauche, questions a droite */
 .qcm-toolbar{display:flex;align-items:end;gap:.6rem;flex-wrap:wrap;margin:0 0 1rem}
 .qcm-toolbar .field{margin:0}
@@ -73,19 +342,43 @@ html[data-theme=dark] .content-field-error{color:#fda4af}
 .chapter-toggle input{width:18px;height:18px;accent-color:var(--primary)}
 .chapter-del{visibility:hidden;flex-shrink:0;border:0;background:none;font-size:1.1rem;line-height:1;cursor:pointer;padding:.3rem .45rem;border-radius:var(--radius)}
 .chapter-row:hover .chapter-del,.chapter-row:focus-within .chapter-del{visibility:visible}
-#content-question-dialog button:disabled{opacity:.5;cursor:not-allowed}
-@media(max-width:1000px){
-  .qcm-body{grid-template-columns:1fr}
-  .qcm-chapters{position:static}
-  .content-chapters-compact{max-height:none}
-  #admin-form .admin-workspace .atelier-shell{grid-template-columns:minmax(0,1fr)}
-  #admin-form .admin-workspace .atelier-nav{display:flex;flex-wrap:nowrap;gap:.4rem;align-items:center;overflow-x:auto;max-height:none;position:sticky;top:4.3125rem;z-index:9;padding:.5rem;overscroll-behavior-x:contain}
-  #admin-form .admin-workspace .atelier-nav h2,#admin-form .admin-workspace .atelier-nav small{display:none}
-  #admin-form .admin-workspace .atelier-nav button{flex:0 0 auto;width:auto;white-space:nowrap;min-height:44px}
+
+.admin-workspace .atelier-qcm-head { display:flex; justify-content:space-between; align-items:end; flex-wrap:wrap; gap:1rem; margin-bottom:var(--space-4); }
+.admin-workspace .atelier-qcm-head .field { margin:0; min-width:180px; }
+.admin-workspace .subtab-bar { display:flex; gap:.35rem; max-width:100%; padding:.35rem; margin-bottom:var(--space-4); overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg); scrollbar-width:thin; }
+.admin-workspace .atelier-qcm-head .subtab-bar { margin-bottom:0; }
+.admin-workspace .subtab-bar button { flex:none; min-height:44px; padding:.6rem .85rem; border:0; border-radius:var(--radius); background:transparent; color:var(--muted); font:inherit; font-size:.875rem; font-weight:600; white-space:nowrap; cursor:pointer; }
+.admin-workspace .subtab-bar button[aria-selected="true"] { background:var(--surface); color:var(--primary); box-shadow:var(--shadow); font-weight:700; }
+.admin-workspace .subtab-bar button:hover { color:var(--primary); }
+.admin-workspace .weak-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:.75rem; margin-bottom:.75rem; }
+.admin-workspace .weak-selectall { display:flex; align-items:center; gap:.5rem; min-height:44px; font-size:.875rem; cursor:pointer; }
+.admin-workspace .weak-sel-count { font-size:.8rem; color:var(--muted); font-variant-numeric:tabular-nums; }
+.admin-workspace .admin-checkbox-list { display:flex; gap:1rem; flex-wrap:wrap; }
+.admin-workspace .admin-checkbox-list label { min-height:44px; }
+.admin-workspace .admin-field-stack { margin:var(--space-4) 0; }
+.admin-workspace .qcm-chapters { top:5.5rem; padding:var(--space-4); }
+.admin-workspace .qcm-chapters input { min-width:0; }
+.admin-workspace .qcm-chapters .content-grow { min-width:0; }
+.admin-workspace .qcm-chapters .content-toolbar { align-items:stretch; }
+.admin-workspace .qcm-chapters .content-toolbar button { width:100%; }
+.admin-workspace .chapter-pick { min-height:44px; }
+.admin-workspace .chapter-pick:disabled { opacity:1; cursor:default; }
+.admin-workspace .chapter-del { color:var(--admin-danger); min-width:40px; min-height:44px; }
+@media (max-width:1150px) {
+  .qcm-body { grid-template-columns:230px minmax(0,1fr); }
 }
-@media(max-width:600px){
-  #content-question-dialog,#content-delete-dialog{padding:1rem;width:calc(100vw - 1rem);max-height:calc(100dvh - 1rem)}
-  .content-toolbar{align-items:stretch}
-  .content-toolbar button{flex:1}
-  .content-answer-group,.content-choice{padding:.75rem}
+@media (max-width:1000px) {
+  .qcm-body { grid-template-columns:minmax(0,1fr); }
+  .qcm-chapters { position:static; }
+  .content-chapters-compact { max-height:320px; }
+  .admin-workspace .admin-disclosure { scroll-margin-top:9rem; }
+}
+@media (max-width:600px) {
+  .atelier-qcm-head > .subtab-bar { width:100%; }
+  .atelier-qcm-head > .field { width:100%; }
+  .qcm-toolbar-actions { width:100%; }
+  .qcm-toolbar-actions button { flex:1; }
+}
+@media (hover:none) {
+  .admin-workspace .chapter-del { visibility:visible; }
 }

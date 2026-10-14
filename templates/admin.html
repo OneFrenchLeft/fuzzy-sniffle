@@ -1,63 +1,50 @@
 {% extends "base.html" %}
 {% block title %}Admin{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/admin_content.css', v=5) }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin_content.css', v=6) }}">
 <script src="{{ url_for('static', filename='js/admin_content.js', v=8) }}" defer></script>
+<script src="{{ url_for('static', filename='js/admin_layout.js', v=1) }}" defer></script>
 {% endblock %}
 {% block content %}
-<style>
-/* Interface admin seulement. Le formulaire de login est hors de ce conteneur. */
-/* Aucun sélecteur du panneau de connexion : seul #admin-form est restylisé. */
-.admin-workspace {color:var(--text);font-family:var(--font);}
-.admin-workspace .atelier-shell {display:grid;grid-template-columns:225px minmax(0,1fr);gap:1.3rem;align-items:start}
-.admin-workspace .atelier-nav {position:sticky;top:5rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:.85rem;max-height:calc(100vh - 6rem);overflow:auto}
-.admin-workspace .atelier-nav h2 {font-size:1rem;color:var(--primary);margin:.3rem .7rem 1rem}
-.admin-workspace .atelier-nav small {display:block;margin:1.1rem .7rem .4rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em}
-.admin-workspace .atelier-nav button {display:block;width:100%;text-align:left;border:0;border-radius:var(--radius);padding:.62rem .7rem;font:inherit;color:var(--text);background:transparent;cursor:pointer}
-.admin-workspace .atelier-nav button:hover {background:var(--bg)}
-.admin-workspace .atelier-nav button[aria-current=page] {background:color-mix(in srgb,var(--primary) 12%,var(--surface));color:var(--primary);font-weight:800}
-.admin-workspace .atelier-badge {display:inline-block;min-width:1.25em;padding:.05em .4em;margin-left:.4rem;border-radius:999px;background:#c0392b;color:#fff;font-size:.72rem;font-weight:700;text-align:center;vertical-align:middle}
-.admin-workspace .atelier-badge[hidden] {display:none}
-.admin-workspace .atelier-main {min-width:0}
-.admin-workspace .atelier-view[hidden] {display:none!important}
-.admin-workspace .atelier-heading {padding:.2rem 0 1rem;border-bottom:1px solid var(--border);margin-bottom:1rem}
-.admin-workspace .atelier-heading h2 {margin:0;color:var(--text);font-size:1.55rem}
-.admin-workspace .atelier-heading p {color:var(--muted);margin:.25rem 0 0;font-size:.86rem}
-.admin-workspace .import-box {background:var(--surface)}
-.admin-workspace .btn-save,.admin-workspace .btn-ghost {max-width:max-content}
-.admin-workspace .weak-table {width:100%}
-/* Onglets internes d'un sous-menu (editeur QCM, resultats) */
-.admin-workspace .subtab-bar {display:flex;gap:.25rem;margin:0 0 1rem;padding:.3rem;background:color-mix(in srgb,var(--border) 30%,var(--surface));border-radius:var(--radius-lg);max-width:max-content}
-.admin-workspace .subtab-bar button {border:0;border-radius:var(--radius);padding:.5rem .95rem;font:inherit;font-weight:600;color:var(--muted);background:transparent;cursor:pointer;white-space:nowrap}
-.admin-workspace .subtab-bar button:hover {color:var(--text)}
-.admin-workspace .subtab-bar button[aria-selected=true] {background:var(--surface);color:var(--primary);font-weight:800;box-shadow:0 1px 4px rgba(15,23,42,.10)}
-.admin-workspace .subtab-panel[hidden] {display:none!important}
-.admin-workspace .subtab-panel > .import-box {margin-top:0}
-.admin-workspace .atelier-qcm-head {display:flex;justify-content:space-between;align-items:end;gap:1rem;flex-wrap:wrap;margin-bottom:1rem}
-.admin-workspace .atelier-qcm-head .subtab-bar {margin:0}
-.admin-workspace .atelier-qcm-head .field {margin:0;min-width:160px}
-.admin-workspace .weak-toolbar {display:flex;align-items:center;gap:.9rem;margin-bottom:.6rem;flex-wrap:wrap}
-.admin-workspace .weak-selectall {display:flex;align-items:center;gap:.45rem;font-size:.85rem;font-weight:600;cursor:pointer;color:var(--text)}
-.admin-workspace .weak-sel-count {font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
-.admin-workspace :is(button,select,input,summary):focus-visible {outline:2px solid var(--primary);outline-offset:2px}
-/* Une fois connecte : plus d'effet carte, l'atelier prend presque tout
-   l'ecran (marges laterales conservees). Avant connexion, la vue garde
-   sa largeur normale : le login est strictement identique. */
-#view-admin.admin-on {max-width:1500px}
-#view-admin.admin-on .panel {background:transparent;border:none;box-shadow:none;border-radius:0;padding:0 1rem}
-</style>
-  <section class="view active" id="view-admin">
-    <div class="panel">
-      <div id="pw-gate">
+<section class="view active" id="view-admin">
+  <div class="panel">
+    <div id="pw-gate">
         <h2>Contrôle de la polarité de l'onde incidente</h2>
         <div class="field">
           <label for="pw-input">Super méga Password</label>
           <input type="password" id="pw-input" placeholder="motdepasse (essayez pas de bruteforce)" onkeydown="if(event.key==='Enter') checkPw()">
           <span class="pw-error" id="pw-error">Aie, c'est un conducteur parfait... l'onde est réfléchie</span>
         </div>
-        <button class="btn-save" onclick="checkPw()">Entrer <span id="login-spinner" class="spinner" style="display:none"></span></button>
+        <button class="btn-save" onclick="checkPw()">Entrer <span id="login-spinner" class="spinner admin-start-hidden"></span></button>
       </div>
-      <div id="admin-form" style="display:none"><div class="admin-workspace"><div class="atelier-shell"><nav class="atelier-nav" aria-label="Rubriques de l’administration"><h2>Atelier admin</h2><small>Fiches</small><button type="button" data-atelier="cards" aria-current="page">Fiches &amp; import</button><button type="button" data-atelier="proba">Probabilités</button><button type="button" data-atelier="settings">Paramètres</button><small>QCM</small><button type="button" data-atelier="qcm">Éditeur &amp; aperçu</button><button type="button" data-atelier="qcmstats">Résultats &amp; parties</button><small>Suivi</small><button type="button" data-atelier="students">Élèves</button><button type="button" data-atelier="notes">Notes de blocage<span class="atelier-badge" id="notes-badge" hidden></span></button><button type="button" data-atelier="class">Statistiques de classe</button><button type="button" data-atelier="ankimie">Ankimie</button><button type="button" data-atelier="exports">Exports</button></nav><div class="atelier-main"><section class="atelier-view" id="atelier-cards"><div class="atelier-heading"><h2>Forgecards</h2><p>Importer, consulter et gérer les fiches.</p></div><div class="import-box" style="margin-top:1.5rem">
+    <div id="admin-form" class="admin-start-hidden">
+      <div class="admin-workspace"><div class="atelier-shell">
+          <nav class="atelier-nav" aria-label="Rubriques de l’administration">
+            <p class="admin-nav-title">Administration</p>
+            <div class="admin-nav-group">
+              <p class="admin-nav-label">Contenu</p>
+              <button type="button" data-atelier="cards" aria-controls="atelier-cards" aria-current="page">Fiches PDF</button>
+              <button type="button" data-atelier="qcm" aria-controls="atelier-qcm">Questions QCM</button>
+            </div>
+            <div class="admin-nav-group">
+              <p class="admin-nav-label">Réglages</p>
+              <button type="button" data-atelier="settings" aria-controls="atelier-settings">Réglages de l’application</button>
+              <button type="button" data-atelier="proba" aria-controls="atelier-proba">Vérifier le tirage</button>
+            </div>
+            <div class="admin-nav-group">
+              <p class="admin-nav-label">Suivi des élèves</p>
+              <button type="button" data-atelier="students" aria-controls="atelier-students">Comptes et progression</button>
+              <button type="button" data-atelier="notes" aria-controls="atelier-notes">Notes de blocage<span class="atelier-badge" id="notes-badge" hidden></span></button>
+              <button type="button" data-atelier="qcmstats" aria-controls="atelier-qcmstats">Résultats QCM</button>
+              <button type="button" data-atelier="ankimie" aria-controls="atelier-ankimie">Suivi Ankimie</button>
+              <button type="button" data-atelier="class" aria-controls="atelier-class">Bilans de la classe</button>
+              <button type="button" data-atelier="exports" aria-controls="atelier-exports">Exporter les données</button>
+            </div>
+          </nav>
+          <div class="atelier-main">
+            <section class="atelier-view" id="atelier-cards">
+              <div class="atelier-heading"><p class="admin-eyebrow">Contenu</p><h2>Fiches PDF</h2><p>Consulter les fiches, importer les PDF et gérer leurs informations.</p></div>
+              <div class="import-box admin-card">
           <h3>Fiches importées</h3>
           <div class="fiche-picker">
             <button class="picker-nav" id="fiche-prev" title="Fiche précédente" aria-label="Fiche précédente">←</button>
@@ -65,90 +52,54 @@
             <button class="picker-nav" id="fiche-next" title="Fiche suivante" aria-label="Fiche suivante">→</button>
           </div>
           <div id="admin-list"></div>
-        </div><div class="import-box">
+        </div><div class="import-box admin-card">
           <h3>Importer une fiche</h3>
           <div class="fields-grid">
-            <div class="field"><label for="up-numero">Numero</label><input type="number" id="up-numero" min="1"></div>
+            <div class="field"><label for="up-numero">Numéro</label><input type="number" id="up-numero" min="1"></div>
             <div class="field"><label for="up-chapitre">Chapitre</label><select id="up-chapitre"></select></div>
             <div class="field"><label for="up-difficulty">Difficulté professeur</label><input type="number" id="up-difficulty" min="1" max="5" step="1" placeholder="Ex : 4"></div>
-            <div class="field"><label style="display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text);margin-top:1.4rem"><input type="checkbox" id="up-hors-serie" style="width:auto" onchange="toggleHsNumero(this.checked)"> Hors-série (libre-service, hors répétition espacée et tirage)</label></div>
+            <div class="field"><label class="admin-checkbox admin-checkbox-offset"><input type="checkbox" id="up-hors-serie" onchange="toggleHsNumero(this.checked)" class="admin-checkbox-input"> Hors-série (libre-service, hors répétition espacée et tirage)</label></div>
           </div>
           <div class="field"><label for="up-titre">Titre (optionnel)</label><input type="text" id="up-titre" placeholder="Ex: Etude de la chute d'un vélo"></div>
-          <div class="field"><label for="up-indices">Indices (si sympa)</label><textarea id="up-indices" placeholder="Ex: Pense au theoreme de l energie cinetique..."></textarea></div>
-          <div class="field"><label for="up-fiche">Fiche PDF (énonce pas optionnel)</label><input type="file" id="up-fiche" accept=".pdf"></div>
-          <div class="field"><label for="up-correction">Correction PDF (corrigé)</label><input type="file" id="up-correction" accept=".pdf"></div>
-          <div class="field"><label for="up-bareme">Bareme PDF (optionnel)</label><input type="file" id="up-bareme" accept=".pdf"></div>
-          <button class="btn-save" onclick="uploadFiche()">Importer <span id="upload-spinner" class="spinner" style="display:none"></span></button>
-          <div id="upload-status" style="margin-top:.5rem;font-size:.85rem"></div>
-        </div></section><section class="atelier-view" id="atelier-proba" hidden><div class="atelier-heading"><h2>Probabilités de tirage</h2><p>{{ wording.tirage_label }} ; le calcul se lance à l’ouverture de cet onglet.</p></div><div class="import-box" id="proba-box">
-          <p class="home-subtitle" style="text-align:left;margin:.5rem 0 1rem;font-size:.85rem">
-            Fréquences observées sur <strong id="proba-sims">10 000</strong> simulations du vrai algorithme de tirage
-            (mêmes filtres, mêmes poids, même échantillonnage sans remise). Seules les fiches incluses
-            dans le tirage apparaissent.
-          </p>
-          <div class="hs-toggle" id="proba-hs-toggle" style="margin-bottom:1rem">
-            <span class="hs-toggle-label">Inclure les hors-série</span>
-            <button type="button" class="hs-switch" id="proba-hs-switch" role="switch" aria-checked="false" aria-label="Inclure les forgecards hors-série"></button>
-          </div>
-          <div id="proba-status" class="hint" style="margin:.5rem 0">La simulation se lance à l'ouverture de cet onglet.</div>
-          <div id="proba-chart" style="display:grid;gap:.35rem;margin-top:.75rem"></div>
-        </div></section><section class="atelier-view" id="atelier-settings" hidden><div class="atelier-heading"><h2>Paramètres</h2><p>Réglages du tirage, de la répétition espacée, du rappel Discord et des modules.</p></div><div class="import-box">
-        <div class="fields-grid">
-          <div class="field"><label for="f-max-active">Numero max tirable</label><input type="number" id="f-max-active" min="1"></div>
-          <div class="field"><label for="f-max-kholle">Numero max kholle (mode colle)</label><input type="number" id="f-max-kholle" min="0"></div>
-          <div class="field"><label for="f-max-hs">Hors-série max tirable</label><input type="number" id="f-max-hs" min="0"></div>
-          <div class="field"><label for="f-fsrs-retention">Retention cible FSRS (%)</label><input type="number" id="f-fsrs-retention" step="1" min="70" max="97"></div>
-          <div class="field"><label for="f-daily-new">Nouvelles fiches / jour</label><input type="number" id="f-daily-new" step="1" min="0" max="50"></div>
-          <div class="field"><label for="f-daily-review">Revisions dues / jour</label><input type="number" id="f-daily-review" step="1" min="0" max="50"></div>
-          <div class="field"><label for="f-reminder-hour">Heure du rappel Discord (0-23)</label><input type="number" id="f-reminder-hour" step="1" min="0" max="23"></div>
+          <div class="field"><label for="up-indices">Indices (facultatifs)</label><textarea id="up-indices" placeholder="Ex: Pense au theoreme de l energie cinetique..."></textarea></div>
+          <div class="field"><label for="up-fiche">Énoncé PDF (obligatoire)</label><input type="file" id="up-fiche" accept=".pdf"></div>
+          <div class="field"><label for="up-correction">Correction PDF (obligatoire)</label><input type="file" id="up-correction" accept=".pdf"></div>
+          <div class="field"><label for="up-bareme">Barème PDF (facultatif)</label><input type="file" id="up-bareme" accept=".pdf"></div>
+          <button class="btn-save" onclick="uploadFiche()">Importer <span id="upload-spinner" class="spinner admin-start-hidden"></span></button>
+          <div id="upload-status" class="admin-status" role="status" aria-live="polite"></div>
         </div>
-        <div class="section-title" style="margin:.9rem 0 .4rem">Personnalisation</div>
-        <div class="fields-grid">
-          <div class="field"><label for="f-site-name">Nom du site (menu, logo)</label><input type="text" id="f-site-name" maxlength="60"></div>
-          <div class="field"><label for="f-tirage-label">Nom du tirage de fiches (menu, accueil)</label><input type="text" id="f-tirage-label" maxlength="60"></div>
-        </div>
-        <div class="field" style="margin-bottom:.75rem"><label for="f-chapitres">Chapitres des forgecards (un par ligne)</label><textarea id="f-chapitres" rows="8" spellcheck="false"></textarea><span class="hint">« Autre » est ajouté automatiquement s'il manque. Renommer un chapitre ne renomme pas les fiches existantes : elles seront rangées dans « Autre » à leur prochaine édition.</span></div>
-        <div class="section-title" style="margin:.9rem 0 .4rem">Modules visibles par les élèves</div>
-        <div class="fields-grid">
-          <div class="field"><label style="display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.9rem;color:var(--text)"><input type="checkbox" id="f-module-forgecards" style="width:auto"> Forgecards (tirage, liste, répétition espacée)</label></div>
-          <div class="field"><label style="display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.9rem;color:var(--text)"><input type="checkbox" id="f-module-ankimie" style="width:auto"> Ankimie</label></div>
-          <div class="field"><label style="display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.9rem;color:var(--text)"><input type="checkbox" id="f-module-qcm" style="width:auto"> QCM</label></div>
-        </div>
-        <p class="hint" style="margin:.25rem 0 .75rem">Un module désactivé disparaît du menu et ses pages répondent « module désactivé ». L'admin garde accès aux statistiques.</p>
-        <button class="btn-save" onclick="saveParams()">Enregistrer</button>
-        <div class="saved-msg" id="saved-msg">Parametres enregistrés</div>
-        </div>
-
-        </section><section class="atelier-view" id="atelier-qcm" hidden><div class="atelier-heading"><h2>Questions QCM</h2><p>Gérer la banque, tester un rendu, ou éditer en JSON.</p></div>
-        <div class="atelier-qcm-head">
+            </section>
+            <section class="atelier-view" id="atelier-qcm" hidden>
+              <div class="atelier-heading"><p class="admin-eyebrow">Contenu</p><h2>Questions QCM</h2><p>Préparer les questions par matière et chapitre, tester leur rendu et gérer leur activation.</p></div>
+              <div class="atelier-qcm-head">
         <div class="subtab-bar" role="tablist" aria-label="Éditeur QCM">
           <button type="button" role="tab" data-subtab="bank" aria-selected="true">Gérer les questions</button>
           <button type="button" role="tab" data-subtab="preview" aria-selected="false">Tester une question</button>
           <button type="button" role="tab" data-subtab="json" aria-selected="false">Édition avancée (JSON)</button>
         </div>
-        <div class="field qcm-subject"><select id="qcm-subject-select"></select></div>
+        <div class="field qcm-subject"><label for="qcm-subject-select">Matière</label><select id="qcm-subject-select"></select></div>
         </div>
         <div class="subtab-panel" data-pane="bank" role="tabpanel">
         {% include 'admin_qcm_visual.html' %}
         </div>
         <div class="subtab-panel" data-pane="json" role="tabpanel" hidden>
         <p class="hint">Réservé aux utilisateurs expérimentés. Une modification incorrecte du JSON peut rendre certaines questions invalides. Pour une modification normale, utilise l’onglet « Gérer les questions ». Une liste vide retire les questions du périmètre sélectionné ; les autres chapitres sont conservés.</p>
-        <div class="import-box" id="qcm-editor-box">
+        <div class="import-box admin-card" id="qcm-editor-box">
           <div class="modal-topbar">
             <div>
-              <h3>Éditeur QCM web</h3>
-              <p class="home-subtitle" style="text-align:left;margin:.35rem 0 0;font-size:.8rem">
+              <h3>Édition en masse</h3>
+              <p class="home-subtitle admin-copy">
                 Le LaTeX s'écrit directement dans les textes entre <code>$...$</code> ;
                 en JSON, chaque antislash est doublé (<code>\\frac{1}{2}</code>).
-                Les images utilisent le champ <code>image</code> (URL https publique). L’ancien champ <code>image_complete</code> est converti en <code>image</code> à l’enregistrement. Le champ optionnel <code>explication</code> s'affiche à tous à la révélation de la réponse et dans le récap des erreurs. Si question, contacter Eliot, ou sinon regarder la cheatfiche.<br>
+                Les images utilisent le champ <code>image</code> (URL https publique). L’ancien champ <code>image_complete</code> est converti en <code>image</code> à l’enregistrement. Le champ optionnel <code>explication</code> s'affiche à tous à la révélation de la réponse et dans le récap des erreurs.<br>
                 Pour supprimer un chapitre en conservant ses questions, utilise « Supprimer le chapitre » dans la liste des chapitres.
               </p>
             </div>
           </div>
 
-          <div class="admin-row-actions" style="margin-bottom:1rem">
+          <div class="admin-row-actions admin-actions">
             <button type="button" class="btn-ghost btn-small" onclick="if(contentAdmin.canSwitch()) loadQcmEditor()">⟳ Recharger</button>
-            <button type="button" class="btn-save btn-small" onclick="saveQcmEditor()">💾 Enregistrer <span id="qcm-save-spinner" class="spinner" style="display:none"></span></button>
+            <button type="button" class="btn-save btn-small" onclick="saveQcmEditor()">💾 Enregistrer <span id="qcm-save-spinner" class="spinner admin-start-hidden"></span></button>
           </div>
           <p class="hint">Enregistrer valide automatiquement toutes les questions. En cas d’erreur, la banque reste inchangée et tes modifications restent disponibles pour correction.</p>
 
@@ -156,8 +107,7 @@
             <label for="qcm-json-editor">Questions JSON</label>
             <label for="qcm-json-file">Charger un fichier JSON dans l’éditeur (sans enregistrer)</label>
             <input type="file" id="qcm-json-file" accept=".json,application/json">
-            <textarea id="qcm-json-editor" spellcheck="false"
-                      style="min-height:520px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem"
+            <textarea id="qcm-json-editor" class="admin-code-editor" spellcheck="false"
                       placeholder='[
   {
     "question": "Calculer $\\int_0^1 x^2\\,\\mathrm{d}x$.",
@@ -177,11 +127,11 @@
             </span>
           </div>
 
-        </div></div><div class="subtab-panel" data-pane="preview" role="tabpanel" hidden><div class="import-box" id="qcm-preview-box">
+        </div></div><div class="subtab-panel" data-pane="preview" role="tabpanel" hidden><div class="import-box admin-card" id="qcm-preview-box">
       <div class="modal-topbar">
         <div>
           <h3>Tester une question QCM</h3>
-          <p class="home-subtitle" style="text-align:left;margin:.35rem 0 0;font-size:.8rem">
+          <p class="home-subtitle admin-copy">
             Colle un JSON de test, puis vérifie exactement son rendu avant de l’ajouter aux questions réelles. Ce test ne modifie rien.
           </p>
         </div>
@@ -189,8 +139,7 @@
 
       <div class="field">
         <label for="qcm-preview-json">JSON à tester</label>
-        <textarea id="qcm-preview-json" spellcheck="false"
-                  style="min-height:280px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem"
+        <textarea id="qcm-preview-json" class="admin-code-editor admin-code-preview" spellcheck="false"
                   placeholder='[
   {
     "question": "Calculer : $$\\int_0^1 x^2\\,\\mathrm{d}x$$",
@@ -209,7 +158,7 @@
         </span>
       </div>
 
-      <div class="admin-row-actions" style="margin-bottom:1rem">
+      <div class="admin-row-actions admin-actions">
         <button type="button" class="btn-save btn-small" onclick="previewQcmJson()">Tester le rendu</button>
         <button type="button" class="btn-ghost btn-small" onclick="loadQcmPreviewExample()">Charger un exemple</button>
         <button type="button" class="btn-ghost btn-small" onclick="clearQcmPreview()">Effacer</button>
@@ -217,7 +166,7 @@
 
       <div id="qcm-preview-status" class="saved-msg" role="status" aria-live="polite"></div>
 
-      <div id="qcm-preview-render" class="qcm-preview-render" style="display:none">
+      <div id="qcm-preview-render" class="qcm-preview-render admin-start-hidden">
         <div class="qcm-preview-top">
           <span id="qcm-preview-number" class="sr-meta"></span>
           <div class="admin-row-actions">
@@ -230,20 +179,104 @@
           <div id="qcm-preview-question" class="qcm-preview-question"></div>
           <div id="qcm-preview-image" class="qcm-preview-image"></div>
           <div id="qcm-preview-choices" class="qcm-preview-choices"></div>
-          <p class="hint" style="margin-top:.8rem">
+          <p class="hint admin-copy">
             Bordure verte : bonne réponse configurée.
             Ce rendu est une prévisualisation : il n’y a pas de chrono ni de score.
           </p>
         </div>
       </div>
-    </div></div></section><section class="atelier-view" id="atelier-qcmstats" hidden><div class="atelier-heading"><h2>Résultats QCM</h2><p>Questions à retravailler et historique des parties.</p></div>
-        <div class="subtab-bar" role="tablist" aria-label="Résultats QCM">
+    </div></div>
+            </section>
+            <section class="atelier-view" id="atelier-settings" hidden>
+              <div class="atelier-heading"><p class="admin-eyebrow">Réglages</p><h2>Réglages de l’application</h2><p>Configurer les activités, les contenus, les révisions et le rappel Discord.</p></div>
+              <details class="admin-card admin-disclosure" data-setting-section="application" open>
+  <summary><span class="admin-step">1</span><span>Modules et personnalisation</span></summary>
+  <div class="admin-disclosure-body"><p class="admin-copy">Choisir les activités proposées aux élèves et les libellés affichés sur le site.</p><div class="fields-grid">
+<div class="field"><label class="admin-checkbox"><input type="checkbox" id="f-module-forgecards" class="admin-checkbox-input"> Forgecards (tirage, liste, répétition espacée)</label></div>
+<div class="field"><label class="admin-checkbox"><input type="checkbox" id="f-module-ankimie" class="admin-checkbox-input"> Ankimie</label></div>
+<div class="field"><label class="admin-checkbox"><input type="checkbox" id="f-module-qcm" class="admin-checkbox-input"> QCM</label></div>
+</div><p class="admin-copy">Désactiver un module le retire du menu des élèves ; ses statistiques restent accessibles dans l’administration.</p><div class="fields-grid">
+<div class="field"><label for="f-site-name">Nom du site (menu, logo)</label><input type="text" id="f-site-name" maxlength="60"></div>
+<div class="field"><label for="f-tirage-label">Nom du tirage de fiches (menu, accueil)</label><input type="text" id="f-tirage-label" maxlength="60"></div>
+</div></div>
+</details>
+<details class="admin-card admin-disclosure" data-setting-section="fiches">
+  <summary><span class="admin-step">2</span><span>Fiches disponibles et chapitres</span></summary>
+  <div class="admin-disclosure-body"><p class="admin-copy">Organiser les fiches PDF et définir les limites du tirage.</p><div class="fields-grid">
+<div class="field"><label for="f-max-active">Dernière fiche disponible</label><input type="number" id="f-max-active" min="1"></div>
+<div class="field"><label for="f-max-kholle">Dernière fiche pour le tirage oral</label><input type="number" id="f-max-kholle" min="0"></div>
+<div class="field"><label for="f-max-hs">Dernière hors-série tirable</label><input type="number" id="f-max-hs" min="0"></div>
+</div><div class="field admin-field-stack"><label for="f-chapitres">Chapitres des forgecards (un par ligne)</label><textarea id="f-chapitres" rows="8" spellcheck="false"></textarea><span class="hint">« Autre » est ajouté automatiquement s'il manque. Renommer un chapitre ne renomme pas les fiches existantes : elles seront rangées dans « Autre » à leur prochaine édition.</span></div></div>
+</details>
+<details class="admin-card admin-disclosure" data-setting-section="revision">
+  <summary><span class="admin-step">3</span><span>Révision des fiches</span></summary>
+  <div class="admin-disclosure-body"><p class="admin-copy">Définir le rythme quotidien et l’objectif de mémorisation des fiches PDF.</p><div class="fields-grid">
+<div class="field"><label for="f-fsrs-retention">Objectif de mémorisation (%)</label><input type="number" id="f-fsrs-retention" step="1" min="70" max="97"></div>
+<div class="field"><label for="f-daily-new">Nouvelles fiches par jour</label><input type="number" id="f-daily-new" step="1" min="0" max="50"></div>
+<div class="field"><label for="f-daily-review">Révisions dues par jour</label><input type="number" id="f-daily-review" step="1" min="0" max="50"></div>
+</div></div>
+</details>
+<details class="admin-card admin-disclosure" data-setting-section="ankimie">
+  <summary><span class="admin-step">4</span><span>Révision Ankimie</span></summary>
+  <div class="admin-disclosure-body"><p class="admin-copy">Choisir les matières, le rythme et l’objectif de mémorisation des cartes Ankimie.</p><div class="field admin-field-stack"><label>Matières dans Ankimie</label>
+            <div id="f-ank-subjects" class="admin-checkbox-list"></div>
+          </div><div class="fields-grid">
+<div class="field"><label for="f-ankimie-retention">Objectif de mémorisation (%)</label><input type="number" id="f-ankimie-retention" step="1" min="80" max="97"></div>
+<div class="field"><label for="f-qcm-daily-new">Nouvelles cartes par jour</label><input type="number" id="f-qcm-daily-new" step="1" min="0" max="50"></div>
+</div><p class="admin-copy">Ankimie utilise automatiquement les chapitres actifs en QCM des matières cochées. Leur activation se gère dans les questions QCM.</p><button type="button" class="btn-ghost btn-small" data-admin-open="qcm" data-admin-pane="bank">Gérer les chapitres QCM</button></div>
+</details>
+<details class="admin-card admin-disclosure" data-setting-section="discord">
+  <summary><span class="admin-step">5</span><span>Rappel Discord</span></summary>
+  <div class="admin-disclosure-body"><p class="admin-copy">Choisir l’heure quotidienne du rappel envoyé par le bot.</p><div class="fields-grid">
+<div class="field"><label for="f-reminder-hour">Heure du rappel Discord (0-23)</label><input type="number" id="f-reminder-hour" step="1" min="0" max="23"></div>
+</div></div>
+</details>
+<div class="admin-settings-actions">
+  <button type="button" class="btn-save" onclick="saveParams()">Enregistrer tous les réglages</button>
+  <div class="saved-msg" id="saved-msg" role="status" aria-live="polite">Réglages enregistrés.<span id="ank-saved-msg" class="admin-start-hidden" aria-hidden="true"></span></div>
+</div>
+            </section>
+            <section class="atelier-view" id="atelier-proba" hidden>
+              <div class="atelier-heading"><p class="admin-eyebrow">Réglages</p><h2>Vérifier le tirage</h2><p>Simuler « {{ wording.tirage_label }} » pour vérifier la répartition des tirages.</p></div>
+              <div class="import-box admin-card" id="proba-box">
+          <p class="admin-copy">Répartition observée sur <strong id="proba-sims">10 000</strong> simulations de « {{ wording.tirage_label }} ». Seules les fiches incluses dans le tirage apparaissent.</p>
+          <div class="hs-toggle admin-actions" id="proba-hs-toggle">
+            <span class="hs-toggle-label">Inclure les hors-série</span>
+            <button type="button" class="hs-switch" id="proba-hs-switch" role="switch" aria-checked="false" aria-label="Inclure les forgecards hors-série"></button>
+          </div>
+          <div id="proba-status" class="hint admin-status" role="status" aria-live="polite">La simulation se lance à l'ouverture de cet onglet.</div>
+          <div id="proba-chart" class="admin-chart"></div>
+        </div>
+            </section>
+            <section class="atelier-view" id="atelier-students" hidden>
+              <div class="atelier-heading"><p class="admin-eyebrow">Suivi des élèves</p><h2>Comptes et progression</h2><p>Gérer les comptes, les decks individuels, les jokers et suivre l’activité de chaque élève.</p></div>
+              <div class="import-box admin-card" id="eleves-box">
+          <div class="fields-grid">
+            <div class="field admin-field-wide"><label for="new-prenom">Ajouter un élève</label><input type="text" id="new-prenom" placeholder="Ex: Lea"></div>
+          </div>
+          <button class="btn-save" onclick="addPrenom()">Ajouter</button>
+          <div id="inactive-alert" class="admin-results"></div>
+          <div class="admin-list" id="stats-list"></div>
+        </div>
+            </section>
+            <section class="atelier-view" id="atelier-notes" hidden>
+              <div class="atelier-heading"><p class="admin-eyebrow">Suivi des élèves</p><h2>Notes de blocage</h2><p>Repérer les difficultés signalées par les élèves après une révision.</p></div>
+              <div class="import-box admin-card">
+          <p class="home-subtitle admin-copy">Commentaires laisses par les eleves quand ils cliquent "Pas reussi", les plus recents en premier.</p>
+          <div id="failure-notes-list"></div>
+          <button type="button" class="toggle-btn admin-start-hidden admin-results" id="notes-masked-toggle"></button>
+          <div id="failure-notes-masked"></div>
+        </div>
+            </section>
+            <section class="atelier-view" id="atelier-qcmstats" hidden>
+              <div class="atelier-heading"><p class="admin-eyebrow">Suivi des élèves</p><h2>Résultats QCM</h2><p>Identifier les questions difficiles et consulter les dernières parties.</p></div>
+              <div class="subtab-bar" role="tablist" aria-label="Résultats QCM">
           <button type="button" role="tab" data-subtab="weak" aria-selected="true">Questions les plus ratées</button>
           <button type="button" role="tab" data-subtab="games" aria-selected="false">Parties récentes</button>
         </div>
-        <div class="subtab-panel" data-pane="weak" role="tabpanel"><div class="import-box" id="qcm-weak-box">
+        <div class="subtab-panel" data-pane="weak" role="tabpanel"><div class="import-box admin-card" id="qcm-weak-box">
           <h3>Questions QCM les plus ratées</h3>
-          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">
+          <p class="home-subtitle admin-copy">
             Statistiques cumulées de toutes les QCM (tous élèves confondus).
             Le taux d'échec compte les réponses fausses ET les absences de réponse (temps écoulé).
             Triées par taux d'échec décroissant ; les questions retirées du fichier restent, avec la mention « retirée ».
@@ -261,87 +294,53 @@
             </div>
           </div>
           <button type="button" class="btn-ghost btn-small" onclick="loadWeakQcm()">⟳ Recharger</button>
-          <div id="qcm-weak-table" style="margin-top:.75rem"></div>
-        </div></div><div class="subtab-panel" data-pane="games" role="tabpanel" hidden><div class="import-box" id="qcm-games-box">
+          <div id="qcm-weak-table" class="admin-results admin-table-region" tabindex="0" role="region" aria-label="Tableaux de résultats"></div>
+        </div></div><div class="subtab-panel" data-pane="games" role="tabpanel" hidden><div class="import-box admin-card" id="qcm-games-box">
           <h3>Parties récentes</h3>
-          <p class="home-subtitle" style="text-align:left;margin-bottom:.5rem;font-size:.8rem">Les 15 dernières parties, les plus récentes en premier.</p>
-          <div id="qcm-games-table" style="margin-top:.5rem"></div>
-        </div></div></section><section class="atelier-view" id="atelier-students" hidden><div class="atelier-heading"><h2>Élèves &amp; suivi</h2><p>Comptes, decks individuels, jokers et activité.</p></div><div class="import-box" id="eleves-box">
-          <div class="fields-grid">
-            <div class="field" style="grid-column:1/-1"><label for="new-prenom">Ajouter un élève</label><input type="text" id="new-prenom" placeholder="Ex: Lea"></div>
-          </div>
-          <button class="btn-save" onclick="addPrenom()">Ajouter</button>
-          <div id="inactive-alert" style="margin-top:1rem"></div>
-          <div class="admin-list" id="stats-list"></div>
-        </div></section><section class="atelier-view" id="atelier-notes" hidden><div class="atelier-heading"><h2>Notes de blocage</h2><p>Consulter les commentaires laissés après un échec.</p></div><div class="import-box">
-          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">Commentaires laisses par les eleves quand ils cliquent "Pas reussi", les plus recents en premier.</p>
-          <div id="failure-notes-list"></div>
-          <button type="button" class="toggle-btn" id="notes-masked-toggle" style="display:none;margin-top:.5rem"></button>
-          <div id="failure-notes-masked"></div>
-        </div></section><section class="atelier-view" id="atelier-class" hidden><div class="atelier-heading"><h2>Statistiques de classe</h2><p>Calculer les indicateurs à la demande.</p></div><div class="import-box" id="stats-overview-box">
-          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">
-            Calculées à la demande à partir du journal brut (rien n'est pré-agrégé, tout est recalculé).
-          </p>
-          <button type="button" class="btn-ghost btn-small" onclick="loadStatsOverview()">⟳ Calculer / Rafraîchir</button>
-          <div id="stats-overview" style="margin-top:.75rem"></div>
-        </div></section><section class="atelier-view" id="atelier-ankimie" hidden><div class="atelier-heading"><h2>Ankimie</h2><p>Révision espacée automatique à partir de la banque QCM.</p></div><div class="import-box">
-          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.85rem">
-            Ankimie pioche automatiquement dans <strong>les chapitres actifs en QCM des matières cochées ci-dessous</strong> — il n'y a rien d'autre à gérer.
-            Pour retirer du contenu d'Ankimie, désactive le chapitre dans « Éditeur &amp; aperçu › Gérer les questions » : il disparaît du QCM et d'Ankimie en même temps.
-          </p>
-          <div class="field" style="margin-bottom:.75rem"><label style="margin-bottom:.3rem">Matières dans Ankimie</label>
-            <div id="f-ank-subjects" style="display:flex;gap:1.2rem;flex-wrap:wrap"></div>
-          </div>
-          <div class="fields-grid">
-            <div class="field"><label for="f-ankimie-retention">Rétention cible Ankimie (%)</label><input type="number" id="f-ankimie-retention" step="1" min="80" max="97"></div>
-            <div class="field"><label for="f-qcm-daily-new">Nouvelles cartes Ankimie / jour</label><input type="number" id="f-qcm-daily-new" step="1" min="0" max="50"></div>
-          </div>
-          <button class="btn-save" onclick="saveParams()">Enregistrer</button>
-          <div class="saved-msg" id="ank-saved-msg">Paramètres enregistrés</div>
-        </div><div class="import-box">
+          <p class="home-subtitle admin-copy">Les 15 dernières parties, les plus récentes en premier.</p>
+          <div id="qcm-games-table" class="admin-results"></div>
+        </div></div>
+            </section>
+            <section class="atelier-view" id="atelier-ankimie" hidden>
+              <div class="atelier-heading"><p class="admin-eyebrow">Suivi des élèves</p><h2>Suivi Ankimie</h2><p>Suivre les révisions, les résultats et les questions difficiles dans Ankimie.</p></div>
+              <div class="admin-actions"><button type="button" class="btn-ghost" data-admin-open="settings" data-admin-setting="ankimie">Modifier les réglages Ankimie</button></div><div class="import-box admin-card">
           <h3>Statistiques Ankimie</h3>
-          <div id="ankimie-stats" style="margin-top:.5rem"></div>
-        </div></section><section class="atelier-view" id="atelier-exports" hidden><div class="atelier-heading"><h2>Exports</h2><p>Télécharger les données et rapports existants.</p></div><div class="import-box">
-          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">Exports pour regarder en fin d'année.</p>
-          <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem">
+          <div id="ankimie-stats" class="admin-results admin-table-region" tabindex="0" role="region" aria-label="Tableaux de résultats"></div>
+        </div>
+            </section>
+            <section class="atelier-view" id="atelier-class" hidden>
+              <div class="atelier-heading"><p class="admin-eyebrow">Suivi des élèves</p><h2>Bilans de la classe</h2><p>Consulter les indicateurs de révision et l’assiduité de la classe.</p></div>
+              <div class="import-box admin-card" id="stats-overview-box">
+          <p class="admin-copy">Le bilan est calculé à la demande à partir de l’activité des élèves.</p>
+          <button type="button" class="btn-ghost btn-small" onclick="loadStatsOverview()">⟳ Calculer / Rafraîchir</button>
+          <div id="stats-overview" class="admin-results admin-table-region" tabindex="0" role="region" aria-label="Tableaux de résultats"></div>
+        </div>
+            </section>
+            <section class="atelier-view" id="atelier-exports" hidden>
+              <div class="atelier-heading"><p class="admin-eyebrow">Suivi des élèves</p><h2>Exporter les données</h2><p>Télécharger les rapports d’activité et les données de révision pour les analyser.</p></div>
+              <div class="import-box admin-card">
+          <p class="home-subtitle admin-copy">Exports pour regarder en fin d'année.</p>
+          <div class="admin-actions">
             <button class="btn-ghost btn-small" onclick="exportCsv('activite-quotidienne')">Activité quotidienne (élève × jour)</button>
             <button class="btn-ghost btn-small" onclick="exportCsv('qcm-par-mois')">QCM par mois</button>
             <button class="btn-ghost btn-small" onclick="exportCsv('synthese-eleves')">Synthèse par élève</button>
             <button class="btn-ghost btn-small" onclick="exportCsv('etude-revisions')">Étude révisions (R avant, stabilité, espacement)</button>
           </div>
-          <p class="home-subtitle" style="text-align:left;margin-bottom:.75rem;font-size:.8rem">Export des statistiques FSRS (toutes les infos d'états du FSRS, tous les eleves confondus).</p>
+          <p class="home-subtitle admin-copy">Export des statistiques FSRS (toutes les infos d'états du FSRS, tous les eleves confondus).</p>
           <button class="btn-ghost" onclick="exportCSV()">Exporter data FSRS (CSV)</button>
-          <p class="home-subtitle" style="text-align:left;margin:.75rem 0;font-size:.8rem">Export par fiche : une ligne par fiche avec les stats moyennes de tous les eleves pour chaque fiche.</p>
+          <p class="home-subtitle admin-copy">Export par fiche : une ligne par fiche avec les stats moyennes de tous les eleves pour chaque fiche.</p>
           <button class="btn-ghost" onclick="exportStatsByCard()">Exporter stats des fiche (CSV)</button>
-        </div></section></div></div></div><script>(function(){
-var root=document.querySelector('#admin-form .admin-workspace');if(!root)return;
-var buttons=Array.from(root.querySelectorAll('[data-atelier]'));
-function open(key){
-  buttons.forEach(function(b){if(b.dataset.atelier===key)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  root.querySelectorAll('.atelier-view').forEach(function(v){v.hidden=v.id!=='atelier-'+key;});
-  var h=root.querySelector('#atelier-'+key+' .atelier-heading h2');if(h){h.tabIndex=-1;h.focus();}
-  if(key==='proba'&&window.loadProbaSimOnce)window.loadProbaSimOnce();
-  if(key==='qcm'&&window.contentAdmin&&!window.contentAdmin.hasDraft()&&!qcmSaving)loadQcmEditor();
-  if(key==='ankimie'&&window.loadAnkimieStats)window.loadAnkimieStats();
-}
-buttons.forEach(function(b){b.addEventListener('click',function(){open(b.dataset.atelier);});});
-// Onglets internes d'un sous-menu (Éditeur QCM, Résultats QCM).
-root.querySelectorAll('.subtab-bar').forEach(function(bar){
-  var scope=bar.closest('.atelier-view');if(!scope)return;
-  bar.querySelectorAll('[data-subtab]').forEach(function(b){
-    b.addEventListener('click',function(){
-      bar.querySelectorAll('[data-subtab]').forEach(function(x){x.setAttribute('aria-selected',x===b?'true':'false');});
-      scope.querySelectorAll(':scope > .subtab-panel').forEach(function(p){p.hidden=p.dataset.pane!==b.dataset.subtab;});
-    });
-  });
-});
-})();</script></div>
+        </div>
+            </section>
+          </div>
+      </div></div>
     </div>
-  </section>
+  </div>
+</section>
 {% endblock %}
 {% block modals %}
 {% include 'admin_chapter_delete.html' %}
-<div class="modal-overlay critical" id="confirm-overlay">
+<div class="modal-overlay critical admin-modal" id="confirm-overlay">
   <div class="modal-box">
     <div class="modal-topbar">
       <h3>Confirmation</h3>
@@ -355,13 +354,13 @@ root.querySelectorAll('.subtab-bar').forEach(function(bar){
   </div>
 </div>
 
-<div class="modal-overlay" id="edit-overlay">
+<div class="modal-overlay admin-modal" id="edit-overlay">
   <div class="modal-box narrow">
     <div class="modal-topbar">
       <h3>Modifier la fiche <span id="edit-numero"></span></h3>
       <button class="btn-ghost btn-small" onclick="closeEditModal()">Fermer</button>
     </div>
-    <div class="field" style="margin-top:1rem">
+    <div class="field admin-results">
       <label for="edit-titre">Titre</label>
       <input type="text" id="edit-titre" placeholder="Ex: Etude de la chute d'un vélo">
     </div>
@@ -378,8 +377,8 @@ root.querySelectorAll('.subtab-bar').forEach(function(bar){
       <textarea id="edit-indices" placeholder="Ex: Pense au theoreme de l energie cinetique..."></textarea>
     </div>
     <div class="field">
-      <label style="display:flex;align-items:center;gap:.5rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text)">
-        <input type="checkbox" id="edit-hors-serie" style="width:auto"> Hors-série (libre-service, hors répétition espacée et tirage)
+      <label class="admin-checkbox">
+        <input type="checkbox" id="edit-hors-serie" class="admin-checkbox-input"> Hors-série (libre-service, hors répétition espacée et tirage)
       </label>
     </div>
     <div class="field">
@@ -391,21 +390,21 @@ root.querySelectorAll('.subtab-bar').forEach(function(bar){
       <label for="edit-correction">Remplacer le corrige PDF</label>
       <input type="file" id="edit-correction" accept=".pdf">
       <span class="hint" id="edit-correction-hint">Laisse vide pour garder le PDF actuel.</span>
-      <label style="display:flex;align-items:center;gap:.5rem;margin-top:.4rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text)">
-        <input type="checkbox" id="edit-remove-correction" style="width:auto"> Retirer la correction (sans la remplacer)
+      <label class="admin-checkbox">
+        <input type="checkbox" id="edit-remove-correction" class="admin-checkbox-input"> Retirer la correction (sans la remplacer)
       </label>
     </div>
     <div class="field">
       <label for="edit-bareme">Bareme PDF</label>
       <input type="file" id="edit-bareme" accept=".pdf">
       <span class="hint" id="edit-bareme-hint">Laisse vide pour garder le bareme actuel.</span>
-      <label style="display:flex;align-items:center;gap:.5rem;margin-top:.4rem;text-transform:none;font-weight:400;font-size:.85rem;color:var(--text)">
-        <input type="checkbox" id="edit-remove-bareme" style="width:auto"> Retirer le bareme (sans le remplacer)
+      <label class="admin-checkbox">
+        <input type="checkbox" id="edit-remove-bareme" class="admin-checkbox-input"> Retirer le bareme (sans le remplacer)
       </label>
     </div>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeEditModal()">Annuler</button>
-      <button class="btn-save" onclick="saveEditFiche()">Enregistrer <span id="edit-spinner" class="spinner" style="display:none"></span></button>
+      <button class="btn-save" onclick="saveEditFiche()">Enregistrer <span id="edit-spinner" class="spinner admin-start-hidden"></span></button>
     </div>
   </div>
 </div>

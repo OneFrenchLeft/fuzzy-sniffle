@@ -16,7 +16,7 @@
         <label class="content-grow" for="qcm-new-theme-input">Nouveau chapitre<input type="text" id="qcm-new-theme-input" maxlength="200" placeholder="Ex. : Optique"></label>
         <button type="button" class="btn-ghost btn-small" onclick="createQcmTheme()">Créer</button>
       </div>
-      <details class="content-help"><summary>Comment fonctionne l’activation ?</summary><p class="hint">Disponible ne signifie pas actif pour les élèves. Désactiver conserve les questions et l’historique. Les nouveaux chapitres sont inactifs. QCM et Ankimie ont des activations indépendantes.</p></details>
+      <details class="content-help"><summary>Comment fonctionne l’activation ?</summary><p class="hint">Un chapitre actif est proposé en QCM et dans Ankimie si sa matière y est sélectionnée. Désactiver conserve les questions et l’historique. Les nouveaux chapitres sont inactifs.</p></details>
     </aside>
     <div class="qcm-content">
       <div class="qcm-list-head">
@@ -28,7 +28,7 @@
       <div id="qcm-question-pages" class="content-toolbar"></div>
       <section id="qcm-import-panel" class="import-box" hidden aria-labelledby="qcm-import-title">
         <h3 id="qcm-import-title">Importer des questions</h3>
-        <p class="hint">1. Choisis la matière et le chapitre dans la colonne de gauche. 2. Remplis le modèle dans ton tableur et exporte-le au format CSV. 3. Vérifie l’aperçu avant de confirmer. L’import ajoute des questions ; il ne remplace pas celles de la banque.</p>
+        <p class="hint">1. Choisis la matière ci-dessus, puis le chapitre dans la liste. 2. Remplis le modèle dans ton tableur et exporte-le au format CSV. 3. Vérifie l’aperçu avant de confirmer. L’import ajoute des questions ; il ne remplace pas celles de la banque.</p>
         <a class="btn-ghost btn-small content-link" href="/api/admin/qcm/import-template.csv" download>Télécharger le modèle CSV</a>
         <div class="field"><label for="qcm-import-file">Fichier CSV</label><input type="file" id="qcm-import-file" accept=".csv,text/csv"></div>
         <button type="button" class="btn-ghost btn-small" id="qcm-import-preview">Vérifier et prévisualiser</button>
