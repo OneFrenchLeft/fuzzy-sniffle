@@ -6,7 +6,7 @@ import re
 import time
 from pathlib import Path
 
-from flask import request, session
+from flask import request
 from flask_socketio import join_room, leave_room
 
 from gevent.event import Event
@@ -55,6 +55,13 @@ io = None
 _record_answer = None
 _record_game = None
 _review_query = None
+
+
+def _current_player():
+    # Les evenements SocketIO ne passent pas par les hooks des routes HTTP.
+    from auth import valid_sr_user
+    return valid_sr_user()
+
 
 def question_image(question):
     """Prefer the canonical field, retaining old files until their next save."""
@@ -180,7 +187,8 @@ def review_questions(prenom, themes, n, chapitres=None):
                 q['time'] = 600
                 pool.append(q)
     if chapitres:
-        wanted = set(chapitres)
+        wanted = {tuple(pair) for pair in chapitres
+                  if isinstance(pair, (list, tuple)) and len(pair) == 2}
         pool = [q for q in pool if (q.get('theme'), q.get('chapitre', 'Autre')) in wanted]
     pool.sort(key=lambda q: last_wrong.get(q.get('qid'), ''), reverse=True)
     return pool[:n]
@@ -342,6 +350,34 @@ def remove_player_from_lobby(prenom):
         del LOBBIES[lid]
         print(f'[qcm-web] {lid} supprimé (vide)')
 
+
+def revoke_player(prenom):
+    """Ferme aussi l'etat en memoire quand un compte est supprime."""
+    cancel_offline_timer(prenom)
+    info = PRESENT.pop(prenom, {})
+    gid = GAME_BY_PLAYER.get(prenom)
+    remove_player_from_lobby(prenom)
+    GAME_BY_PLAYER.pop(prenom, None)
+    # Nettoie aussi une association de partie dont le lobby aurait disparu.
+    game = GAMES.get(gid)
+    if game is not None:
+        game.remove_player(prenom)
+        if game.opened and len(game.answers) >= len(game.joueurs):
+            game.answer_event.set()
+    if io is not None:
+        sid = info.get('sid')
+        if sid:
+            try:
+                # PRESENT est deja nettoye : disconnect ne relance aucun timer.
+                io.server.disconnect(sid, namespace='/')
+            except Exception as exc:
+                print(f'[qcm-web] deconnexion impossible pour {prenom!r}: {exc!r}')
+        try:
+            push_lobbies()
+        except Exception as exc:
+            print(f'[qcm-web] actualisation des lobbies impossible: {exc!r}')
+
+
 class Game:
     def __init__(self, gid, lobby, questions):
         self.gid = gid
@@ -354,6 +390,7 @@ class Game:
         self.qindex = 0
         self.qstart = None
         self.opened = False
+        self.phase = 'demarrage'
         self.open_end = 0.0
         self.alive = True
         self.answer_event = Event()
@@ -361,6 +398,8 @@ class Game:
         self.delayed = getattr(lobby, 'delayed_feedback', False)
         self.retry_queue = []
         self.feedback_buffer = []
+        self.completed = []
+        self.reveal = None
         # Anti-triche : chaque joueur voit les boutons dans un ordre different.
         # perms[prenom][qindex] = permutation, position affichee i -> index
         # d'origine perm[i]. Generee paresseusement (les reposes en fin de
@@ -393,17 +432,51 @@ class Game:
             self.scores.pop(prenom, None)
 
     def current_payload(self, prenom):
-        if not (0 <= self.qindex < len(self.questions)):
+        if self.phase not in ('lecture', 'ouverture', 'correction') or not (0 <= self.qindex < len(self.questions)):
             return None
         question = self.questions[self.qindex]
         perm = self._perm_for(prenom, self.qindex)
+        answer = self.answers.get(prenom)
         return {
             'gid': self.gid, 'q': self.qindex + 1, 'total': len(self.questions),
             'question': question['question'],
             'choix': [question['choices'][i] for i in perm],
             'temps': question['time'], 'image': question['image'],
-            'phase': 'ouverture' if self.opened else 'lecture',
+            'phase': self.phase,
             'ends_at': self.open_end, 'now': time.time(),
+            'deja_repondu': answer is not None,
+            'choice': perm.index(answer[0]) if answer is not None else None,
+        }
+
+    def history_payload(self, prenom):
+        """Ne restitue que les reponses du joueur, sans reveler le differe."""
+        history = []
+        for item in self.completed:
+            index = item['index']
+            question = self.questions[index]
+            perm = self._perm_for(prenom, index)
+            answer = item['answers'].get(prenom)
+            revealed = not (self.delayed and not self.review)
+            history.append({
+                'q': index + 1, 'question': question['question'],
+                'choix': [question['choices'][i] for i in perm],
+                'ma': perm.index(answer[0]) if answer is not None else None,
+                'correct': perm.index(question['answer']) if revealed else None,
+                'explication': question.get('explication', '') if revealed else '',
+            })
+        return history
+
+    def reveal_payload(self, prenom):
+        if self.reveal is None or self.phase != 'correction' or (self.delayed and not self.review):
+            return None
+        question = self.questions[self.qindex]
+        correct = question['answer']
+        return {
+            'gid': self.gid, 'q': self.qindex + 1,
+            'correct': self._perm_for(prenom, self.qindex).index(correct),
+            'bonne': question['choices'][correct], 'detail': self.reveal['detail'],
+            'scores': self.scores, 'cloturee_tot': self.reveal['cloturee_tot'],
+            'explication': question.get('explication', ''),
         }
 
     def run(self):
@@ -423,6 +496,9 @@ class Game:
                 self.answers = {}
                 self.answer_event = Event()
                 self.opened = False
+                self.phase = 'lecture'
+                self.qstart = None
+                self.reveal = None
 
                 self.open_end = time.time() + QCM_READ_TIME_S + question['time']
 
@@ -434,6 +510,7 @@ class Game:
                     break
 
                 self.opened = True
+                self.phase = 'ouverture'
                 self.qstart = time.monotonic()
 
                 self.open_end = time.time() + question['time']
@@ -446,6 +523,9 @@ class Game:
                     self.answer_event.wait(timeout=remaining)
                 if not self.alive or not self.joueurs:
                     break
+
+                self.opened = False
+                self.phase = 'correction'
 
                 cloturee_tot = (len(self.answers) >= len(self.joueurs)
                                 and time.time() < self.open_end - 0.5)
@@ -477,25 +557,20 @@ class Game:
                         except Exception:
                             pass
 
+                self.completed.append({'index': self.qindex, 'answers': dict(self.answers)})
+                self.reveal = {'detail': detail, 'cloturee_tot': cloturee_tot}
                 if self.delayed and not self.review:
                     self.feedback_buffer.append({
                         'q': self.qindex + 1, 'correct': correct,
                         'explication': question.get('explication', ''),
                     })
                 else:
-                    def reveal_payload(player, question=question, correct=correct,
-                                       detail=detail, cloturee_tot=cloturee_tot):
-                        return {
-                            'gid': self.gid, 'q': self.qindex + 1,
-                            'correct': self._perm_for(player, self.qindex).index(correct),
-                            'bonne': question['choices'][correct], 'detail': detail,
-                            'scores': self.scores,
-                            'cloturee_tot': cloturee_tot,
-                            'explication': question.get('explication', ''),
-                        }
-                    self.send_each('qcm_reveal', reveal_payload)
+                    self.send_each('qcm_reveal', self.reveal_payload)
                     print(f'[qcm-web] {self.gid} q{self.qindex + 1} reveal '
                           f'(anticipée={cloturee_tot}), scores={self.scores}')
+                # La question courante reste celle de la correction jusqu'a
+                # la fin de la pause, notamment pendant une reconnexion.
+                io.sleep(0 if (self.delayed and not self.review) else QCM_REVEAL_TIME_S)
                 self.qindex += 1
                 if self.review and self.qindex >= len(self.questions) and self.retry_queue:
                     # Micro-spacing : les questions ratees sont reposees une fois en fin de session.
@@ -507,8 +582,9 @@ class Game:
                         retry.append(qretry)
                     self.questions.extend(retry)
                     self.retry_queue = []
-                io.sleep(0 if (self.delayed and not self.review) else QCM_REVEAL_TIME_S)
 
+            self.opened = False
+            self.phase = 'terminee'
             classement = sorted(self.scores.items(), key=lambda item: -item[1])
             if _record_game is not None:
                 try:
@@ -555,6 +631,9 @@ class Game:
             push_lobbies()
 
 def try_start_lobby(lobby):
+    from config import module_enabled
+    if not module_enabled('qcm'):
+        return
     if lobby.etat != 'attente' or not lobby.everyone_ready():
         return
     if not PRESENT.get(lobby.leader, {}).get('connected'):
@@ -596,13 +675,16 @@ def try_start_lobby(lobby):
           f'(thèmes={lobby.themes or "tous"}, chapitres={lobby.chapitres or "tous"}, n={len(questions)})')
     push_lobbies()
     io.sleep(QCM_START_DELAY_S)
-    if lobby.etat != 'partie' or lobby.game is not game or not lobby.everyone_ready() or not game.joueurs:
+    if (lobby.etat != 'partie' or lobby.game is not game or not lobby.everyone_ready()
+            or not game.joueurs or not module_enabled('qcm')):
         GAMES.pop(gid, None)
         for player in list(game.joueurs):
             GAME_BY_PLAYER.pop(player, None)
         lobby.game = None
         if lobby.etat == 'partie':
             lobby.etat = 'attente'
+        if not module_enabled('qcm'):
+            io.emit('qcm_error', {'message': 'Le module QCM est désactivé.'}, room=lobby.room())
         push_lobbies()
         return
     io.start_background_task(game.run)
@@ -622,9 +704,12 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
     @io.on('qcm_join_page')
     def on_join_page():
         from config import module_enabled
-        if not module_enabled('qcm'):
+        prenom = _current_player()
+        gid = GAME_BY_PLAYER.get(prenom or '')
+        # Une partie deja engagee reste jouable si le professeur ferme le
+        # module entre-temps, y compris apres une reconnexion reseau.
+        if not module_enabled('qcm') and gid not in GAMES:
             return False
-        prenom = session.get('sr_user')
         print(f'[qcm-web] join: prenom={prenom!r} sid={request.sid}')
         if not prenom:
             return False
@@ -651,11 +736,14 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
                 'gid': game.gid, 'joueurs': game.joueurs, 'scores': game.scores,
                 'total': len(game.questions), 'theme': game.theme,
                 'media': questions_media(game.questions), 'resync': True,
+                'review': game.review, 'history': game.history_payload(prenom),
             }, room=request.sid)
             payload = game.current_payload(prenom)
             if payload:
-                payload['deja_repondu'] = prenom in game.answers
                 io.emit('qcm_question', payload, room=request.sid)
+                reveal = game.reveal_payload(prenom)
+                if reveal is not None:
+                    io.emit('qcm_reveal', reveal, room=request.sid)
             print(f'[qcm-web] {prenom} resynchronisé sur {gid}')
         push_lobbies()
 
@@ -683,7 +771,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_leave_page')
     def on_leave_page():
-        prenom = session.get('sr_user')
+        prenom = _current_player()
         if not prenom or GAME_BY_PLAYER.get(prenom):
             return
         PRESENT.pop(prenom, None)
@@ -693,8 +781,11 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_lobby_create')
     def on_lobby_create(data):
-        prenom = session.get('sr_user')
-        data = data or {}
+        from config import module_enabled
+        if not module_enabled('qcm'):
+            return {'ok': False, 'message': 'Le module QCM est désactivé.'}
+        prenom = _current_player()
+        data = data if isinstance(data, dict) else {}
         if not prenom or not PRESENT.get(prenom, {}).get('connected'):
             return
         if LOBBY_BY_PLAYER.get(prenom):
@@ -714,8 +805,11 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_lobby_join')
     def on_lobby_join(data):
-        prenom = session.get('sr_user')
-        data = data or {}
+        from config import module_enabled
+        if not module_enabled('qcm'):
+            return {'ok': False, 'message': 'Le module QCM est désactivé.'}
+        prenom = _current_player()
+        data = data if isinstance(data, dict) else {}
         if not prenom or not PRESENT.get(prenom, {}).get('connected'):
             return
         lid = str(data.get('id') or '')
@@ -739,7 +833,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_lobby_leave')
     def on_lobby_leave(data):
-        prenom = session.get('sr_user')
+        prenom = _current_player()
         if not prenom:
             return
         lid = LOBBY_BY_PLAYER.get(prenom)
@@ -755,8 +849,11 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_lobby_ready')
     def on_lobby_ready(data):
-        prenom = session.get('sr_user')
-        data = data or {}
+        from config import module_enabled
+        prenom = _current_player()
+        data = data if isinstance(data, dict) else {}
+        if bool(data.get('pret', True)) and not module_enabled('qcm'):
+            return {'ok': False, 'message': 'Le module QCM est désactivé.'}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
         lobby = LOBBIES.get(lid) if lid else None
         if lobby is None or lobby.etat != 'attente':
@@ -769,7 +866,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_lobby_review')
     def on_lobby_review(data):
-        prenom = session.get('sr_user')
+        prenom = _current_player()
         data = data or {}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
         lobby = LOBBIES.get(lid) if lid else None
@@ -792,7 +889,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_lobby_feedback')
     def on_lobby_feedback(data):
-        prenom = session.get('sr_user')
+        prenom = _current_player()
         data = data or {}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
         lobby = LOBBIES.get(lid) if lid else None
@@ -806,7 +903,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_lobby_theme')
     def on_lobby_theme(data):
-        prenom = session.get('sr_user')
+        prenom = _current_player()
         data = data or {}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
         lobby = LOBBIES.get(lid) if lid else None
@@ -833,7 +930,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_lobby_chapitre')
     def on_lobby_chapitre(data):
-        prenom = session.get('sr_user')
+        prenom = _current_player()
         data = data or {}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
         lobby = LOBBIES.get(lid) if lid else None
@@ -869,7 +966,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_lobby_length')
     def on_lobby_length(data):
-        prenom = session.get('sr_user')
+        prenom = _current_player()
         data = data or {}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
         lobby = LOBBIES.get(lid) if lid else None
@@ -888,7 +985,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_lobby_kick')
     def on_lobby_kick(data):
-        prenom = session.get('sr_user')
+        prenom = _current_player()
         data = data or {}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
         lobby = LOBBIES.get(lid) if lid else None
@@ -915,7 +1012,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_answer')
     def on_answer(data):
-        prenom = session.get('sr_user')
+        prenom = _current_player()
         if not isinstance(data, dict):
             return {'ok': False, 'raison': 'choix invalide'}
         gid = GAME_BY_PLAYER.get(prenom or '')
@@ -923,14 +1020,18 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
         if game is None or not game.alive:
             return {'ok': False, 'raison': 'pas de partie en cours'}
         try:
-            choice = int((data or {}).get('choice'))
+            choice = qcm_integer(data.get('choice'))
+            question_number = qcm_integer(data.get('q'))
         except (TypeError, ValueError):
             return {'ok': False, 'raison': 'choix invalide'}
+        if data.get('gid') != game.gid or question_number != game.qindex + 1:
+            return {'ok': False, 'raison': 'question terminée'}
         if not (0 <= game.qindex < len(game.questions)):
             return {'ok': False, 'raison': 'question terminée'}
         question = game.questions[game.qindex]
-        if not game.opened or game.qstart is None:
-            return {'ok': False, 'raison': 'phase de lecture'}
+        if not game.opened or game.phase != 'ouverture' or game.qstart is None:
+            reason = 'phase de lecture' if game.phase == 'lecture' else 'question terminée'
+            return {'ok': False, 'raison': reason}
         if prenom in game.answers:
             return {'ok': False, 'raison': 'déjà répondu'}
         # Le client envoie la POSITION du bouton chez lui ; on la traduit en
@@ -951,7 +1052,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
 
     @io.on('qcm_quit')
     def on_quit(data):
-        prenom = session.get('sr_user')
+        prenom = _current_player()
         if not prenom:
             return
         gid = GAME_BY_PLAYER.get(prenom)

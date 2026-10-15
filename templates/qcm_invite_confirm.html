@@ -50,7 +50,7 @@
     <h1>QCM</h1>
     <p>Tu vas rejoindre la partie sous le prénom :</p>
     <p><strong>{{ prenom }}</strong></p>
-    <form method="post" action="{{ url_for('consume_qcm_invite', token=token) }}">
+    <form method="post" action="{{ url_for('qcm_invites.consume_qcm_invite', token=token) }}">
       <button type="submit">Rejoindre le QCM</button>
     </form>
   </main>

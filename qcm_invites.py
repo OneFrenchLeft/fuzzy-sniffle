@@ -180,10 +180,12 @@ def consume_qcm_invite(token):
             message="Ce lien QCM vient déjà d'être utilisé."
         ), 410
 
-    # Xiao: Fresh session after accepting the invite.
+    # L'identite stable du compte est aussi necessaire aux evenements SocketIO.
+    from auth import bind_sr_user
     session.clear()
-    session['sr_user'] = row['prenom']
-    session.permanent = True
+    if not bind_sr_user(row['prenom']):
+        return render_template('qcm_invite_error.html',
+                               message="Ce compte n'existe plus. Demande un nouveau lien."), 410
     try:
         conn = db()
         log_event(conn, row['prenom'], 'invite_used')
