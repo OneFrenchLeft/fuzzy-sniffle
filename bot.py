@@ -14,6 +14,7 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 from dotenv import load_dotenv
+from config import forgecards_paused
 
 # ---------------------------------------------------------------------------
 # Bot Discord Forgecards — lit la base du site.
@@ -38,7 +39,8 @@ SITE_URL = os.environ.get('MADEC_SITE_URL', '').rstrip('/')
 # Base des appels internes bot -> site (streak guard, log d'events) : local
 # par defaut car le bot tourne sur la meme machine que le site.
 INTERNAL_API_BASE = os.environ.get('MADEC_INTERNAL_API_BASE', 'http://127.0.0.1:5000').rstrip('/')
-DEFAULT_PARAMS = {'max_active_num': 36, 'daily_new_limit': 3, 'daily_review_limit': 3, 'reminder_hour': None}
+DEFAULT_PARAMS = {'max_active_num': 36, 'daily_new_limit': 3, 'daily_review_limit': 3,
+                  'reminder_hour': None, 'module_forgecards': 1}
 JOKER_CAP = 2
 JOKER_EVERY = 4
 BOT_EXCLUDED_PRENOMS = frozenset({'admin'})
@@ -113,6 +115,8 @@ def read_params():
         data = json.loads(PARAMS_PATH.read_text(encoding='utf-8'))
     except Exception:
         data = {}
+    if not isinstance(data, dict):
+        data = {}
     out = DEFAULT_PARAMS.copy()
     for k in list(out):
         try:
@@ -131,6 +135,9 @@ def read_params():
             }
         except (TypeError, ValueError):
             pass
+    pauses = data.get('_forgecards_pauses')
+    if isinstance(pauses, list):
+        out['_forgecards_pauses'] = pauses
     return out
 
 
@@ -141,6 +148,9 @@ def today_paris():
 def compute_daily(conn, prenom, params):
     """Decompose la journee : dues, faites, total (capte par quota), restantes."""
     today = today_paris()
+    if forgecards_paused(today, params):
+        return dict.fromkeys(('due_new', 'due_review', 'new_done', 'review_done',
+                              'total', 'done', 'remaining'), 0)
     max_active = params['max_active_num']
     # Meme definition de "du" que le site (streak._due_count) : hors serie
     # exclus, et les fiches d'un increment du jour ne sont dues que demain.
@@ -174,7 +184,6 @@ def compute_daily(conn, prenom, params):
     ).fetchall()
     new_done = sum(c for w, c in done if w)
     review_done = sum(c for w, c in done if not w)
-    total = min(params['daily_new_limit'], due_new) + min(params['daily_review_limit'], due_review)
     # Eliot: le reste = le quota pas encore consomme, borne par ce qui est
     # encore du. L'ancienne formule min(limit, du) - fait soustrayait les
     # reviews faites du compte de cartes dues : un eleve qui avait fait 1
@@ -182,6 +191,7 @@ def compute_daily(conn, prenom, params):
     # 2 autres (cas Eddie). Aligne sur la logique du site (sr.py).
     remaining = (min(max(0, params['daily_new_limit'] - new_done), due_new)
                  + min(max(0, params['daily_review_limit'] - review_done), due_review))
+    total = new_done + review_done + remaining
     return {'due_new': due_new, 'due_review': due_review, 'new_done': new_done,
             'review_done': review_done, 'total': total, 'done': new_done + review_done,
             'remaining': remaining}
@@ -191,11 +201,12 @@ def compute_remaining(conn, prenom, params):
     return compute_daily(conn, prenom, params)['remaining']
 
 
-def compute_streak(conn, prenom):
+def compute_streak(conn, prenom, params=None):
     """Jours consecutifs avec >= 1 review OU jour valide (sr_daily_streak).
 
     Les reviews de hors-serie ne valident pas un jour : elles sont du bonus.
     """
+    params = read_params() if params is None else params
     rows = conn.execute(
         'SELECT DISTINCT substr(r.created_at,1,10) FROM reviews r '
         'JOIN forgecards f ON f.numero = r.numero '
@@ -209,12 +220,23 @@ def compute_streak(conn, prenom):
     if not days:
         return 0
     cursor = datetime.now(TZ_PARIS).date()
-    if cursor.isoformat() not in days:
+    earliest = datetime.strptime(min(days), '%Y-%m-%d').date()
+    paused_today = forgecards_paused(cursor.isoformat(), params)
+    while (cursor >= earliest and cursor.isoformat() not in days
+           and forgecards_paused(cursor.isoformat(), params)):
         cursor -= timedelta(days=1)
-        if cursor.isoformat() not in days:
-            return 0
+    if not paused_today and cursor.isoformat() not in days:
+        cursor -= timedelta(days=1)
+        while (cursor >= earliest and cursor.isoformat() not in days
+               and forgecards_paused(cursor.isoformat(), params)):
+            cursor -= timedelta(days=1)
     streak = 0
-    while cursor.isoformat() in days:
+    while cursor >= earliest:
+        if cursor.isoformat() not in days and forgecards_paused(cursor.isoformat(), params):
+            cursor -= timedelta(days=1)
+            continue
+        if cursor.isoformat() not in days:
+            break
         streak += 1
         cursor -= timedelta(days=1)
     return streak
@@ -476,8 +498,14 @@ async def progress(interaction: discord.Interaction):
     if not prenom:
         await interaction.response.send_message("Tu n'es pas relié à un prenom.", ephemeral=True)
         return
+    params = read_params()
+    if forgecards_paused(today_paris(), params):
+        await interaction.response.send_message(
+            '⏸️ Forgecards est en pause : aucune carte obligatoire ni joker dépensé.',
+            ephemeral=True)
+        return
     conn = fc_db()
-    d = compute_daily(conn, prenom, read_params())
+    d = compute_daily(conn, prenom, params)
     conn.close()
     if d['total'] == 0:
         await interaction.response.send_message(
@@ -742,11 +770,17 @@ class Duel:
                         f"tu avais donné **{fmt_grade(given)}**.")
                 except Exception:
                     pass
-            channel = client.get_channel(self.channel_id)
-            if channel:
-                await channel.send(
-                    f"🏆 **{winner.display_name}** remporte le duel sur la forgecard n°{self.numero} "
-                    f"! GG")
+            try:
+                channel = client.get_channel(self.channel_id)
+                if channel:
+                    await channel.send(
+                        f"🏆 **{winner.display_name}** remporte le duel sur la forgecard n°{self.numero} "
+                        f"! GG")
+            except Exception as exc:
+                print(f'[duel] resultat public impossible: {exc!r}')
+            finally:
+                self._cleanup()
+            return
         self._cleanup()
 
     async def _grade_timeout(self):
@@ -1064,6 +1098,8 @@ async def _post(path, payload, timeout=10):
 @tasks.loop(time=[dtime(hour=h, minute=1, tzinfo=TZ_PARIS) for h in range(24)])
 async def daily_reminder():
     params = read_params()
+    if forgecards_paused(today_paris(), params):
+        return
     configured = params.get('reminder_hour')
     target_hour = configured if isinstance(configured, int) else REMINDER_HOUR
     if datetime.now(TZ_PARIS).hour != target_hour:
@@ -1136,10 +1172,13 @@ def plan_drop_announcement(nums, last, pending_str, now):
 
 @tasks.loop(minutes=2)
 async def watch_new_cards():
+    params = read_params()
+    if forgecards_paused(today_paris(), params):
+        return
     ch_id = get_setting('channel_id')
     if not ch_id:
         return
-    max_active = read_params()['max_active_num']
+    max_active = params['max_active_num']
     conn = fc_db()
     rows = conn.execute(
         'SELECT numero FROM forgecards WHERE numero <= ? ORDER BY numero',
@@ -1187,6 +1226,9 @@ async def watch_new_cards():
 @tasks.loop(seconds=15)
 async def rotate_status():
     now = datetime.now(TZ_PARIS)
+    if forgecards_paused(now.date().isoformat(), read_params()):
+        await client.change_presence(activity=discord.CustomActivity(name='Forgecards en pause'))
+        return
     if now.hour >= 23 or now.hour < 7:
         await client.change_presence(activity=discord.Streaming(name='📹 les forgecards que tu n\'as pas faites', url='https://www.youtube.com/watch?v=E4WlUXrJgy4'))
         return

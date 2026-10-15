@@ -61,7 +61,7 @@ def _ensure_states(conn, prenom, today):
     missing = [(prenom, qid, today) for qid in index if qid not in existing]
     if missing:
         conn.executemany(
-            "INSERT INTO qcm_sr_state (prenom, qid, state, next_review, repetitions, lapses) "
+            "INSERT OR IGNORE INTO qcm_sr_state (prenom, qid, state, next_review, repetitions, lapses) "
             "VALUES (?, ?, 'new', ?, 0, 0)", missing)
         conn.commit()
 
@@ -195,45 +195,48 @@ def ankimie_review(qid):
         correct = 1 if grade >= 2 else 0
     params = read_params()
     retention = _retention(params)
-    now = now_paris()
     conn = db()
-    row = conn.execute(
-        'SELECT * FROM qcm_sr_state WHERE prenom=? AND qid=?', (prenom, qid)).fetchone()
-    if row is None:
-        conn.execute(
-            "INSERT INTO qcm_sr_state (prenom, qid, state, next_review, repetitions, lapses) "
-            "VALUES (?, ?, 'new', ?, 0, 0)", (prenom, qid, now.date().isoformat()))
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        now = now_paris()
         row = conn.execute(
             'SELECT * FROM qcm_sr_state WHERE prenom=? AND qid=?', (prenom, qid)).fetchone()
-    was_new = 1 if (row['repetitions'] or 0) == 0 else 0
-    reps = (row['repetitions'] or 0) + 1
-    lapses = (row['lapses'] or 0) + (1 if grade == 1 else 0)
-    r = apply_review(row['stability'], row['difficulty'], row['last_review'],
-                     grade, now, retention)
-    conn.execute(
-        'UPDATE qcm_sr_state SET stability=?, difficulty=?, state=?, last_review=?, '
-        'next_review=?, repetitions=?, lapses=?, last_retrievability=? '
-        'WHERE prenom=? AND qid=?',
-        (r['stability'], r['difficulty'], r['state'], now.isoformat(), r['next_review'],
-         reps, lapses, r['retrievability_before'], prenom, qid))
-    cur = conn.execute(
-        'INSERT INTO qcm_sr_reviews(qid, prenom, chapitre, result, grade, correct, was_new, duration_seconds, created_at) '
-        'VALUES (?,?,?,?,?,?,?,?,?)',
-        (qid, prenom, q.get('chapitre') or '', result, grade, correct, was_new, duration,
-         now.isoformat()))
-    # Snapshot de l'etat precedent pour "annuler la derniere note".
-    conn.execute(
-        'INSERT OR REPLACE INTO ankimie_undo(prenom, review_id, qid, prev_stability, prev_difficulty, '
-        'prev_state, prev_last_review, prev_next_review, prev_repetitions, prev_lapses, '
-        'prev_last_retrievability, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-        (prenom, cur.lastrowid, qid, row['stability'], row['difficulty'], row['state'],
-         row['last_review'], row['next_review'], row['repetitions'] or 0, row['lapses'] or 0,
-         row['last_retrievability'], now.isoformat()))
-    log_event(conn, prenom, 'ankimie_review', f'{qid}:{result}')
-    conn.commit()
-    conn.close()
-    return jsonify({'ok': True, 'qid': qid, 'correct': correct, **r,
-                    'repetitions': reps})
+        if row is None:
+            conn.execute(
+                "INSERT INTO qcm_sr_state (prenom, qid, state, next_review, repetitions, lapses) "
+                "VALUES (?, ?, 'new', ?, 0, 0)", (prenom, qid, now.date().isoformat()))
+            row = conn.execute(
+                'SELECT * FROM qcm_sr_state WHERE prenom=? AND qid=?', (prenom, qid)).fetchone()
+        was_new = 1 if (row['repetitions'] or 0) == 0 else 0
+        reps = (row['repetitions'] or 0) + 1
+        lapses = (row['lapses'] or 0) + (1 if grade == 1 else 0)
+        r = apply_review(row['stability'], row['difficulty'], row['last_review'],
+                         grade, now, retention)
+        conn.execute(
+            'UPDATE qcm_sr_state SET stability=?, difficulty=?, state=?, last_review=?, '
+            'next_review=?, repetitions=?, lapses=?, last_retrievability=? '
+            'WHERE prenom=? AND qid=?',
+            (r['stability'], r['difficulty'], r['state'], now.isoformat(), r['next_review'],
+             reps, lapses, r['retrievability_before'], prenom, qid))
+        cur = conn.execute(
+            'INSERT INTO qcm_sr_reviews(qid, prenom, chapitre, result, grade, correct, was_new, duration_seconds, created_at) '
+            'VALUES (?,?,?,?,?,?,?,?,?)',
+            (qid, prenom, q.get('chapitre') or '', result, grade, correct, was_new, duration,
+             now.isoformat()))
+        # Snapshot de l'etat precedent pour "annuler la derniere note".
+        conn.execute(
+            'INSERT OR REPLACE INTO ankimie_undo(prenom, review_id, qid, prev_stability, prev_difficulty, '
+            'prev_state, prev_last_review, prev_next_review, prev_repetitions, prev_lapses, '
+            'prev_last_retrievability, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+            (prenom, cur.lastrowid, qid, row['stability'], row['difficulty'], row['state'],
+             row['last_review'], row['next_review'], row['repetitions'] or 0, row['lapses'] or 0,
+             row['last_retrievability'], now.isoformat()))
+        log_event(conn, prenom, 'ankimie_review', f'{qid}:{result}')
+        conn.commit()
+        return jsonify({'ok': True, 'qid': qid, 'correct': correct, **r,
+                        'repetitions': reps, 'review_id': cur.lastrowid})
+    finally:
+        conn.close()
 
 
 @bp.route('/api/ankimie/undo', methods=['POST'])
@@ -244,40 +247,46 @@ def ankimie_undo():
     et retire la review du journal. Une seule profondeur (derniere carte)."""
     ensure_db()
     prenom = session['sr_user']
+    data = request.get_json(silent=True)
+    if (not isinstance(data, dict) or type(data.get('review_id')) is not int
+            or data['review_id'] <= 0):
+        return jsonify({'ok': False, 'error': 'Recharge la page avant d’annuler cette note.'}), 400
     conn = db()
-    undo = conn.execute('SELECT * FROM ankimie_undo WHERE prenom=?', (prenom,)).fetchone()
-    if not undo:
-        conn.close()
-        return jsonify({'ok': False, 'error': 'Rien à annuler.'}), 404
-    review = conn.execute(
-        'SELECT id FROM qcm_sr_reviews WHERE id=? AND prenom=?',
-        (undo['review_id'], prenom)).fetchone()
-    if not review:
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        undo = conn.execute('SELECT * FROM ankimie_undo WHERE prenom=?', (prenom,)).fetchone()
+        if not undo:
+            return jsonify({'ok': False, 'error': 'Rien à annuler.'}), 404
+        if undo['review_id'] != data['review_id']:
+            return jsonify({'ok': False, 'error': 'La dernière note a changé. Recharge la page.'}), 409
+        review = conn.execute(
+            'SELECT id FROM qcm_sr_reviews WHERE id=? AND prenom=?',
+            (undo['review_id'], prenom)).fetchone()
+        if not review:
+            conn.execute('DELETE FROM ankimie_undo WHERE prenom=?', (prenom,))
+            conn.commit()
+            return jsonify({'ok': False, 'error': 'Déjà annulée.'}), 404
+        # La review annulee doit etre la plus recente de l'eleve, sinon
+        # l'annulation casserait la chronologie FSRS des cartes suivantes.
+        last = conn.execute(
+            'SELECT id FROM qcm_sr_reviews WHERE prenom=? ORDER BY id DESC LIMIT 1',
+            (prenom,)).fetchone()
+        if not last or last['id'] != review['id']:
+            return jsonify({'ok': False, 'error': 'Seule la toute dernière carte peut être annulée.'}), 409
+        conn.execute('DELETE FROM qcm_sr_reviews WHERE id=?', (review['id'],))
+        conn.execute(
+            'UPDATE qcm_sr_state SET stability=?, difficulty=?, state=?, last_review=?, '
+            'next_review=?, repetitions=?, lapses=?, last_retrievability=? '
+            'WHERE prenom=? AND qid=?',
+            (undo['prev_stability'], undo['prev_difficulty'], undo['prev_state'] or 'new',
+             undo['prev_last_review'], undo['prev_next_review'], undo['prev_repetitions'] or 0,
+             undo['prev_lapses'] or 0, undo['prev_last_retrievability'], prenom, undo['qid']))
         conn.execute('DELETE FROM ankimie_undo WHERE prenom=?', (prenom,))
+        log_event(conn, prenom, 'ankimie_undo', undo['qid'])
         conn.commit()
+        return jsonify({'ok': True, 'qid': undo['qid'], 'review_id': undo['review_id']})
+    finally:
         conn.close()
-        return jsonify({'ok': False, 'error': 'Déjà annulée.'}), 404
-    # La review annulee doit etre la plus recente de l'eleve, sinon
-    # l'annulation casserait la chronologie FSRS des cartes suivantes.
-    last = conn.execute(
-        'SELECT id FROM qcm_sr_reviews WHERE prenom=? ORDER BY id DESC LIMIT 1',
-        (prenom,)).fetchone()
-    if not last or last['id'] != review['id']:
-        conn.close()
-        return jsonify({'ok': False, 'error': 'Seule la toute dernière carte peut être annulée.'}), 409
-    conn.execute('DELETE FROM qcm_sr_reviews WHERE id=?', (review['id'],))
-    conn.execute(
-        'UPDATE qcm_sr_state SET stability=?, difficulty=?, state=?, last_review=?, '
-        'next_review=?, repetitions=?, lapses=?, last_retrievability=? '
-        'WHERE prenom=? AND qid=?',
-        (undo['prev_stability'], undo['prev_difficulty'], undo['prev_state'] or 'new',
-         undo['prev_last_review'], undo['prev_next_review'], undo['prev_repetitions'] or 0,
-         undo['prev_lapses'] or 0, undo['prev_last_retrievability'], prenom, undo['qid']))
-    conn.execute('DELETE FROM ankimie_undo WHERE prenom=?', (prenom,))
-    log_event(conn, prenom, 'ankimie_undo', undo['qid'])
-    conn.commit()
-    conn.close()
-    return jsonify({'ok': True, 'qid': undo['qid']})
 
 
 @bp.route('/api/admin/ankimie/reset/<prenom>', methods=['POST'])
@@ -287,13 +296,15 @@ def ankimie_reset_student(prenom):
     en nouvelles). Le journal des reviews est conserve."""
     ensure_db()
     conn = db()
-    if not conn.execute('SELECT 1 FROM users WHERE prenom=?', (prenom,)).fetchone():
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        if not conn.execute('SELECT 1 FROM users WHERE prenom=?', (prenom,)).fetchone():
+            return jsonify({'ok': False, 'error': 'Élève introuvable.'}), 404
+        n = _reset_states(conn, 'prenom=?', (prenom,))
+        conn.commit()
+        return jsonify({'ok': True, 'reset': n})
+    finally:
         conn.close()
-        return jsonify({'ok': False, 'error': 'Élève introuvable.'}), 404
-    n = _reset_states(conn, 'prenom=?', (prenom,))
-    conn.commit()
-    conn.close()
-    return jsonify({'ok': True, 'reset': n})
 
 
 @bp.route('/api/admin/ankimie/reset-question/<qid>', methods=['POST'])
@@ -303,14 +314,19 @@ def ankimie_reset_question(qid):
     apres correction d'un enonce). Le journal des reviews est conserve."""
     ensure_db()
     conn = db()
-    n = _reset_states(conn, 'qid=?', (qid,))
-    conn.commit()
-    conn.close()
-    return jsonify({'ok': True, 'reset': n})
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        n = _reset_states(conn, 'qid=?', (qid,))
+        conn.commit()
+        return jsonify({'ok': True, 'reset': n})
+    finally:
+        conn.close()
 
 
 def _reset_states(conn, where, args):
     today = now_paris().date().isoformat()
+    # Une annulation ancienne ne doit pas restaurer l'etat efface par le prof.
+    conn.execute('DELETE FROM ankimie_undo WHERE ' + where, tuple(args))
     return conn.execute(
         "UPDATE qcm_sr_state SET stability=NULL, difficulty=NULL, state='new', "
         "last_review=NULL, next_review=?, repetitions=0, lapses=0, "

@@ -413,40 +413,42 @@ def sr_review(numero):
         # Steph: A failed card needs an actual explanation, not "idk".
         return jsonify({'ok': False, 'error': "Decris ton blocage (10 caracteres min) : items du bareme rates, endroit ou tu as bloque..."}), 400
 
-    now = now_paris()
     params = read_params()
     retention = float(params.get('fsrs_retention', 0.90))
 
     conn = db()
-    if not card_exists(conn, numero):
-        conn.close()
-        return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
-    prof_row = conn.execute('SELECT teacher_difficulty FROM forgecards WHERE numero=?', (numero,)).fetchone()
-    prof_difficulty = prof_row['teacher_difficulty'] if prof_row else None
-    row = ensure_sr_row(conn, prenom, numero)
-    was_new = 1 if (row['repetitions'] or 0) == 0 else 0
-    reps = (row['repetitions'] or 0) + 1
-    lapses = (row['lapses'] or 0) + (1 if grade == 1 else 0)
-    weights = get_user_weights(conn, prenom)
-    r = apply_review(row['stability'], row['difficulty'], row['last_review'], grade, now, retention,
-                     w=weights, prof_difficulty=prof_difficulty)
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        now = now_paris()
+        if not card_exists(conn, numero):
+            return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
+        prof_row = conn.execute('SELECT teacher_difficulty FROM forgecards WHERE numero=?', (numero,)).fetchone()
+        prof_difficulty = prof_row['teacher_difficulty'] if prof_row else None
+        row = ensure_sr_row(conn, prenom, numero)
+        was_new = 1 if (row['repetitions'] or 0) == 0 else 0
+        reps = (row['repetitions'] or 0) + 1
+        lapses = (row['lapses'] or 0) + (1 if grade == 1 else 0)
+        weights = get_user_weights(conn, prenom)
+        r = apply_review(row['stability'], row['difficulty'], row['last_review'], grade, now, retention,
+                         w=weights, prof_difficulty=prof_difficulty)
 
-    conn.execute(
-        'UPDATE sr_state_user SET stability=?, difficulty=?, state=?, last_review=?, next_review=?, '
-        'repetitions=?, lapses=?, last_retrievability=? WHERE prenom=? AND numero=?',
-        (r['stability'], r['difficulty'], r['state'], now.isoformat(), r['next_review'],
-         reps, lapses, r['retrievability_before'], prenom, numero)
-    )
-    conn.execute(
-        'INSERT INTO reviews(numero, prenom, result, note, duration_seconds, was_new, created_at) VALUES(?,?,?,?,?,?,?)',
-        (numero, prenom, result, note, duration, was_new, now.isoformat())
-    )
-    log_event(conn, prenom, 'review', f'{numero}:{result}')
-    conn.commit()
-    # Flying: Reconcile only after the review is safely committed.
-    streak = reconcile_streak(conn, prenom)
-    conn.close()
-    return jsonify({'ok': True, 'numero': numero, **r, 'repetitions': reps, 'lapses': lapses, 'streak': streak})
+        conn.execute(
+            'UPDATE sr_state_user SET stability=?, difficulty=?, state=?, last_review=?, next_review=?, '
+            'repetitions=?, lapses=?, last_retrievability=? WHERE prenom=? AND numero=?',
+            (r['stability'], r['difficulty'], r['state'], now.isoformat(), r['next_review'],
+             reps, lapses, r['retrievability_before'], prenom, numero)
+        )
+        conn.execute(
+            'INSERT INTO reviews(numero, prenom, result, note, duration_seconds, was_new, created_at) VALUES(?,?,?,?,?,?,?)',
+            (numero, prenom, result, note, duration, was_new, now.isoformat())
+        )
+        log_event(conn, prenom, 'review', f'{numero}:{result}')
+        conn.commit()
+        # Flying: Reconcile only after the review is safely committed.
+        streak = reconcile_streak(conn, prenom)
+        return jsonify({'ok': True, 'numero': numero, **r, 'repetitions': reps, 'lapses': lapses, 'streak': streak})
+    finally:
+        conn.close()
 
 @bp.route('/api/sr/<int:numero>/advance', methods=['POST'])
 @require_sr_user
@@ -460,25 +462,27 @@ def sr_advance(numero):
         # Eliot: Invalid input gets a safe default. Better than making the route complain.
         days = 1
     conn = db()
-    if not card_exists(conn, numero):
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        if not card_exists(conn, numero):
+            return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
+        row = ensure_sr_row(conn, prenom, numero)
+        base_date = now_paris().date()
+        if card_is_due(conn, prenom, numero, base_date.isoformat(), read_params()):
+            log_event(conn, prenom, 'sr_due_postponed', str(numero))
+        if row['next_review']:
+            try:
+                base_date = max(base_date, datetime.strptime(row['next_review'], '%Y-%m-%d').date())
+            except Exception:
+                # Xiao: Keep malformed legacy dates from killing the endpoint.
+                pass
+        new_next = (base_date + timedelta(days=days)).isoformat()
+        conn.execute('UPDATE sr_state_user SET next_review=? WHERE prenom=? AND numero=?', (new_next, prenom, numero))
+        log_event(conn, prenom, 'advance', f'{numero}:+{days}j')
+        conn.commit()
+        return jsonify({'ok': True, 'numero': numero, 'next_review': new_next})
+    finally:
         conn.close()
-        return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
-    row = ensure_sr_row(conn, prenom, numero)
-    base_date = now_paris().date()
-    if card_is_due(conn, prenom, numero, base_date.isoformat(), read_params()):
-        log_event(conn, prenom, 'sr_due_postponed', str(numero))
-    if row['next_review']:
-        try:
-            base_date = max(base_date, datetime.strptime(row['next_review'], '%Y-%m-%d').date())
-        except Exception:
-            # Xiao: Keep malformed legacy dates from killing the endpoint.
-            pass
-    new_next = (base_date + timedelta(days=days)).isoformat()
-    conn.execute('UPDATE sr_state_user SET next_review=? WHERE prenom=? AND numero=?', (new_next, prenom, numero))
-    log_event(conn, prenom, 'advance', f'{numero}:+{days}j')
-    conn.commit()
-    conn.close()
-    return jsonify({'ok': True, 'numero': numero, 'next_review': new_next})
 
 @bp.route('/api/sr/export', methods=['GET'])
 @require_admin

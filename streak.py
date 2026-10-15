@@ -13,11 +13,11 @@ Regles metier :
   - chaque mouvement de stock est trace dans joker_ledger (append-only).
 """
 from datetime import datetime, timedelta
-from config import JOKER_CAP, JOKER_EVERY, now_paris, read_params
+from config import JOKER_CAP, JOKER_EVERY, now_paris, read_params, forgecards_paused
 from db import db, log_event, apply_joker_change
 
 
-def activity_days(conn, prenom):
+def activity_days(conn, prenom, params=None):
     # Small: Don't forget validated days; reviews aren't the only source.
     # Eliot: les reviews de hors-serie sont exclues — une journee de HS seules
     # ne valide pas la serie (les HS sont du bonus, pas l'obligation quotidienne).
@@ -27,33 +27,58 @@ def activity_days(conn, prenom):
         'WHERE r.prenom=? AND f.hors_serie=0', (prenom,)).fetchall()}
     days |= {r[0] for r in conn.execute(
         'SELECT day FROM sr_daily_streak WHERE prenom=? AND validated>=1', (prenom,)).fetchall()}
+    # Une journee deja acquise reste acquise si le module est coupe ensuite.
     return days
 
 
-def compute_record(days):
+def compute_record(days, params=None):
     # Ethan: Sorted dates make the consecutive-day check deterministic.
+    params = read_params() if params is None else params
     record, run, prev = 0, 0, None
     for d in sorted(days):
         cur = datetime.strptime(d, '%Y-%m-%d').date()
-        run = run + 1 if prev and (cur - prev).days == 1 else 1
+        cursor = prev + timedelta(days=1) if prev else cur
+        while cursor < cur and forgecards_paused(cursor.isoformat(), params):
+            cursor += timedelta(days=1)
+        run = run + 1 if prev and cursor == cur else 1
         record = max(record, run)
         prev = cur
     return record
 
 
-def compute_streak(conn, prenom):
-    # Flying: This stays read-only. Steph, please don't "fix" the DB here again.
-    days = activity_days(conn, prenom)
+def _current_chain(days, params):
+    """Les pauses relient les jours actifs sans ajouter de jour a la serie."""
     if not days:
-        return 0
+        return 0, None
+    earliest = datetime.strptime(min(days), '%Y-%m-%d').date()
     cursor = now_paris().date()
-    if cursor.isoformat() not in days:
+    paused_today = forgecards_paused(cursor.isoformat(), params)
+    while (cursor >= earliest and cursor.isoformat() not in days
+           and forgecards_paused(cursor.isoformat(), params)):
         cursor -= timedelta(days=1)
-    streak = 0
-    while cursor.isoformat() in days:
+    if not paused_today and cursor.isoformat() not in days:
+        cursor -= timedelta(days=1)
+        while (cursor >= earliest and cursor.isoformat() not in days
+               and forgecards_paused(cursor.isoformat(), params)):
+            cursor -= timedelta(days=1)
+    streak, chain_start = 0, None
+    while cursor >= earliest:
+        day = cursor.isoformat()
+        if day not in days and forgecards_paused(day, params):
+            cursor -= timedelta(days=1)
+            continue
+        if day not in days:
+            break
         streak += 1
+        chain_start = day
         cursor -= timedelta(days=1)
-    return streak
+    return streak, chain_start
+
+
+def compute_streak(conn, prenom, params=None):
+    # Flying: This stays read-only. Steph, please don't "fix" the DB here again.
+    params = read_params() if params is None else params
+    return _current_chain(activity_days(conn, prenom, params), params)[0]
 
 
 def _due_count(conn, prenom, day, params, numero=None):
@@ -64,6 +89,8 @@ def _due_count(conn, prenom, day, params, numero=None):
     exclues : elles ne deviennent dues que le lendemain de l'increment,
     sinon un increment a 23h crame des jokers pour des cartes jamais vues.
     """
+    if forgecards_paused(day, params):
+        return 0
     max_active = int(params.get('max_active_num', 36))
     increment = params.get('_max_active_increment') or {}
     inc_date = str(increment.get('date', ''))
@@ -100,6 +127,8 @@ def _deck_count(conn, params):
 
 
 def close_day(conn, prenom, day, params, reason='guard_spend', allow_joker=True):
+    if forgecards_paused(day, params):
+        return 'paused'
     if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=? AND validated>=1',
                     (prenom, day)).fetchone():
         return 'already'
@@ -153,6 +182,8 @@ def streak_verdict(conn, prenom, params, when=None, prediction=False):
     # Eliot : Same issue as before but with streak_verdict: the guard and the UI can disagree on streak status if the guard has not yet closed the day. This is a problem because the UI may show "validated" while the guard has not yet processed the day, leading to confusion.
     when = when or now_paris()
     today = when.date().isoformat()
+    if forgecards_paused(today, params):
+        return 'paused'
     if prediction and when.hour == 23 and when.minute >= 55:
         return 'too_late'
     if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=? AND validated>=1',
@@ -194,6 +225,7 @@ def close_missed_days(conn, prenom, params, reason='guard_spend', max_back=62, i
         "  SELECT substr(created_at,1,10) AS d FROM reviews WHERE prenom=?"
         "  UNION SELECT day AS d FROM sr_daily_streak WHERE prenom=?"
         "  UNION SELECT substr(created_at,1,10) AS d FROM events WHERE prenom=?"
+        "    AND type NOT IN ('account_identity','account_deleted')"
         ")", (prenom, prenom, prenom)).fetchone()
     first_day = row['first_day'] if row else None
     if not first_day:
@@ -220,7 +252,7 @@ def close_missed_days(conn, prenom, params, reason='guard_spend', max_back=62, i
         allow_joker = cursor >= today - timedelta(days=1)
         outcome = close_day(conn, prenom, day, params, reason=reason,
                             allow_joker=allow_joker)
-        if outcome != 'already':
+        if outcome not in ('already', 'paused'):
             outcomes[day] = outcome
         if outcome == 'missed':
             break
@@ -236,7 +268,7 @@ def close_all_missed_days(params=None, reason='site_guard'):
     Discord ne fait que lire les resultats pour envoyer les DM.
     Retourne {prenom: {'streak': int, 'events': [...], 'jokers': int, 'closed': {...}}}.
     """
-    params = params or read_params()
+    params = read_params() if params is None else params
     # Le guard de 23h55 clot AUSSI aujourd'hui : la journee est finie (le
     # verdict UI dit deja 'too_late' a partir de 23h55) et la streak affichee
     # est correcte des ce soir au lieu d'etre fausse pendant 24h.
@@ -248,6 +280,13 @@ def close_all_missed_days(params=None, reason='site_guard'):
     results = {}
     for prenom in users:
         try:
+            if forgecards_paused(now.date().isoformat(), params):
+                jk = conn.execute('SELECT count FROM user_jokers WHERE prenom=?',
+                                  (prenom,)).fetchone()
+                results[prenom] = {'streak': compute_streak(conn, prenom, params),
+                                   'events': [], 'jokers': jk['count'] if jk else 0,
+                                   'closed': {}}
+                continue
             events = []
             outcomes = close_missed_days(conn, prenom, params, reason=reason,
                                          include_today=include_today)
@@ -256,13 +295,16 @@ def close_all_missed_days(params=None, reason='site_guard'):
             jk_before = conn.execute('SELECT count FROM user_jokers WHERE prenom=?',
                                      (prenom,)).fetchone()
             before = jk_before['count'] if jk_before else 0
-            streak = reconcile_streak(conn, prenom)
+            streak = reconcile_streak(conn, prenom, params)
             jk_after = conn.execute('SELECT count FROM user_jokers WHERE prenom=?',
                                     (prenom,)).fetchone()
             after = jk_after['count'] if jk_after else 0
             if after > before:
                 events.append('joker_awarded')
                 log_event(conn, prenom, 'joker_awarded', f'streak={streak}')
+            # Le journal d'un gain ouvre une transaction : la terminer avant
+            # que l'eleve suivant puisse commencer une depense atomique.
+            conn.commit()
             results[prenom] = {'streak': streak, 'events': events, 'jokers': after,
                                'closed': outcomes}
         except Exception as exc:
@@ -274,32 +316,24 @@ def close_all_missed_days(params=None, reason='site_guard'):
     return results
 
 
-def reconcile_streak(conn, prenom):
+def reconcile_streak(conn, prenom, params=None):
     # Take SQLite's write lock BEFORE reading reward progress. Concurrent
     # reviews and guards must not both pay the same milestone. This also works
     # when the caller already has an open transaction (e.g. a guard log entry).
+    params = read_params() if params is None else params
+    if forgecards_paused(now_paris().date().isoformat(), params):
+        return compute_streak(conn, prenom, params)
     with conn:
         conn.execute('UPDATE user_jokers SET count=count WHERE prenom=?', (prenom,))
-        return _reconcile_streak_locked(conn, prenom)
+        return _reconcile_streak_locked(conn, prenom, params)
 
 
-def _reconcile_streak_locked(conn, prenom):
-    days = activity_days(conn, prenom)
-    if not days:
+def _reconcile_streak_locked(conn, prenom, params):
+    streak, chain_start = _current_chain(activity_days(conn, prenom, params), params)
+    if not streak:
+        # Garder le marqueur si un gardien tardif repare ensuite hier.
         return 0
-    cursor = now_paris().date()
-    if cursor.isoformat() not in days:
-        cursor -= timedelta(days=1)
-        if cursor.isoformat() not in days:
-            # Retain the chain marker if a late guard subsequently repairs
-            # yesterday; otherwise its already processed rewards could replay.
-            return 0
-    streak = 0
-    while cursor.isoformat() in days:
-        streak += 1
-        cursor -= timedelta(days=1)
     milestone = streak // JOKER_EVERY
-    chain_start = (cursor + timedelta(days=1)).isoformat()
     jrow = conn.execute('SELECT count, last_milestone, milestone_chain_start FROM user_jokers WHERE prenom=?',
                         (prenom,)).fetchone()
     current = jrow['count'] if jrow else 0
