@@ -189,35 +189,25 @@
             </section>
             <section class="atelier-view" id="atelier-settings" hidden>
               <div class="atelier-heading"><p class="admin-eyebrow">Réglages</p><h2>Réglages de l’application</h2><p>Configurer les activités, les contenus, les révisions et le rappel Discord.</p></div>
-              <details class="admin-card admin-disclosure" data-setting-section="application" open>
-  <summary><span class="admin-step">1</span><span>Modules et personnalisation</span></summary>
-  <div class="admin-disclosure-body"><p class="admin-copy">Choisir les activités proposées aux élèves et les libellés affichés sur le site.</p><div class="fields-grid">
-<div class="field"><label class="admin-checkbox"><input type="checkbox" id="f-module-forgecards" class="admin-checkbox-input"> Forgecards (tirage, liste, répétition espacée)</label></div>
-<div class="field"><label class="admin-checkbox"><input type="checkbox" id="f-module-ankimie" class="admin-checkbox-input"> Ankimie</label></div>
-<div class="field"><label class="admin-checkbox"><input type="checkbox" id="f-module-qcm" class="admin-checkbox-input"> QCM</label></div>
-</div><p class="admin-copy">Désactiver un module le retire du menu des élèves ; ses statistiques restent accessibles dans l’administration.</p><div class="fields-grid">
-<div class="field"><label for="f-site-name">Nom du site (menu, logo)</label><input type="text" id="f-site-name" maxlength="60"></div>
-<div class="field"><label for="f-tirage-label">Nom du tirage de fiches (menu, accueil)</label><input type="text" id="f-tirage-label" maxlength="60"></div>
-</div></div>
-</details>
-<details class="admin-card admin-disclosure" data-setting-section="fiches">
-  <summary><span class="admin-step">2</span><span>Fiches disponibles et chapitres</span></summary>
+<details class="admin-card admin-disclosure" data-setting-section="fiches" open>
+  <summary><span class="admin-step">1</span><span>Fiches disponibles et chapitres</span></summary>
   <div class="admin-disclosure-body"><p class="admin-copy">Organiser les fiches PDF et définir les limites du tirage.</p><div class="fields-grid">
 <div class="field"><label for="f-max-active">Dernière fiche disponible</label><input type="number" id="f-max-active" min="1"></div>
 <div class="field"><label for="f-max-kholle">Dernière fiche pour le tirage oral</label><input type="number" id="f-max-kholle" min="0"></div>
 <div class="field"><label for="f-max-hs">Dernière hors-série tirable</label><input type="number" id="f-max-hs" min="0"></div>
-</div><div class="field admin-field-stack"><label for="f-chapitres">Chapitres des forgecards (un par ligne)</label><textarea id="f-chapitres" rows="8" spellcheck="false"></textarea><span class="hint">« Autre » est ajouté automatiquement s'il manque. Renommer un chapitre ne renomme pas les fiches existantes : elles seront rangées dans « Autre » à leur prochaine édition.</span></div></div>
 </details>
-<details class="admin-card admin-disclosure" data-setting-section="revision">
-  <summary><span class="admin-step">3</span><span>Révision des fiches</span></summary>
+
+<details class="admin-card admin-disclosure" data-setting-section="revision" open>
+  <summary><span class="admin-step">2</span><span>Révision des fiches</span></summary>
   <div class="admin-disclosure-body"><p class="admin-copy">Définir le rythme quotidien et l’objectif de mémorisation des fiches PDF.</p><div class="fields-grid">
-<div class="field"><label for="f-fsrs-retention">Objectif de mémorisation (%)</label><input type="number" id="f-fsrs-retention" step="1" min="80" max="97"></div>
+<div class="field"><label for="f-fsrs-retention">Objectif de mémorisation (%)</label><input type="number" id="f-fsrs-retention" step="1" min="70" max="97"></div>
 <div class="field"><label for="f-daily-new">Nouvelles fiches par jour</label><input type="number" id="f-daily-new" step="1" min="0" max="50"></div>
 <div class="field"><label for="f-daily-review">Révisions dues par jour</label><input type="number" id="f-daily-review" step="1" min="0" max="50"></div>
 </div></div>
 </details>
+
 <details class="admin-card admin-disclosure" data-setting-section="ankimie">
-  <summary><span class="admin-step">4</span><span>Révision Ankimie</span></summary>
+  <summary><span class="admin-step">3</span><span>Révision Ankimie</span></summary>
   <div class="admin-disclosure-body"><p class="admin-copy">Choisir les matières, le rythme et l’objectif de mémorisation des cartes Ankimie.</p><div class="field admin-field-stack"><label>Matières dans Ankimie</label>
             <div id="f-ank-subjects" class="admin-checkbox-list"></div>
           </div><div class="fields-grid">
@@ -225,11 +215,24 @@
 <div class="field"><label for="f-qcm-daily-new">Nouvelles cartes par jour</label><input type="number" id="f-qcm-daily-new" step="1" min="0" max="50"></div>
 </div><p class="admin-copy">Ankimie utilise automatiquement les chapitres actifs en QCM des matières cochées. Leur activation se gère dans les questions QCM.</p><button type="button" class="btn-ghost btn-small" data-admin-open="qcm" data-admin-pane="bank">Gérer les chapitres QCM</button></div>
 </details>
+
 <details class="admin-card admin-disclosure" data-setting-section="discord">
-  <summary><span class="admin-step">5</span><span>Rappel Discord</span></summary>
+  <summary><span class="admin-step">4</span><span>Rappel Discord</span></summary>
   <div class="admin-disclosure-body"><p class="admin-copy">Choisir l’heure quotidienne du rappel envoyé par le bot.</p><div class="fields-grid">
 <div class="field"><label for="f-reminder-hour">Heure du rappel Discord (0-23)</label><input type="number" id="f-reminder-hour" step="1" min="0" max="23"></div>
 </div></div>
+</details>
+
+<details class="admin-card admin-disclosure" data-setting-section="application">
+  <summary><span class="admin-step">5</span><span>Modules et personnalisation</span></summary>
+  <div class="admin-disclosure-body"><p class="admin-copy">Choisir les activités proposées aux élèves et les libellés affichés sur le site.</p><div class="fields-grid">
+<div class="field"><label class="admin-checkbox"><input type="checkbox" id="f-module-forgecards" class="admin-checkbox-input"> Forgecards (tirage, liste, répétition espacée)</label></div>
+<div class="field"><label class="admin-checkbox"><input type="checkbox" id="f-module-ankimie" class="admin-checkbox-input"> Ankimie</label></div>
+<div class="field"><label class="admin-checkbox"><input type="checkbox" id="f-module-qcm" class="admin-checkbox-input"> QCM</label></div>
+</div><p class="admin-copy">Désactiver un module le retire du menu des élèves ; ses statistiques restent accessibles dans l’administration.</p><div class="fields-grid">
+<div class="field"><label for="f-site-name">Nom du site (menu, logo)</label><input type="text" id="f-site-name" maxlength="60"></div>
+<div class="field"><label for="f-tirage-label">Nom du tirage de fiches (menu, accueil)</label><input type="text" id="f-tirage-label" maxlength="60"></div>
+</div><div class="field admin-field-stack"><label for="f-chapitres">Chapitres des forgecards (un par ligne)</label><textarea id="f-chapitres" rows="8" spellcheck="false"></textarea><span class="hint">« Autre » est ajouté automatiquement s'il manque. Renommer un chapitre ne renomme pas les fiches existantes : elles seront rangées dans « Autre » à leur prochaine édition.</span></div></div>
 </details>
 <div class="admin-settings-actions">
   <button type="button" class="btn-save" onclick="saveParams()">Enregistrer tous les réglages</button>
