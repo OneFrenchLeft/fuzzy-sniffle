@@ -14,9 +14,12 @@ espacée (FSRS modifié), QCM en direct façon kahoot, et bot Discord
 
 ## Administration des contenus
 
-La banque QCM se gère avec des formulaires, un import CSV avec aperçu et des
-chapitres activables. Ankimie utilise des collections de ces mêmes questions.
-Le JSON reste disponible dans « Mode avancé — édition JSON ».
+L’administration regroupe le contenu, les réglages et le suivi des élèves. La
+banque QCM se gère avec des formulaires, un import CSV avec aperçu et des chapitres
+activables. Ankimie utilise automatiquement les chapitres QCM actifs des matières
+choisies dans les réglages. Le JSON reste disponible dans « Édition avancée (JSON) ».
+Désactiver Forgecards suspend ses obligations et préserve la série et les jokers ;
+le site et le bot utilisent les mêmes dates de pause.
 
 Voir [le guide et les notes de migration](docs/admin-content.md) pour les
 comportements, les API et les commandes de vérification.

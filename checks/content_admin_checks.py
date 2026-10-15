@@ -225,7 +225,6 @@ class ContentAdministration(unittest.TestCase):
         conn.execute('INSERT INTO qcm_answers(qid,theme,chapitre,question,prenom,ok) VALUES(?,?,?,?,?,0)',
                      (optics['qid'], 'physique', 'Optique', optics['question'], 'Élève'))
         conn.commit(); conn.close()
-        qcm_engine._review_query = lambda _: [{'qid': optics['qid'], 'created_at': '2026-10-12'}]
         original = config.QCM_FILES['physique'].read_bytes()
         response = self.client.put('/api/admin/content/physique/chapters', json={'chapitre': 'Optique', 'qcm_active': False})
         self.assertEqual(response.status_code, 200)
@@ -233,35 +232,48 @@ class ContentAdministration(unittest.TestCase):
         self.assertEqual(len(self.questions()), 2)
         self.assertNotIn(['physique', 'Optique'], qcm_engine.available_chapters(['physique']))
         self.assertNotIn(optics['qid'], [q['qid'] for q in qcm_engine.pick_questions(['physique'], 20)])
-        self.assertEqual(qcm_engine.review_questions('Élève', ['physique'], 10), [])
+        with patch.object(qcm_engine, '_review_query', return_value=[{'qid': optics['qid'], 'created_at': '2026-10-12'}]):
+            self.assertEqual(qcm_engine.review_questions('Élève', ['physique'], 10), [])
         self.assertEqual(self.count('qcm_answers'), 1)
         self.assertEqual(self.client.get('/api/qcm/last-states').get_json()['wrongs'], {})
 
-    def test_ankimie_deactivation_retains_review_state(self):
+    def test_shared_chapter_activation_retains_ankimie_review_state(self):
         q = self.questions('chimie')[0]
         self.assertEqual(self.client.post('/api/ankimie/' + q['qid'] + '/review', json={'result': 'good'}).status_code, 200)
-        response = self.client.put('/api/admin/content/chimie/chapters', json={'chapitre': 'Optique', 'ankimie_active': False})
+        response = self.client.put('/api/admin/content/chimie/chapters', json={'chapitre': 'Optique', 'qcm_active': False})
         self.assertEqual(response.status_code, 200)
+        chapter = next(ch for ch in response.get_json()['chapters'] if ch['chapitre'] == 'Optique')
+        self.assertFalse(chapter['qcm_active'])
+        self.assertFalse(chapter['ankimie_active'])
+        self.assertNotIn(q['qid'], [item['qid'] for item in qcm_engine.pick_questions(['chimie'], 20)])
         self.assertNotIn(q['qid'], [c['qid'] for c in self.client.get('/api/ankimie/today').get_json()['cards']])
         self.assertEqual(self.client.get('/api/ankimie/' + q['qid'] + '/answer').status_code, 404)
         self.assertEqual(self.client.post('/api/ankimie/' + q['qid'] + '/review', json={'result': 'good'}).status_code, 404)
         self.assertEqual(self.count('qcm_sr_reviews'), 1)
-        self.client.put('/api/admin/content/chimie/chapters', json={'chapitre': 'Optique', 'ankimie_active': True})
+        self.assertEqual(self.client.put('/api/admin/content/chimie/chapters', json={'chapitre': 'Optique', 'qcm_active': True}).status_code, 200)
+        self.assertEqual(self.client.get('/api/ankimie/' + q['qid'] + '/answer').status_code, 200)
         conn = database.db()
         self.assertEqual(conn.execute('SELECT repetitions FROM qcm_sr_state WHERE qid=?', (q['qid'],)).fetchone()[0], 1)
         conn.close()
 
-    def test_ankimie_deck_is_chimie_only(self):
-        # Le deck Ankimie pioche dans les chapitres de chimie actifs, jamais
-        # dans les autres matieres — meme avec ankimie_active=True.
+    def test_ankimie_deck_uses_configured_subjects_and_shared_activation(self):
+        # Par défaut, seules les questions de chimie actives sont proposées.
         q = self.questions()[0]
         self.assertNotIn(q['qid'], ankimie._deck_index())
-        self.client.put('/api/admin/content/physique/chapters', json={'chapitre': 'Optique', 'ankimie_active': True})
+        config.write_params({'ankimie_subjects': ['physique']})
+        self.assertIn(q['qid'], ankimie._deck_index())
+        self.assertFalse(any(item['qid'] in ankimie._deck_index() for item in self.questions('chimie')))
+        self.client.put('/api/admin/content/physique/chapters', json={'chapitre': 'Optique', 'qcm_active': False})
         self.assertNotIn(q['qid'], ankimie._deck_index())
-        # Nouveau chapitre chimie : inactif par defaut, ses questions ne
-        # tombent pas dans Ankimie tant qu'il n'est pas active.
-        self.client.post('/api/admin/content/chimie/chapters', json={'chapitre': 'Solutions'})
-        self.assertFalse(next(ch for ch in self.bank('chimie')['chapters'] if ch['chapitre'] == 'Solutions')['ankimie_active'])
+        self.assertEqual(self.client.post('/api/admin/content/physique/chapters', json={'chapitre': 'Solutions'}).status_code, 200)
+        created = self.client.post('/api/admin/qcm/physique/questions', json={'question': self.question(chapter='Solutions')})
+        self.assertEqual(created.status_code, 200)
+        new = next(item for item in created.get_json()['questions'] if item['chapitre'] == 'Solutions')
+        self.assertNotIn(new['qid'], ankimie._deck_index())
+        self.client.put('/api/admin/content/physique/chapters', json={'chapitre': 'Solutions', 'qcm_active': True})
+        self.assertIn(new['qid'], ankimie._deck_index())
+        config.write_params({'ankimie_subjects': []})
+        self.assertEqual(ankimie._deck_index(), {})
 
     def test_revision_conflict_and_duplicate_submission(self):
         revision = self.bank()['revision']
