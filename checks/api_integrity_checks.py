@@ -474,5 +474,38 @@ class ApiIntegrity(unittest.TestCase):
         self.assertEqual((stats['due_today'], stats['todo_today']), (0, 0))
 
 
+    def test_public_list_shows_only_latest_grade_for_current_student(self):
+        self.add_card(2)
+        self.add_card(9001, hors_serie=True, code='h1')
+        student = self.client()
+        self.login(student)
+        for numero, result in ((1, 'good'), (1, 'easy'), (9001, 'hard')):
+            self.assertEqual(student.post('/api/sr/' + str(numero) + '/review', json={'result': result}).status_code, 200)
+        self.add_user('Autre')
+        other = self.client()
+        with other.session_transaction() as session:
+            session['sr_user'] = 'Autre'
+        self.assertEqual(other.post('/api/sr/1/review', json={'result': 'again', 'note': 'Je dois reprendre la méthode.'}).status_code, 200)
+        response = student.get('/api/forgecards/public?prenom=Autre')
+        grades = {card['numero']: card['last_result'] for card in response.get_json()}
+        self.assertEqual(grades, {1: 'easy', 2: None, 9001: 'hard'})
+        self.assertIn('no-store', response.headers['Cache-Control'])
+        self.assertIn('Cookie', response.vary)
+        self.assertEqual(other.get('/api/forgecards/public').get_json()[0]['last_result'], 'again')
+        for client in (self.client(), self.admin):
+            self.assertTrue(all(card['last_result'] is None for card in client.get('/api/forgecards/public').get_json()))
+
+    def test_reset_clears_last_grade_and_logout_never_exposes_it(self):
+        student = self.client()
+        self.login(student)
+        self.assertEqual(student.post('/api/sr/1/review', json={'result': 'easy'}).status_code, 200)
+        self.assertEqual(student.get('/api/forgecards/public').get_json()[0]['last_result'], 'easy')
+        self.assertEqual(self.admin.post('/api/forgecards/1/reset-stats').status_code, 200)
+        self.assertIsNone(student.get('/api/forgecards/public').get_json()[0]['last_result'])
+        self.assertEqual(student.post('/api/sr/1/review', json={'result': 'hard'}).status_code, 200)
+        self.assertEqual(student.post('/api/sr/logout').status_code, 200)
+        self.assertIsNone(student.get('/api/forgecards/public').get_json()[0]['last_result'])
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

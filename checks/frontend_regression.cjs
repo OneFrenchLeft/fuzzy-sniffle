@@ -206,6 +206,61 @@ test('le refus du stockage ne bloque pas l’authentification ni le chargement A
   } finally { await f.context.close(); }
 });
 
+test('la liste affiche les quatre dernières évaluations et préserve recherche, mobile et déconnexion', async () => {
+  const cards = [
+    { numero: 1, titre: 'Conservation de l’énergie mécanique et hypothèses de travail', chapitre: 'Mécanique', last_result: 'easy' },
+    { numero: 2, titre: 'Réussite', last_result: 'good' },
+    { numero: 3, titre: 'Difficulté', last_result: 'hard' },
+    { numero: 4, titre: 'À reprendre', last_result: 'again' },
+    { numero: 5, titre: 'Jamais évaluée' },
+    { numero: 9001, label: 'H1', titre: 'Bonus', hors_serie: true, last_result: 'easy' },
+  ];
+  let loggedIn = true;
+  const f = await fixture('liste', {
+    '/api/forgecards/public': route => route.fulfill({ json: cards.map(card => ({ ...card, last_result: loggedIn ? card.last_result : null })) }),
+    '/api/sr/logout': route => { loggedIn = false; return route.fulfill({ json: { ok: true } }); },
+  });
+  try {
+    await f.page.waitForFunction(() => currentSrUser === 'Alice' && document.querySelectorAll('.last-review-badge').length === 5);
+    assert.deepEqual(await f.page.locator('#public-list .last-review-badge').allTextContents(), ['Automatique ✅', 'Réussi 👍', 'Difficile 🟠', 'Pas réussi ❌']);
+    assert.equal(await f.page.locator('#public-list .public-card').last().locator('.last-review-badge').count(), 0);
+    assert.equal(await f.page.locator('#hors-serie-list .last-review-badge').textContent(), 'Automatique ✅');
+    await f.page.addStyleTag({ content: fs.readFileSync(path.join(root, 'static/css/main.css'), 'utf8') + fs.readFileSync(path.join(root, 'static/css/public.css'), 'utf8') });
+    await f.page.locator('body').evaluate(el => el.classList.add('public-app'));
+    for (const width of [320, 390, 1280]) for (const theme of ['light', 'dark']) {
+      await f.page.setViewportSize({ width, height: 850 });
+      await f.page.evaluate(theme => applyTheme(theme), theme);
+      assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    }
+    await f.page.locator('#liste-search').fill('mécanique');
+    await f.page.waitForFunction(() => document.querySelectorAll('#public-list .public-card').length === 1);
+    await f.page.evaluate(() => loadPublicList());
+    assert.equal(await f.page.locator('#public-list .public-card').count(), 1);
+    assert.match(await f.page.locator('#public-list summary').innerText(), /Automatique ✅/);
+    await f.page.evaluate(() => logoutSr());
+    await f.page.waitForFunction(() => currentSrUser === null && document.querySelectorAll('#public-list .public-card').length === 1 && document.querySelectorAll('.last-review-badge').length === 0);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.context.close(); }
+});
+
+test('une réponse de liste ancienne ne réaffiche pas les notes du compte précédent', async () => {
+  const list = { innerHTML: '' };
+  const { context } = sandbox({ 'public-list': list });
+  const first = deferred(), second = deferred(), rendered = [];
+  let count = 0;
+  context.fetchJson = () => (++count === 1 ? first.promise : second.promise);
+  context.renderPublicList = cards => rendered.push(cards);
+  const oldLoad = context.loadPublicList();
+  const newLoad = context.loadPublicList();
+  second.resolve([{ numero: 1, last_result: null }]);
+  await newLoad;
+  first.resolve([{ numero: 1, last_result: 'easy' }]);
+  await oldLoad;
+  assert.equal(rendered.length, 1);
+  assert.equal(context.allPublicCards[0].last_result, null);
+  assert.equal(context.lastReviewBadgeHtml('<img onerror=alert(1)>'), '');
+});
+
 test('SR verrouille note, report et case pendant le POST puis permet de réessayer', async () => {
   const failure = deferred();
   const f = await fixture('sr', {

@@ -292,6 +292,7 @@ function loadCompteDashboard() {
 
 function refreshAuthUI() {
   var user = currentSrUser || null;
+  if (PAGE === 'liste') loadPublicList();
   if (user) loadCompteDashboard();
   if (user && PAGE === 'compte') loadSrHsPreference();
   document.querySelectorAll('.auth-only').forEach(function (el) { el.hidden = !user; });
@@ -2222,6 +2223,20 @@ function lancerTirage() {
   });
 }
 
+function lastReviewBadgeHtml(result) {
+  var labels = { again: 'Pas réussi ❌', hard: 'Difficile 🟠', good: 'Réussi 👍', easy: 'Automatique ✅' };
+  if (!Object.prototype.hasOwnProperty.call(labels, result)) return '';
+  return '<span class="last-review-badge" title="Dernière autoévaluation">' + labels[result] + '</span>';
+}
+
+function filterPublicCards(query) {
+  var q = (query || '').trim().toLowerCase();
+  if (!q) return allPublicCards;
+  return allPublicCards.filter(function (c) {
+    return (c.titre || '').toLowerCase().indexOf(q) !== -1 || String(c.numero).indexOf(q) !== -1 || (c.chapitre || '').toLowerCase().indexOf(q) !== -1;
+  });
+}
+
 function renderHorsSerie(cards) {
   var box = document.getElementById('hors-serie-box');
   if (!box) return;
@@ -2235,6 +2250,7 @@ function renderHorsSerie(cards) {
     card.className = 'public-card';
     var html = '<summary><span class="name">Fiche ' + esc(c.label || c.numero) +
       (c.titre ? (' - ' + esc(c.titre)) : '') +
+      lastReviewBadgeHtml(c.last_result) +
       '<span class="chip-chapitre">' + esc(c.chapitre || 'Autre') + '</span>' +
       '<span class="chip-chapitre" style="background:rgba(230,126,34,.12);color:#e67e22">Hors-série</span>' +
       '</span><span class="card-chevron" aria-hidden="true"></span></summary>';
@@ -2266,7 +2282,7 @@ function renderPublicList(cards) {
   cards.forEach(function (c) {
     var card = document.createElement('details');
     card.className = 'public-card';
-    var html = '<summary><span class="name">Fiche ' + esc(c.label || c.numero) + (c.titre ? (' - ' + esc(c.titre)) : '') + '<span class="chip-chapitre">' + esc(c.chapitre || 'Autre') + '</span></span><span class="card-chevron" aria-hidden="true">▾</span></summary>';
+    var html = '<summary><span class="name">Fiche ' + esc(c.label || c.numero) + (c.titre ? (' - ' + esc(c.titre)) : '') + lastReviewBadgeHtml(c.last_result) + '<span class="chip-chapitre">' + esc(c.chapitre || 'Autre') + '</span></span><span class="card-chevron" aria-hidden="true">▾</span></summary>';
     html += '<div class="public-card-actions">' + pdfLinksHtml(c, 'Voir le sujet', 'Voir le bareme', true);
     if (c.indices) {
       html += '<button class="toggle-btn" aria-expanded="false">Voir les indices</button>';
@@ -2277,13 +2293,22 @@ function renderPublicList(cards) {
     list.appendChild(card);
   });
 }
+var publicListLoadVersion = 0;
 function loadPublicList() {
   var list = document.getElementById('public-list');
+  if (!list) return;
+  var version = ++publicListLoadVersion;
+  // Retirer les notes précédentes dès un changement de compte ou une relance.
+  allPublicCards = [];
+  renderHorsSerie([]);
   list.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">Chargement des fiches…</p>';
-  fetchJson('/api/forgecards/public').then(function (cards) {
+  return fetchJson('/api/forgecards/public').then(function (cards) {
+    if (version !== publicListLoadVersion) return;
     allPublicCards = cards;
-    renderPublicList(cards);
+    var search = document.getElementById('liste-search');
+    renderPublicList(filterPublicCards(search ? search.value : ''));
   }).catch(function () {
+    if (version !== publicListLoadVersion) return;
     list.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">Impossible de charger les fiches.</p><button class="btn-ghost btn-small" onclick="loadPublicList()">Réessayer</button>';
   });
 }
@@ -3267,11 +3292,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (clearBtn) clearBtn.style.display = q ? 'inline-block' : 'none';
       clearTimeout(searchTimer);
       searchTimer = setTimeout(function () {
-        if (!q) { renderPublicList(allPublicCards); return; }
-        var filtered = allPublicCards.filter(function (c) {
-          return (c.titre || '').toLowerCase().indexOf(q) !== -1 || String(c.numero).indexOf(q) !== -1 || (c.chapitre || '').toLowerCase().indexOf(q) !== -1;
-        });
-        renderPublicList(filtered);
+        renderPublicList(filterPublicCards(q));
       }, 150);
     });
   }
@@ -3285,7 +3306,12 @@ document.addEventListener('DOMContentLoaded', function () {
     };
   }
 
-  if (document.getElementById('public-list')) loadPublicList();
+  if (document.getElementById('public-list')) {
+    loadPublicList();
+    window.addEventListener('pageshow', function (event) {
+      if (event.persisted) loadPublicList();
+    });
+  }
   
   fetch('/api/sr/whoami')
     .then(function (r) { return r.ok ? r.json() : null; })

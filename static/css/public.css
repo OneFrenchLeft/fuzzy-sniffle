@@ -35,6 +35,21 @@
 .public-app .home-title{font-weight:800;line-height:1.2;letter-spacing:-.025em}
 .public-app .home-subtitle2{color:var(--muted);font-size:1rem;line-height:1.6}
 .public-app .sr-list{gap:.75rem}
+.public-app .last-review-badge{
+  display:inline-block;
+  max-width:100%;
+  margin-left:.5rem;
+  padding:.2rem .55rem;
+  border:1px solid var(--border);
+  border-radius:999px;
+  background:var(--bg);
+  color:var(--text);
+  font-size:.8rem;
+  font-weight:600;
+  line-height:1.5;
+  vertical-align:middle;
+  overflow-wrap:anywhere;
+}
 
 /* Ankimie keeps its single-card focus and colour-coded grading controls. */
 .public-app .ank-topbar{margin-bottom:1rem}

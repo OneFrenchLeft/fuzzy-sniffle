@@ -9,7 +9,7 @@ from helpers import (allowed_file, is_real_pdf, parse_teacher_difficulty, hs_sor
                      card_label, filenames_for, remove_pdf_if_exists, card_exists,
                      interleave_by_chapitre)
 
-from auth import require_admin
+from auth import require_admin, valid_sr_user
 from db import csv_safe, csv_response
 from replay import replay_reviews
 from streak import activity_days, compute_record, compute_streak
@@ -119,6 +119,7 @@ def list_forgecards():
 @bp.route('/api/forgecards/public')
 def list_forgecards_public():
     ensure_db()
+    prenom = valid_sr_user()
     q = (request.args.get('q') or '').strip().lower()
     params = read_params()
     max_active = int(params.get('max_active_num', 36))
@@ -133,10 +134,18 @@ def list_forgecards_public():
             "SELECT numero, code, titre, chapitre, teacher_difficulty, fiche_file, correction_file, bareme_file, indices, hors_serie FROM forgecards WHERE hors_serie = 1 ORDER BY numero ASC LIMIT ?",
             (max_hs,)
         ).fetchall()
+    last_results = {}
+    if prenom:
+        # Une seule lecture pour la dernière note de chaque fiche de cet élève.
+        last_results = {r['numero']: r['result'] for r in conn.execute(
+            'SELECT r.numero, r.result FROM reviews r '
+            'JOIN (SELECT numero, MAX(id) AS id FROM reviews WHERE prenom=? GROUP BY numero) latest '
+            'ON r.id=latest.id', (prenom,)).fetchall()}
     conn.close()
     cards = [dict(r) for r in rows]
     for c in cards:
         c['label'] = card_label(c.get('code'), c['hors_serie'])
+        c['last_result'] = last_results.get(c['numero'])
     if q:
         def match(c):
             label = (c.get('label') or '').lower()
@@ -146,7 +155,10 @@ def list_forgecards_public():
                     or (c.get('hors_serie') and q == label.lstrip('h'))
                     or q in (c.get('chapitre') or '').lower())
         cards = [c for c in cards if match(c)]
-    return jsonify(cards)
+    response = jsonify(cards)
+    response.headers['Cache-Control'] = 'private, no-store'
+    response.vary.add('Cookie')
+    return response
 
 @bp.route('/api/forgecards/upload', methods=['POST'])
 @require_admin
