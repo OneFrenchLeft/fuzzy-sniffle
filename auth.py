@@ -3,7 +3,7 @@
 from datetime import datetime
 from functools import wraps
 import hmac, io, time, secrets
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, request, session, current_app
 from werkzeug.utils import secure_filename
 import config
 from config import (EMOJI_KEYPAD, EMOJI_PW_LENGTH, EMOJI_SEP,
@@ -56,10 +56,89 @@ def require_admin(fn):
 def require_sr_user(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if not session.get('sr_user'):
+        if not valid_sr_user():
             return jsonify({'ok': False, 'error': 'unauthorized'}), 401
         return fn(*args, **kwargs)
     return wrapper
+
+
+def _account_identity(conn, prenom):
+    """Identité stable du compte, indépendante de son mot de passe."""
+    row = conn.execute(
+        "SELECT payload FROM events WHERE prenom=? AND type='account_identity' "
+        "ORDER BY id DESC LIMIT 1", (prenom,)).fetchone()
+    if row:
+        return row['payload']
+    identity = secrets.token_hex(24)
+    conn.execute(
+        "INSERT INTO events(prenom,type,payload,created_at) VALUES(?,'account_identity',?,?)",
+        (prenom, identity, now_paris().isoformat()))
+    return identity
+
+
+def _set_sr_session(prenom, identity):
+    session['sr_user'] = prenom
+    session['sr_account_identity'] = identity
+    session.permanent = True
+
+
+def bind_sr_user(prenom):
+    """Ouvre une session après un autre mode d’authentification, comme un lien QCM."""
+    ensure_db()
+    conn = db()
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        if not conn.execute('SELECT 1 FROM users WHERE prenom=?', (prenom,)).fetchone():
+            return False
+        identity = _account_identity(conn, prenom)
+        conn.commit()
+        _set_sr_session(prenom, identity)
+        return True
+    finally:
+        conn.close()
+
+
+def valid_sr_user():
+    """Refuse les comptes supprimés et les anciens cookies d’un compte recréé."""
+    prenom = session.get('sr_user')
+    if not isinstance(prenom, str) or not prenom:
+        return None
+    ensure_db()
+    conn = db()
+    try:
+        exists = conn.execute('SELECT 1 FROM users WHERE prenom=?', (prenom,)).fetchone()
+        row = conn.execute(
+            "SELECT payload FROM events WHERE prenom=? AND type='account_identity' "
+            "ORDER BY id DESC LIMIT 1", (prenom,)).fetchone() if exists else None
+        supplied = session.get('sr_account_identity')
+        if exists and isinstance(supplied, str) and row:
+            if hmac.compare_digest(supplied.encode('utf-8'), row['payload'].encode('utf-8')):
+                return prenom
+        elif exists and supplied is None:
+            # Migration des sessions antérieures à ce contrôle. Après une
+            # suppression, seul un nouveau login peut obtenir la nouvelle identité.
+            conn.execute('BEGIN IMMEDIATE')
+            exists = conn.execute('SELECT 1 FROM users WHERE prenom=?', (prenom,)).fetchone()
+            deleted = conn.execute(
+                "SELECT 1 FROM events WHERE prenom=? AND type='account_deleted' LIMIT 1",
+                (prenom,)).fetchone()
+            if exists and not deleted:
+                identity = _account_identity(conn, prenom)
+                conn.commit()
+                _set_sr_session(prenom, identity)
+                return prenom
+    finally:
+        conn.close()
+    session.pop('sr_user', None)
+    session.pop('sr_account_identity', None)
+    return None
+
+
+@bp.before_app_request
+def validate_sr_session():
+    # Les vues et certains exports lisent directement la session.
+    if session.get('sr_user'):
+        valid_sr_user()
 
 def require_module(name):
     """404 JSON si le module est desactive dans les parametres admin.
@@ -81,8 +160,10 @@ def login():
     ip = request.remote_addr or 'unknown'
     if rate_limited('admin_login_' + ip):
         return jsonify({'ok': False, 'error': 'trop de tentatives'}), 429
-    data = request.get_json(silent=True) or {}
-    candidate = str(data.get('password') or '')
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get('password', ''), str):
+        return jsonify({'ok': False, 'error': 'objet JSON et mot de passe texte attendus'}), 400
+    candidate = data.get('password') or ''
     # Eliot: Read it live. db.py may have generated a temp password AFTER this
     # module was imported (MADEC_ADMIN_PASSWORD missing from .env), and the
     # frozen import used to crash every login with a 500.
@@ -104,7 +185,9 @@ def logout():
 @bp.route('/api/sr/login', methods=['POST'])
 def sr_login():
     ensure_db()
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get('prenom', ''), str):
+        return jsonify({'ok': False, 'error': 'objet JSON et prénom texte attendus'}), 400
     prenom = (data.get('prenom') or '').strip()
     emojis = data.get('password') or []
     if not prenom:
@@ -116,34 +199,35 @@ def sr_login():
         return jsonify({'ok': False, 'error': 'trop de tentatives, patiente quelques minutes'}), 429
 
     if (not isinstance(emojis, list) or len(emojis) != EMOJI_PW_LENGTH
-            or not all(isinstance(e, str) for e in emojis)):
+            or not all(isinstance(e, str) and e in EMOJI_KEYPAD for e in emojis)):
         return jsonify({'ok': False, 'error': f'mot de passe invalide ({EMOJI_PW_LENGTH} emoji attendus)'}), 400
 
     conn = db()
-    row = conn.execute('SELECT emoji_password FROM users WHERE prenom=?', (prenom,)).fetchone()
-    conn.close()
-    stored = row['emoji_password'] if row and row['emoji_password'] else ''
-    # Xiao: Constant-time compare on the joined form. No timing leaks today.
-    if not stored or not hmac.compare_digest(stored, EMOJI_SEP.join(emojis)):
-        return jsonify({'ok': False, 'error': 'bad password'}), 403
-
+    try:
+        # Le compte ne peut pas être supprimé puis recréé pendant le login.
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute('SELECT emoji_password FROM users WHERE prenom=?', (prenom,)).fetchone()
+        stored = row['emoji_password'] if row and row['emoji_password'] else ''
+        if not stored or not hmac.compare_digest(stored.encode('utf-8'), EMOJI_SEP.join(emojis).encode('utf-8')):
+            return jsonify({'ok': False, 'error': 'bad password'}), 403
+        identity = _account_identity(conn, prenom)
+        log_event(conn, prenom, 'login')
+        conn.commit()
+    finally:
+        conn.close()
     reset_rate_limit('sr_login_' + ip + '_' + prenom)
-    session['sr_user'] = prenom
-    session.permanent = True
-    conn = db()
-    log_event(conn, prenom, 'login')
-    conn.commit()
-    conn.close()
+    _set_sr_session(prenom, identity)
     return jsonify({'ok': True, 'prenom': prenom})
 
 @bp.route('/api/sr/logout', methods=['POST'])
 def sr_logout():
     session.pop('sr_user', None)
+    session.pop('sr_account_identity', None)
     return jsonify({'ok': True})
 
 @bp.route('/api/sr/whoami', methods=['GET'])
 def sr_whoami():
-    prenom = session.get('sr_user')
+    prenom = valid_sr_user()
     if not prenom:
         return jsonify({'ok': False}), 401
     return jsonify({'ok': True, 'prenom': prenom})
@@ -174,22 +258,26 @@ def users_list():
 @require_admin
 def users_add():
     ensure_db()
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get('prenom', ''), str):
+        return jsonify({'ok': False, 'error': 'objet JSON et prénom texte attendus'}), 400
     prenom = (data.get('prenom') or '').strip()
     if not prenom:
         return jsonify({'ok': False, 'error': 'prenom requis'}), 400
     conn = db()
-    existing = conn.execute('SELECT emoji_password FROM users WHERE prenom=?', (prenom,)).fetchone()
-    if existing and existing['emoji_password']:
-
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        existing = conn.execute('SELECT emoji_password FROM users WHERE prenom=?', (prenom,)).fetchone()
+        if existing and existing['emoji_password']:
+            return jsonify({'ok': True, 'prenom': prenom, 'password': None})
+        pw_emojis = gen_emoji_password()
+        pw_str = EMOJI_SEP.join(pw_emojis)
+        conn.execute('INSERT OR IGNORE INTO users(prenom, emoji_password) VALUES(?,?)', (prenom, pw_str))
+        conn.execute('UPDATE users SET emoji_password=? WHERE prenom=? AND (emoji_password IS NULL OR emoji_password="")', (pw_str, prenom))
+        _account_identity(conn, prenom)
+        conn.commit()
+    finally:
         conn.close()
-        return jsonify({'ok': True, 'prenom': prenom, 'password': None})
-    pw_emojis = gen_emoji_password()
-    pw_str = EMOJI_SEP.join(pw_emojis)
-    conn.execute('INSERT OR IGNORE INTO users(prenom, emoji_password) VALUES(?,?)', (prenom, pw_str))
-    conn.execute('UPDATE users SET emoji_password=? WHERE prenom=? AND (emoji_password IS NULL OR emoji_password="")', (pw_str, prenom))
-    conn.commit()
-    conn.close()
     return jsonify({'ok': True, 'prenom': prenom, 'password': pw_emojis})
 
 @bp.route('/api/users/<prenom>/password', methods=['GET'])
@@ -225,17 +313,27 @@ def user_regen_password(prenom):
 def users_delete(prenom):
     ensure_db()
     conn = db()
-    conn.execute('DELETE FROM users WHERE prenom=?', (prenom,))
-    conn.execute('DELETE FROM sr_state_user WHERE prenom=?', (prenom,))
-    conn.execute('DELETE FROM sr_weights_user WHERE prenom=?', (prenom,))
-    conn.execute('DELETE FROM reviews WHERE prenom=?', (prenom,))
-    conn.execute('DELETE FROM sr_daily_streak WHERE prenom=?', (prenom,))
-    conn.execute('DELETE FROM user_jokers WHERE prenom=?', (prenom,))
-    conn.execute('DELETE FROM qcm_answers WHERE prenom=?', (prenom,))
-    conn.execute('DELETE FROM events WHERE prenom=?', (prenom,))
-    conn.execute('DELETE FROM qcm_invites WHERE prenom=?', (prenom,))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        for table in ('users', 'sr_state_user', 'sr_weights_user', 'reviews',
+                      'sr_daily_streak', 'user_jokers', 'qcm_answers', 'events',
+                      'qcm_invites', 'qcm_sr_state', 'qcm_sr_reviews', 'ankimie_undo'):
+            conn.execute('DELETE FROM ' + table + ' WHERE prenom=?', (prenom,))
+        # Même un second DELETE doit conserver ce marqueur : les cookies
+        # anciens ne doivent jamais adopter un compte recréé sous ce prénom.
+        conn.execute(
+            "INSERT INTO events(prenom,type,payload,created_at) VALUES(?,'account_deleted','',?)",
+            (prenom, now_paris().isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        from qcm_engine import revoke_player
+        revoke_player(prenom)
+    except Exception:
+        # La suppression en base est acquise, même si le moteur temps réel
+        # n’a pas pu déconnecter une ancienne connexion.
+        current_app.logger.exception('Nettoyage QCM impossible après suppression de %s', prenom)
     return jsonify({'ok': True})
 
 @bp.route('/api/users/<prenom>/joker', methods=['POST'])
@@ -270,6 +368,9 @@ def users_stats():
     ensure_db()
     conn = db()
     today = now_paris().date().isoformat()
+    params = read_params()
+    daily_new_limit = int(params.get('daily_new_limit', 3))
+    daily_review_limit = int(params.get('daily_review_limit', 3))
     users = [r['prenom'] for r in conn.execute('SELECT prenom FROM users ORDER BY prenom ASC').fetchall()]
 
     review_rows = conn.execute(
@@ -285,19 +386,36 @@ def users_stats():
     ).fetchall()
     review_by_prenom = {r['prenom']: r for r in review_rows}
 
-    due_rows = conn.execute(
-        "SELECT prenom, COUNT(*) as c FROM sr_state_user "
-        "WHERE next_review IS NULL OR next_review <= ? GROUP BY prenom",
-        (today,)
-    ).fetchall()
-    due_by_prenom = {r['prenom']: r['c'] for r in due_rows}
+    due_by_prenom = {}
+    if params.get('module_forgecards', 1):
+        increment = params.get('_max_active_increment') or {}
+        max_active = int(params.get('max_active_num', 36))
+        inc_from = int(increment.get('from', max_active))
+        inc_date = str(increment.get('date', ''))
+        # Même périmètre que SR : nouvelles sans état comprises, bonus et
+        # nouvelles fiches du drop du jour exclus des obligations du jour.
+        due_rows = conn.execute(
+            "SELECT u.prenom, "
+            "SUM(CASE WHEN COALESCE(s.repetitions,0)=0 THEN 1 ELSE 0 END) AS nouvelles, "
+            "SUM(CASE WHEN COALESCE(s.repetitions,0)>0 THEN 1 ELSE 0 END) AS revisions "
+            "FROM users u CROSS JOIN forgecards f "
+            "LEFT JOIN sr_state_user s ON s.prenom=u.prenom AND s.numero=f.numero "
+            "WHERE f.hors_serie=0 AND f.numero<=? "
+            "AND (s.next_review IS NULL OR s.next_review<=?) "
+            "AND NOT (s.numero IS NULL AND f.numero>? AND ?>=?) "
+            "GROUP BY u.prenom",
+            (max_active, today, inc_from, inc_date, today)).fetchall()
+        due_by_prenom = {r['prenom']: r for r in due_rows}
 
     done_rows = conn.execute(
-        "SELECT prenom, COUNT(*) as c FROM reviews "
-        "WHERE substr(created_at,1,10)=? GROUP BY prenom",
+        "SELECT r.prenom, COUNT(*) AS c, "
+        "SUM(CASE WHEN r.was_new=1 THEN 1 ELSE 0 END) AS nouvelles, "
+        "SUM(CASE WHEN COALESCE(r.was_new,0)!=1 THEN 1 ELSE 0 END) AS revisions "
+        "FROM reviews r JOIN forgecards f ON f.numero=r.numero "
+        "WHERE substr(r.created_at,1,10)=? AND f.hors_serie=0 GROUP BY r.prenom",
         (today,)
     ).fetchall()
-    done_by_prenom = {r['prenom']: r['c'] for r in done_rows}
+    done_by_prenom = {r['prenom']: r for r in done_rows}
 
     joker_rows = conn.execute('SELECT prenom, count FROM user_jokers').fetchall()
     jokers_by_prenom = {r['prenom']: r['count'] for r in joker_rows}
@@ -306,11 +424,18 @@ def users_stats():
     streak_by_prenom = {p: compute_streak(conn, p) for p in users}
 
     conn.close()
-    daily_review_limit = int(read_params().get('daily_review_limit', 3))
 
     stats = []
     for prenom in users:
         rv = review_by_prenom.get(prenom)
+        due = due_by_prenom.get(prenom)
+        done = done_by_prenom.get(prenom)
+        new_due = due['nouvelles'] if due else 0
+        review_due = due['revisions'] if due else 0
+        new_done = done['nouvelles'] if done else 0
+        review_done = done['revisions'] if done else 0
+        todo = (min(new_due, max(0, daily_new_limit - new_done)) +
+                min(review_due, max(0, daily_review_limit - review_done)))
         stats.append({
             'prenom': prenom,
             'total_reviews': rv['total'] if rv else 0,
@@ -320,13 +445,12 @@ def users_stats():
             'easy': rv['easy'] if rv else 0,
             'last_review': rv['last_review'] if rv else None,
             'avg_duration': round(rv['avg_duration']) if rv and rv['avg_duration'] is not None else None,
-            'due_today': due_by_prenom.get(prenom, 0),
-            'done_today': done_by_prenom.get(prenom, 0),
+            'due_today': new_due + review_due,
+            'done_today': done['c'] if done else 0,
             'daily_review_limit': daily_review_limit,
             'jokers': jokers_by_prenom.get(prenom, 0),
             'streak': streak_by_prenom.get(prenom, 0),
-            'todo_today': min(max(0, due_by_prenom.get(prenom, 0) - done_by_prenom.get(prenom, 0)),
-                              max(0, daily_review_limit - done_by_prenom.get(prenom, 0))),
+            'todo_today': todo,
         })
     return jsonify(stats)
 

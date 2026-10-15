@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Fiches (forgecards) cote admin : upload, edition, stats, notes."""
-import io, csv
+import io, csv, os, shutil, tempfile
 from datetime import datetime, timedelta
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from config import get_chapitres, UPLOADS, now_paris, read_params
 from db import db, ensure_db, log_event
 from helpers import (allowed_file, is_real_pdf, parse_teacher_difficulty, hs_sort_key,
@@ -15,6 +15,94 @@ from replay import replay_reviews
 from streak import activity_days, compute_record, compute_streak
 
 bp = Blueprint('cards', __name__)
+
+
+class _PdfChanges:
+    """Prépare les PDF et restaure leurs originaux si la transaction échoue."""
+
+    def __init__(self):
+        self.directory = tempfile.mkdtemp(prefix='.forgecards-', dir=UPLOADS)
+        self.pending = {}
+        self.backups = {}
+        self.applied = []
+        self.committed = False
+
+    def __enter__(self):
+        return self
+
+    def _temporary(self):
+        handle, path = tempfile.mkstemp(dir=self.directory)
+        os.close(handle)
+        return path
+
+    def save(self, uploaded, filename):
+        path = self._temporary()
+        uploaded.save(path)
+        self.pending[UPLOADS / filename] = path
+
+    def remove(self, filename):
+        if filename:
+            self.pending[UPLOADS / filename] = None
+
+    def rename(self, old_name, new_name):
+        if not old_name or old_name == new_name:
+            return
+        source = UPLOADS / old_name
+        if source.exists():
+            path = self._temporary()
+            shutil.copy2(source, path)
+            self.pending[UPLOADS / new_name] = path
+            self.remove(old_name)
+
+    def apply(self):
+        # Toutes les copies de secours précèdent la première modification.
+        for target in self.pending:
+            backup = None
+            if target.exists():
+                backup = self._temporary()
+                shutil.copy2(target, backup)
+            self.backups[target] = backup
+        for target, source in self.pending.items():
+            self.applied.append(target)
+            if source is None:
+                target.unlink(missing_ok=True)
+            else:
+                os.replace(source, target)
+
+    def commit(self):
+        self.committed = True
+
+    def __exit__(self, exc_type, exc, traceback):
+        if not self.committed:
+            for target in reversed(self.applied):
+                backup = self.backups[target]
+                if backup is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    os.replace(backup, target)
+        try:
+            shutil.rmtree(self.directory)
+        except OSError:
+            current_app.logger.exception('Nettoyage des PDF temporaires impossible')
+
+
+def _archive_card_reviews(conn, numero, hors_serie):
+    # Une révision hors-série ne devient jamais une validation de journée.
+    if not hors_serie:
+        conn.execute(
+            "UPDATE sr_daily_streak SET validated=max(validated,1) WHERE EXISTS ("
+            "SELECT 1 FROM reviews r WHERE r.numero=? AND r.prenom=sr_daily_streak.prenom "
+            "AND substr(r.created_at,1,10)=sr_daily_streak.day)", (numero,))
+        conn.execute(
+            "INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) "
+            "SELECT DISTINCT prenom, substr(created_at,1,10), 1 "
+            "FROM reviews WHERE numero=?",
+            (numero,))
+    conn.execute(
+        "INSERT INTO reviews_archive(numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee) "
+        "SELECT numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee FROM reviews WHERE numero=?",
+        (numero,))
+    conn.execute('DELETE FROM reviews WHERE numero=?', (numero,))
 
 @bp.route('/api/forgecards', methods=['GET'])
 @require_admin
@@ -93,9 +181,16 @@ def upload_forgecard():
             return jsonify({'ok': False, 'error': 'numero requis'}), 400
         numero = None
     else:
-        numero = int(numero)
+        try:
+            numero = int(numero)
+        except ValueError:
+            return jsonify({'ok': False, 'error': 'numero invalide'}), 400
+        if not 0 <= numero < 2 ** 63:
+            return jsonify({'ok': False, 'error': 'numero hors limites'}), 400
     conn = db()
     try:
+        # Le verrou protège aussi l’allocation des codes hors-série.
+        conn.execute('BEGIN IMMEDIATE')
         if hs_target:
             row_t = conn.execute("SELECT numero FROM forgecards WHERE code = ? AND hors_serie = 1", (hs_target,)).fetchone()
             if not row_t:
@@ -114,38 +209,36 @@ def upload_forgecard():
             code = str(numero)
         fiche_name, corr_name, bareme_name = filenames_for(code)
         existing = conn.execute('SELECT fiche_file, correction_file, bareme_file FROM forgecards WHERE numero=?', (numero,)).fetchone()
-        if existing:
-            # L'ancien barème n'est supprime QUE si un nouveau est fourni :
-            # sinon on conserve le fichier ET la reference en base.
-            for name in [existing['fiche_file'], existing['correction_file']]:
-                remove_pdf_if_exists(name)
+        final_bareme_name = bareme_name if bareme else (existing['bareme_file'] if existing else '')
+        with _PdfChanges() as files:
+            if existing:
+                files.remove(existing['fiche_file'])
+                files.remove(existing['correction_file'])
+                if bareme:
+                    files.remove(existing['bareme_file'])
+            files.save(fiche, fiche_name)
+            files.save(correction, corr_name)
             if bareme:
-                remove_pdf_if_exists(existing['bareme_file'])
-        fiche.save(UPLOADS / fiche_name)
-        correction.save(UPLOADS / corr_name)
-        final_bareme_name = ''
-        if bareme:
-            bareme.save(UPLOADS / bareme_name)
-            final_bareme_name = bareme_name
-        elif existing and existing['bareme_file']:
-            final_bareme_name = existing['bareme_file']
-        # UPDATE puis INSERT si absent : schema-agnostique. La base du serveur
-        # de test a ete migree par feat/multi-matieres, ou la PK de forgecards
-        # est (subject, numero) — ON CONFLICT(numero) y leve
-        # "does not match any PRIMARY KEY or unique index".
-        cur = conn.execute(
-            'UPDATE forgecards SET code=?, fiche_file=?, correction_file=?, bareme_file=?, '
-            'titre=?, indices=?, chapitre=?, teacher_difficulty=?, hors_serie=? WHERE numero=?',
-            (code, fiche_name, corr_name, final_bareme_name, titre, indices, chapitre,
-             teacher_difficulty, hors_serie, numero)
-        )
-        if cur.rowcount == 0:
-            conn.execute(
-                'INSERT INTO forgecards(numero, code, fiche_file, correction_file, bareme_file, titre, indices, chapitre, teacher_difficulty, hors_serie) '
-                'VALUES(?,?,?,?,?,?,?,?,?,?)',
-                (numero, code, fiche_name, corr_name, final_bareme_name, titre, indices, chapitre, teacher_difficulty, hors_serie)
+                files.save(bareme, bareme_name)
+            # UPDATE puis INSERT si absent : schema-agnostique. La base du serveur
+            # de test a ete migree par feat/multi-matieres, ou la PK de forgecards
+            # est (subject, numero) — ON CONFLICT(numero) y leve
+            # "does not match any PRIMARY KEY or unique index".
+            cur = conn.execute(
+                'UPDATE forgecards SET code=?, fiche_file=?, correction_file=?, bareme_file=?, '
+                'titre=?, indices=?, chapitre=?, teacher_difficulty=?, hors_serie=? WHERE numero=?',
+                (code, fiche_name, corr_name, final_bareme_name, titre, indices, chapitre,
+                 teacher_difficulty, hors_serie, numero)
             )
-        conn.commit()
+            if cur.rowcount == 0:
+                conn.execute(
+                    'INSERT INTO forgecards(numero, code, fiche_file, correction_file, bareme_file, titre, indices, chapitre, teacher_difficulty, hors_serie) '
+                    'VALUES(?,?,?,?,?,?,?,?,?,?)',
+                    (numero, code, fiche_name, corr_name, final_bareme_name, titre, indices, chapitre, teacher_difficulty, hors_serie)
+                )
+            files.apply()
+            conn.commit()
+            files.commit()
     finally:
         conn.close()
     return jsonify({'ok': True, 'numero': numero, 'code': code, 'label': card_label(code, hors_serie)})
@@ -155,31 +248,23 @@ def upload_forgecard():
 def delete_forgecard(numero):
     ensure_db()
     conn = db()
-    row = conn.execute('SELECT fiche_file, correction_file, bareme_file FROM forgecards WHERE numero=?', (numero,)).fetchone()
-    if not row:
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute('SELECT fiche_file, correction_file, bareme_file, hors_serie FROM forgecards WHERE numero=?', (numero,)).fetchone()
+        if not row:
+            return jsonify({'ok': False, 'error': 'not found'}), 404
+        with _PdfChanges() as files:
+            for name in (row['fiche_file'], row['correction_file'], row['bareme_file']):
+                files.remove(name)
+            _archive_card_reviews(conn, numero, row['hors_serie'])
+            conn.execute('DELETE FROM forgecards WHERE numero=?', (numero,))
+            conn.execute('DELETE FROM sr_state_user WHERE numero=?', (numero,))
+            conn.execute('DELETE FROM draw_history WHERE numero=?', (numero,))
+            files.apply()
+            conn.commit()
+            files.commit()
+    finally:
         conn.close()
-        return jsonify({'ok': False, 'error': 'not found'}), 404
-    conn.execute('DELETE FROM forgecards WHERE numero=?', (numero,))
-    conn.execute('DELETE FROM sr_state_user WHERE numero=?', (numero,))
-
-    # Preserver les jours d'activite de tous les eleves (sinon leurs streaks
-    # cassent retroactivement) puis archiver les reviews pour la tracabilite.
-    conn.execute(
-        "INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) "
-        "SELECT DISTINCT prenom, substr(created_at,1,10), 1 FROM reviews WHERE numero=?",
-        (numero,),
-    )
-    conn.execute(
-        "INSERT INTO reviews_archive(numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee) "
-        "SELECT numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee FROM reviews WHERE numero=?",
-        (numero,),
-    )
-    conn.execute('DELETE FROM reviews WHERE numero=?', (numero,))
-    conn.execute('DELETE FROM draw_history WHERE numero=?', (numero,))
-    conn.commit()
-    conn.close()
-    for name in [row['fiche_file'], row['correction_file'], row['bareme_file']]:
-        remove_pdf_if_exists(name)
     return jsonify({'ok': True})
 
 @bp.route('/api/forgecards/<int:numero>', methods=['PATCH'])
@@ -211,6 +296,7 @@ def edit_forgecard(numero):
     hors_serie_edit = 1 if (request.form.get('hors_serie') or '') == '1' else 0
     conn = db()
     try:
+        conn.execute('BEGIN IMMEDIATE')
         row = conn.execute('SELECT fiche_file, correction_file, bareme_file, code, hors_serie FROM forgecards WHERE numero=?', (numero,)).fetchone()
         if not row:
             return jsonify({'ok': False, 'error': 'not found'}), 404
@@ -220,45 +306,30 @@ def edit_forgecard(numero):
             code = f"h{max([hs_sort_key(c) for c in existing_codes] + [0]) + 1}"
         elif not hors_serie_edit and row['hors_serie']:
             code = str(numero)
-        if code != (row['code'] or str(numero)):
-            for old_name, new_name in zip(
-                    [row['fiche_file'], row['correction_file'], row['bareme_file']],
-                    filenames_for(code)):
-                old_path = UPLOADS / old_name if old_name else None
-                if old_name and old_name != new_name and old_path.exists():
-                    old_path.replace(UPLOADS / new_name)
-            conn.execute(
-                'UPDATE forgecards SET fiche_file=?, correction_file=?, bareme_file=? WHERE numero=?',
-                (filenames_for(code)[0],
-                 filenames_for(code)[1] if row['correction_file'] else '',
-                 filenames_for(code)[2] if row['bareme_file'] else '',
-                 numero))
-            row = conn.execute('SELECT fiche_file, correction_file, bareme_file, code, hors_serie FROM forgecards WHERE numero=?', (numero,)).fetchone()
         fiche_name, corr_name, bareme_name = filenames_for(code)
-        final_fiche_name = row['fiche_file']
-        final_corr_name = row['correction_file']
-        final_bareme_name = row['bareme_file']
-        if fiche:
-            fiche.save(UPLOADS / fiche_name)
-            final_fiche_name = fiche_name
-        if correction:
-            correction.save(UPLOADS / corr_name)
-            final_corr_name = corr_name
-        elif remove_correction:
-            remove_pdf_if_exists(row['correction_file'])
-            final_corr_name = ''
-        if bareme:
-            bareme.save(UPLOADS / bareme_name)
-            final_bareme_name = bareme_name
-        elif remove_bareme:
-            remove_pdf_if_exists(row['bareme_file'])
-            final_bareme_name = ''
-        conn.execute(
-            'UPDATE forgecards SET titre=?, indices=?, chapitre=?, fiche_file=?, correction_file=?, bareme_file=?, teacher_difficulty=?, hors_serie=?, code=? WHERE numero=?',
-            (titre, indices, chapitre, final_fiche_name, final_corr_name, final_bareme_name, teacher_difficulty,
-             hors_serie_edit, code, numero)
-        )
-        conn.commit()
+        final_names = [row['fiche_file'], row['correction_file'], row['bareme_file']]
+        with _PdfChanges() as files:
+            if code != (row['code'] or str(numero)):
+                for index, (old_name, new_name) in enumerate(zip(final_names, (fiche_name, corr_name, bareme_name))):
+                    files.rename(old_name, new_name)
+                    final_names[index] = new_name if old_name else ''
+            for index, (uploaded, name, remove) in enumerate((
+                    (fiche, fiche_name, False),
+                    (correction, corr_name, remove_correction),
+                    (bareme, bareme_name, remove_bareme))):
+                if uploaded:
+                    files.save(uploaded, name)
+                    final_names[index] = name
+                elif remove:
+                    files.remove(final_names[index])
+                    final_names[index] = ''
+            conn.execute(
+                'UPDATE forgecards SET titre=?, indices=?, chapitre=?, fiche_file=?, correction_file=?, bareme_file=?, teacher_difficulty=?, hors_serie=?, code=? WHERE numero=?',
+                (titre, indices, chapitre, *final_names, teacher_difficulty,
+                 hors_serie_edit, code, numero))
+            files.apply()
+            conn.commit()
+            files.commit()
     finally:
         conn.close()
     return jsonify({'ok': True, 'numero': numero, 'code': code, 'label': card_label(code, hors_serie_edit)})
@@ -272,7 +343,9 @@ def set_kholle_enabled(numero):
     continuent comme avant pour cette carte.
     """
     ensure_db()
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'ok': False, 'error': 'objet JSON attendu'}), 400
     enabled = 1 if data.get('enabled', True) else 0
     conn = db()
     cur = conn.execute('UPDATE forgecards SET kholle_enabled=? WHERE numero=?', (enabled, numero))
@@ -288,40 +361,16 @@ def set_kholle_enabled(numero):
 def reset_forgecard_stats(numero):
     ensure_db()
     conn = db()
-
-    exists = conn.execute(
-        "SELECT 1 FROM forgecards WHERE numero = ?",
-        (numero,),
-    ).fetchone()
-
-    if not exists:
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute('SELECT hors_serie FROM forgecards WHERE numero=?', (numero,)).fetchone()
+        if not row:
+            return jsonify(ok=False, error="fiche introuvable"), 404
+        _archive_card_reviews(conn, numero, row['hors_serie'])
+        conn.execute('DELETE FROM sr_state_user WHERE numero=?', (numero,))
+        conn.commit()
+    finally:
         conn.close()
-        return jsonify(ok=False, error="fiche introuvable"), 404
-
-    # Preserver les jours d'activite de tous les eleves (sinon leurs streaks
-    # cassent retroactivement) puis archiver les reviews pour la tracabilite.
-    conn.execute(
-        "INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) "
-        "SELECT DISTINCT prenom, substr(created_at,1,10), 1 FROM reviews WHERE numero=?",
-        (numero,),
-    )
-    conn.execute(
-        "INSERT INTO reviews_archive(numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee) "
-        "SELECT numero, prenom, result, note, duration_seconds, was_new, created_at, note_masquee FROM reviews WHERE numero=?",
-        (numero,),
-    )
-    conn.execute(
-        "DELETE FROM reviews WHERE numero = ?",
-        (numero,),
-    )
-
-    conn.execute(
-        "DELETE FROM sr_state_user WHERE numero = ?",
-        (numero,),
-    )
-
-    conn.commit()
-    conn.close()
 
     return jsonify(ok=True, numero=numero)
 
@@ -498,7 +547,9 @@ def admin_stats_overview():
     # activity_days (reviews hors-série exclues + jours validés), cohérente
     # avec le calcul des séries des élèves.
     last_act = {}
-    for r in conn.execute("SELECT prenom, MAX(created_at) AS m FROM events GROUP BY prenom").fetchall():
+    for r in conn.execute(
+            "SELECT prenom, MAX(created_at) AS m FROM events "
+            "WHERE type NOT IN ('account_identity','account_deleted') GROUP BY prenom").fetchall():
         if r['m']:
             last_act[r['prenom']] = r['m']
     for r in conn.execute("SELECT prenom, MAX(created_at) AS m FROM reviews GROUP BY prenom").fetchall():
@@ -584,7 +635,7 @@ def admin_suivi_eleve(prenom):
     ev = conn.execute(
         "SELECT MAX(created_at) AS last, "
         "MAX(CASE WHEN type='login' THEN created_at END) AS last_login "
-        "FROM events WHERE prenom=?", (prenom,)).fetchone()
+        "FROM events WHERE prenom=? AND type NOT IN ('account_identity','account_deleted')", (prenom,)).fetchone()
     rev_last = conn.execute(
         "SELECT MAX(created_at) AS m FROM reviews WHERE prenom=?", (prenom,)).fetchone()['m']
     last_activity = max(ev['last'] or '', rev_last or '') or None
@@ -699,7 +750,8 @@ def admin_stats_export(kind):
         ev = {}
         for r in conn.execute(
                 "SELECT prenom, substr(created_at,1,10) AS d, type, COUNT(*) AS n "
-                "FROM events GROUP BY prenom, d, type").fetchall():
+                "FROM events WHERE type NOT IN ('account_identity','account_deleted') "
+                "GROUP BY prenom, d, type").fetchall():
             ev.setdefault((r['prenom'], r['d']), {})[r['type']] = r['n']
         qcm = {}
         for r in conn.execute(
