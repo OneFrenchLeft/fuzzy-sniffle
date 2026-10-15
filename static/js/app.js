@@ -30,6 +30,18 @@ var qcmSaving = false;
 var qcmRevision = null;
 var qcmChapters = [];
 var qcmScopeVersion = 0;
+var srPending = {};
+var srLogoutPending = false;
+
+// Le stockage local reste facultatif (navigation privée ou stockage refusé).
+function storedValue(key, fallback) {
+  try { return localStorage.getItem(key) || fallback; }
+  catch (_) { return fallback; }
+}
+function storeValue(key, value) {
+  try { localStorage.setItem(key, value); }
+  catch (_) {}
+}
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -94,14 +106,28 @@ function adminAction(url, method, onOk, failMsg) {
 }
 
 function srPost(numero, action, body, okMsg, failVerb, reenable) {
-  fetchJson('/api/sr/' + numero + '/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  if (srPending[numero]) return Promise.resolve(false);
+  srPending[numero] = true;
+  setSrCardPending(numero, true);
+  var failed = false;
+  return fetchJson('/api/sr/' + numero + '/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     .then(function (res) {
-      if (res) { removeCardFromList(numero); updateDailyStatusOnly(); showToast(okMsg); }
+      if (!res || res.ok === false) throw new Error((res && res.error) || 'Enregistrement impossible.');
+      removeCardFromList(numero); updateDailyStatusOnly(); showToast(okMsg);
+      return true;
     })
     .catch(function (err) {
-      if (err && err.status === 401) { openNameGate(); return; }
-      if (reenable) reenable();
-      showToast('Erreur reseau, la carte n\'a pas ete ' + failVerb + '.');
+      failed = true;
+      if (err && err.status === 401) openNameGate();
+      else showToast((err && err.data && err.data.error) || ('Erreur reseau, la carte n\'a pas ete ' + failVerb + '.'));
+      return false;
+    }).finally(function () {
+      delete srPending[numero];
+      // Une carte enregistrée reste verrouillée pendant son animation de sortie.
+      if (failed) {
+        setSrCardPending(numero, false);
+        if (reenable) reenable();
+      }
     });
 }
 
@@ -218,7 +244,7 @@ function applyTheme(theme) {
   if (!toggleBtn) return;
   toggleBtn.textContent = theme === 'dark' ? 'Jour' : 'Nuit';
   toggleBtn.setAttribute('aria-label', theme === 'dark' ? 'Passer en theme clair' : 'Passer en theme sombre');
-  localStorage.setItem('mdc-theme', theme);
+  storeValue('mdc-theme', theme);
 }
 function toggleTheme() {
   var current = document.documentElement.getAttribute('data-theme') || 'light';
@@ -283,12 +309,23 @@ function refreshAuthUI() {
 function openLoginGate() { openNameGate(); }
 
 function logoutSr() {
-  fetch('/api/sr/logout', { method: 'POST' }).catch(function (e) { console.error(e); });
-  currentSrUser = null;
-  setupExportButton();
-  refreshAuthUI();
-  showToast('Déconnecté. À bientôt !');
-  if (PAGE === 'sr' || PAGE === 'ankimie' || PAGE === 'qcm') location.href = '/';
+  if (srLogoutPending) return;
+  srLogoutPending = true;
+  var buttons = Array.from(document.querySelectorAll('[onclick="logoutSr()"]'));
+  buttons.forEach(function (button) { button.disabled = true; });
+  return fetchJson('/api/sr/logout', { method: 'POST' }).then(function (res) {
+    if (!res || !res.ok) throw new Error('Déconnexion impossible.');
+    // Attendre le cookie de déconnexion avant de quitter la page.
+    currentSrUser = null;
+    setupExportButton(); refreshAuthUI();
+    showToast('Déconnecté. À bientôt !');
+    if (PAGE === 'sr' || PAGE === 'ankimie' || PAGE === 'qcm') location.href = '/';
+  }).catch(function () {
+    showToast('Déconnexion impossible. Tu es toujours connecté : réessaie.');
+  }).finally(function () {
+    srLogoutPending = false;
+    buttons.forEach(function (button) { button.disabled = false; });
+  });
 }
 
 function chapitreOptionsHtml(list) {
@@ -355,6 +392,11 @@ function makeNameChip(label, prenom) {
 }
 
 function openNameGate() {
+  // Les pages protégées sans formulaire local passent par l'espace compte.
+  if (!document.getElementById('name-gate-overlay')) {
+    location.href = '/compte';
+    return;
+  }
   document.getElementById('name-step').style.display = 'flex';
   document.getElementById('pw-step').style.display = 'none';
   document.getElementById('gate-pw-error').style.display = 'none';
@@ -382,7 +424,7 @@ function renderLastUserChip() {
   var box = document.getElementById('gate-last-user');
   if (!box) return;
   box.innerHTML = '';
-  var last = localStorage.getItem('mdc-last-user');
+  var last = storedValue('mdc-last-user', null);
   if (!last || gateNamesCache.indexOf(last) === -1) return;
   var chip = makeNameChip('↩ ' + last, last);
   chip.setAttribute('aria-label', 'Continuer en tant que ' + last);
@@ -471,7 +513,7 @@ function validateGatePw() {
   if (currentEmojiPw.length !== EMOJI_PW_LENGTH) return;
   submitPasswordLogin('/api/sr/login', { prenom: pendingPrenom, password: currentEmojiPw }, 'gate-spinner', function (res) {
     currentSrUser = res.prenom;
-    localStorage.setItem('mdc-last-user', res.prenom);
+    storeValue('mdc-last-user', res.prenom);
     cm('name-gate-overlay');
     setupExportButton();
     refreshAuthUI();
@@ -883,8 +925,17 @@ function saveParams() {
       .filter(function (el) { return el.checked; })
       .map(function (el) { return el.dataset.subject; });
   }
-  fetchJson('/api/params', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-    .then(function () {
+  return fetchJson('/api/params', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (res) {
+      if (!res || !res.ok) throw new Error('Réglages non enregistrés.');
+      params = res.params || params;
+      [[retentionEl, 'fsrs_retention'], [ankRetEl, 'ankimie_retention']].forEach(function (item) {
+        var input = item[0], key = item[1];
+        // Ne pas écraser une nouvelle saisie commencée pendant la requête.
+        if (input && Number(input.value) === body[key] * 100 && res.params && res.params[key] != null) {
+          input.value = Math.round(res.params[key] * 100);
+        }
+      });
       ['saved-msg', 'ank-saved-msg'].forEach(function (id) {
         var msg = document.getElementById(id);
         if (!msg) return;
@@ -1124,6 +1175,7 @@ function saveQcmEditor() {
 
 
 var weakQcmRows = [];
+var weakQcmLoadVersion = 0;
 
 function fmtDateShort(iso) {
   if (!iso) return '—';
@@ -1169,9 +1221,14 @@ function loadWeakQcm() {
   var chapterSel = document.getElementById('qcm-weak-chapter');
   var theme = subjectSel ? subjectSel.value : '';
   var chapitre = chapterSel ? chapterSel.value : '';
+  var version = ++weakQcmLoadVersion;
+  function currentRequest() {
+    return version === weakQcmLoadVersion && (!subjectSel || subjectSel.value === theme) && (!chapterSel || chapterSel.value === chapitre);
+  }
   box.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">Chargement…</p>';
-  fetchJson('/api/admin/qcm/weak?theme=' + encodeURIComponent(theme) + '&chapitre=' + encodeURIComponent(chapitre), { cache: 'no-store' })
+  return fetchJson('/api/admin/qcm/weak?theme=' + encodeURIComponent(theme) + '&chapitre=' + encodeURIComponent(chapitre), { cache: 'no-store' })
     .then(function (d) {
+      if (!currentRequest()) return;
       if (!d || d.ok === false) {
         box.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">Chargement impossible.</p>';
         return;
@@ -1189,6 +1246,7 @@ function loadWeakQcm() {
       renderWeakQcm();
     })
     .catch(function (err) {
+      if (!currentRequest()) return;
       if (err && err.status === 401) { showToast('Session admin expirée, reconnecte-toi.'); return; }
       box.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">Erreur réseau.</p>';
     });
@@ -1758,7 +1816,7 @@ function renderInactiveAlert(stats) {
 
 
 function loadStats() {
-  fetchJson('/api/users/stats').then(function (stats) {
+  return fetchJson('/api/users/stats').then(function (stats) {
     var list = document.getElementById('stats-list');
     if (!list) return;
     list.innerHTML = '';
@@ -1809,7 +1867,13 @@ function loadStats() {
       };
       list.appendChild(det);
     });
-  }).catch(function (e) { console.error(e); });
+  }).catch(function (e) {
+    console.error(e);
+    var list = document.getElementById('stats-list');
+    if (list) list.innerHTML = '<p class="hint" role="alert">' +
+      (e && e.status === 401 ? 'Session admin expirée : reconnecte-toi.' : 'Impossible de charger le suivi des élèves.') +
+      '</p><button type="button" class="btn-ghost btn-small" onclick="loadStats()">Réessayer</button>';
+  });
 }
 function loadDeck(prenom, slot, btn) {
   var box = slot || document.getElementById('deck-view');
@@ -2097,7 +2161,7 @@ function selectDrawCount(n) {
 
 function pdfLinksHtml(c, subjectLabel, baremeLabel, primary) {
   var html = '<a class="fiche-link' + (primary ? ' primary' : '') + '" href="/uploads/fiche/' + encodeURIComponent(c.fiche_file || (c.numero + '.pdf')) + '" target="_blank">' + subjectLabel + '</a>';
-  html += '<a class="fiche-link" href="/uploads/fiche/' + encodeURIComponent(c.correction_file) + '" target="_blank">Voir la correction</a>';
+  if (c.correction_file) html += '<a class="fiche-link" href="/uploads/fiche/' + encodeURIComponent(c.correction_file) + '" target="_blank">Voir la correction</a>';
   if (c.bareme_file) {
     html += '<a class="fiche-link" href="/uploads/fiche/' + encodeURIComponent(c.bareme_file) + '" target="_blank">' + baremeLabel + '</a>';
   }
@@ -2340,7 +2404,18 @@ function removeCardFromList(numero) {
 
 function setRateButtonsEnabled(numero, enabled) {
   var div = document.querySelector('.sr-item[data-numero="' + numero + '"]');
-  if (div) div.querySelectorAll('.btn-rate').forEach(function (rb) { rb.disabled = !enabled; });
+  var finished = div && div.querySelector('[data-action="finished"]');
+  if (div) div.querySelectorAll('.btn-rate').forEach(function (rb) { rb.disabled = !enabled || !!srPending[numero] || !(finished && finished.checked); });
+}
+
+function setSrCardPending(numero, pending) {
+  var div = document.querySelector('.sr-item[data-numero="' + numero + '"]');
+  if (!div) return;
+  var finished = div.querySelector('[data-action="finished"]');
+  if (finished) finished.disabled = pending;
+  var advance = div.querySelector('[data-action="advance"]');
+  if (advance) advance.disabled = pending;
+  setRateButtonsEnabled(numero, !pending);
 }
 
 function setLinkEnabled(link, enabled) {
@@ -2455,12 +2530,13 @@ function buildSrCard(c) {
       if (c.bareme_file) {
         html += '<a class="sr-chip disabled-link" aria-disabled="true" tabindex="-1" id="bareme-link-' + esc(c.numero) + '" data-href="/uploads/fiche/' + encodeURIComponent(c.bareme_file) + '" target="_blank">📊 Barème</a>';
       }
-      html += '<a class="sr-chip disabled-link" aria-disabled="true" tabindex="-1" id="corr-link-' + esc(c.numero) + '" data-href="/uploads/fiche/' + encodeURIComponent(c.correction_file) + '" target="_blank">✅ Corrigé</a>';
+      if (c.correction_file) html += '<a class="sr-chip disabled-link" aria-disabled="true" tabindex="-1" id="corr-link-' + esc(c.numero) + '" data-href="/uploads/fiche/' + encodeURIComponent(c.correction_file) + '" target="_blank">✅ Corrigé</a>';
       html += '</div>';
       if (c.indices) {
         html += '<div class="hidden-block" id="sr-indices-' + esc(c.numero) + '">' + esc(c.indices) + '</div>';
       }
-      html += '<label class="sr-finish-label"><input type="checkbox" id="finished-' + esc(c.numero) + '" data-action="finished" data-numero="' + esc(c.numero) + '"> J\'ai fini, je veux voir le corrigé</label>';
+      var finishedLabel = c.correction_file ? 'J\'ai fini, je veux voir le corrigé' : (c.bareme_file ? 'J\'ai fini, je veux voir le barème' : 'J\'ai fini, je veux m\'évaluer');
+      html += '<label class="sr-finish-label"><input type="checkbox" id="finished-' + esc(c.numero) + '" data-action="finished" data-numero="' + esc(c.numero) + '"> ' + finishedLabel + '</label>';
       html += '<div class="sr-actions">' +
         '<div class="sr-block-title" style="margin-bottom:.4rem">Autoévaluation</div>' +
         '<div class="sr-grade-row">' +
@@ -2492,7 +2568,7 @@ function buildSrCard(c) {
 
       div.querySelectorAll('.btn-rate').forEach(function (b) {
         b.onclick = function () {
-          if (b.disabled) return;
+          if (b.disabled || srPending[c.numero]) return;
           var numero = parseInt(b.getAttribute('data-numero'), 10);
           var result = b.getAttribute('data-result');
           if (result === 'again') {
@@ -2507,11 +2583,12 @@ function buildSrCard(c) {
       if (finishedCheckbox) {
         finishedCheckbox.onchange = function () {
           var numero = finishedCheckbox.getAttribute('data-numero');
+          if (srPending[numero]) return;
           var corrLink = document.getElementById('corr-link-' + numero);
           var baremeLink = document.getElementById('bareme-link-' + numero);
           setLinkEnabled(corrLink, finishedCheckbox.checked);
           setLinkEnabled(baremeLink, finishedCheckbox.checked);
-          div.querySelectorAll('.btn-rate').forEach(function (rb) { rb.disabled = !finishedCheckbox.checked; });
+          setRateButtonsEnabled(numero, finishedCheckbox.checked);
           // Small: "J'ai fini" retires the chrono toast; unchecking brings it back.
           if (finishedCheckbox.checked) { chronoDone[numero] = true; } else { delete chronoDone[numero]; }
           updateChrono();
@@ -2520,6 +2597,7 @@ function buildSrCard(c) {
       var advanceBtn = div.querySelector('[data-action="advance"]');
       if (advanceBtn) {
         advanceBtn.onclick = function () {
+          if (srPending[c.numero]) return;
           advanceBtn.disabled = true;
           advanceCard(parseInt(advanceBtn.getAttribute('data-numero'), 10));
         };
@@ -2760,6 +2838,24 @@ var ankPool = 0;        // nouvelles encore en reserve dans le deck
 var ankGraded = {};     // qid -> true si deja comptee (pas de double comptage au requeue)
 var ankLastReview = null; // {qid, card, counted, wasNew} pour le bouton Annuler
 var ankSession = null;  // stats de la session en cours (resume de fin)
+var ankMutationPending = false;
+
+function beginAnkMutation() {
+  ankMutationPending = true;
+  var controls = Array.from(document.querySelectorAll('#ank-list .ank-card button')).map(function (el) {
+    return { el: el, disabled: el.disabled };
+  });
+  controls.forEach(function (control) { control.el.disabled = true; });
+  ankUpdateUndoBtn();
+  return controls;
+}
+function endAnkMutation(controls, restore) {
+  ankMutationPending = false;
+  if (restore) controls.forEach(function (control) {
+    if (control.el.isConnected) control.el.disabled = control.disabled;
+  });
+  ankUpdateUndoBtn();
+}
 
 function ankSessionReset() {
   ankSession = { again: 0, hard: 0, good: 0, easy: 0, nouvelles: 0, revisions: 0, totalSec: 0 };
@@ -2767,7 +2863,10 @@ function ankSessionReset() {
 
 function ankUpdateUndoBtn() {
   var b = document.getElementById('ank-undo');
-  if (b) b.style.display = ankLastReview ? 'inline-block' : 'none';
+  if (b) {
+    b.style.display = ankLastReview ? 'inline-block' : 'none';
+    b.disabled = ankMutationPending;
+  }
 }
 
 function openAnkimieInfoModal() { om('ank-info-overlay'); }
@@ -2788,7 +2887,7 @@ function loadAnkimieToday() {
     var status = document.getElementById('ank-daily-status');
     if (status) status.style.display = 'block';
     ankNewDone = data.new_done_today || 0;
-    ankNewLimit = data.new_limit || 10;
+    ankNewLimit = data.new_limit == null ? 10 : data.new_limit;
     ankPool = data.new_remaining_pool || 0;
     updateAnkQuota();
     ankQueue = data.cards || [];
@@ -2857,7 +2956,7 @@ function buildAnkCard(c) {
     ' <span class="chip-chapitre">' + esc(c.chapitre || 'Autre') + '</span></div></div>';
   html += '<div class="ank-question">' + esc(c.question) + '</div>';
   if (c.image) {
-    html += '<div class="ank-image"><img src="' + esc(c.image) + '" alt="Illustration de la question" loading="lazy"></div>';
+    html += '<div class="ank-image"><img src="' + esc(qcmPreviewImageUrl(c.image)) + '" alt="Illustration de la question" loading="lazy"></div>';
   }
   // Pas de QCM : l'eleve repond dans sa tete, revele la bonne reponse, puis
   // s'auto-evalue — exactement le flux recto/verso d'Anki.
@@ -2878,10 +2977,10 @@ function buildAnkCard(c) {
   if (qimg) {
     qimg.style.cursor = 'zoom-in';
     qimg.title = 'Cliquer pour agrandir';
-    qimg.onclick = function () { openImgZoom(c.image); };
+    qimg.onclick = function () { openImgZoom(qcmPreviewImageUrl(c.image)); };
   }
   showBtn.onclick = function () {
-    if (revealed) return;
+    if (revealed || ankMutationPending) return;
     revealed = true;
     showBtn.disabled = true;
     fetchJson('/api/ankimie/' + encodeURIComponent(c.qid) + '/answer').then(function (a) {
@@ -2889,7 +2988,7 @@ function buildAnkCard(c) {
       var goodChoice = c.choices[a.answer];
       var goodLabel = goodChoice && goodChoice.text ? '<div class="ank-answer-text">' + esc(goodChoice.text) + '</div>' : '';
       var goodImg = goodChoice && goodChoice.image
-        ? '<img class="ank-verdict-img" src="' + esc(goodChoice.image) + '" alt="Bonne réponse">' : '';
+        ? '<img class="ank-verdict-img" src="' + esc(qcmPreviewImageUrl(goodChoice.image)) + '" alt="Bonne réponse">' : '';
       var reveal = div.querySelector('.ank-reveal');
       reveal.innerHTML = '<div class="ank-answer">' +
         '<div class="ank-answer-label">Bonne réponse</div>' + goodLabel + goodImg + '</div>' +
@@ -2917,33 +3016,32 @@ function buildAnkCard(c) {
   };
   div.querySelectorAll('.btn-rate').forEach(function (b) {
     b.onclick = function () {
-      if (b.disabled) return;
+      if (b.disabled || ankMutationPending) return;
       var result = b.getAttribute('data-result');
       var dur = Math.round((Date.now() - shownAt) / 1000);
-      div.querySelectorAll('.btn-rate').forEach(function (x) { x.disabled = true; });
-      fetchJson('/api/ankimie/' + encodeURIComponent(c.qid) + '/review', {
+      var controls = beginAnkMutation(), saved = false;
+      return fetchJson('/api/ankimie/' + encodeURIComponent(c.qid) + '/review', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ result: result, duration_seconds: dur })
       }).then(function (res) {
         if (res && res.ok) {
-          finishAnkCard(c, result, dur);
+          saved = true;
+          return finishAnkCard(c, result, dur, res.review_id);
         } else {
-          div.querySelectorAll('.btn-rate').forEach(function (x) { x.disabled = false; });
           showToast('Erreur : ' + ((res && res.error) || 'enregistrement impossible'));
         }
       }).catch(function (err) {
         if (err && err.status === 401) { openNameGate(); return; }
         if (err && err.status === 404) { showToast('Cette carte n’est plus active. Le deck est actualisé.'); loadAnkimieToday(); return; }
-        div.querySelectorAll('.btn-rate').forEach(function (x) { x.disabled = false; });
         showToast('Erreur reseau, la carte n\'a pas ete enregistree.');
-      });
+      }).finally(function () { endAnkMutation(controls, !saved); });
     };
   });
   typesetMathKatex(div);
   return div;
 }
 
-function finishAnkCard(c, result, dur) {
+function finishAnkCard(c, result, dur, reviewId) {
   // Sortie de file + comptages (une seule fois par carte, meme si requeuee).
   if (ankQueue.length && ankQueue[0].qid === c.qid) ankQueue.shift();
   var counted = false;
@@ -2958,7 +3056,8 @@ function finishAnkCard(c, result, dur) {
     if (c.was_new) ankSession.nouvelles++; else ankSession.revisions++;
     if (dur) ankSession.totalSec += dur;
   }
-  ankLastReview = { qid: c.qid, card: c, counted: counted, wasNew: !!c.was_new, result: result, dur: dur || 0 };
+  ankLastReview = Number.isInteger(reviewId) && reviewId > 0
+    ? { qid: c.qid, reviewId: reviewId, card: c, counted: counted, wasNew: !!c.was_new, result: result, dur: dur || 0 } : null;
   ankUpdateUndoBtn();
   // Style Anki : "Pas reussi" est intercalee quelques cartes plus loin dans
   // la session, pas strictement en fin de file.
@@ -2969,19 +3068,33 @@ function finishAnkCard(c, result, dur) {
     div.style.transition = 'opacity .25s, transform .25s';
     div.style.opacity = '0';
     div.style.transform = 'translateX(-1.5rem)';
-    setTimeout(renderNextAnkCard, 250);
+    // Garder le verrou jusqu'à la prochaine carte, y compris pendant l'animation.
+    return new Promise(function (resolve) {
+      setTimeout(function () { renderNextAnkCard(); resolve(); }, 250);
+    });
   } else {
     renderNextAnkCard();
+    return Promise.resolve();
   }
 }
 
 function undoAnkReview() {
-  if (!ankLastReview) return;
+  if (!ankLastReview || ankMutationPending) return;
   var last = ankLastReview;
-  fetchJson('/api/ankimie/undo', { method: 'POST' }).then(function (res) {
+  var controls = beginAnkMutation(), restored = false;
+  return fetchJson('/api/ankimie/undo', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ review_id: last.reviewId })
+  }).then(function (res) {
     if (!res || !res.ok) {
       showToast((res && res.error) || 'Annulation impossible.');
       if (res && res.error && res.error.indexOf('dernière') !== -1) { ankLastReview = null; ankUpdateUndoBtn(); }
+      return;
+    }
+    if (res.qid !== last.qid || res.review_id !== last.reviewId) {
+      ankLastReview = null;
+      showToast('La dernière note a changé. Le deck est actualisé.');
+      loadAnkimieToday();
       return;
     }
     // Retire l'eventuelle copie requeuee, puis remet la carte en tete de file.
@@ -3001,10 +3114,17 @@ function undoAnkReview() {
       ankSession.totalSec = Math.max(0, ankSession.totalSec - (last.dur || 0));
     }
     ankLastReview = null;
+    restored = true;
     ankUpdateUndoBtn();
     renderNextAnkCard();
     showToast('Note annulée : la carte est remise en tête de file.');
-  }).catch(function () { showToast('Erreur réseau, annulation impossible.'); });
+  }).catch(function (err) {
+    if (err && (err.status === 409 || err.status === 404)) {
+      ankLastReview = null;
+      showToast((err.data && err.data.error) || 'La dernière note a changé. Le deck est actualisé.');
+      loadAnkimieToday();
+    } else showToast((err && err.data && err.data.error) || 'Erreur réseau, annulation impossible.');
+  }).finally(function () { endAnkMutation(controls, !restored); });
 }
 
 function openImgZoom(src) {
@@ -3108,7 +3228,7 @@ function resetAnkimieQuestion(qid) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
-  applyTheme(localStorage.getItem('mdc-theme') || 'light');
+  applyTheme(storedValue('mdc-theme', 'light'));
   var mainNav = document.getElementById('main-nav');
   if (mainNav) mainNav.addEventListener('click', function (e) {
     if (e.target.closest('a,button')) closeMobileNav();
