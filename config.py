@@ -4,7 +4,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
-import os, re, secrets, json
+import os, re, secrets, json, math, logging, tempfile, fcntl
+from contextlib import contextmanager
 
 BASE = Path(__file__).resolve().parent
 
@@ -143,22 +144,37 @@ QCM_INVITE_TTL_MINUTES = 15
 
 GRADE_MAP_FR = {'again': 1, 'hard': 2, 'good': 3, 'easy': 4}
 
-def read_params():
+SQLITE_INT_MAX = 2 ** 63 - 1
+_params_log = logging.getLogger(__name__)
 
 
-    data = {}
-    if PARAMS_PATH.exists():
-        try:
-            data = json.loads(PARAMS_PATH.read_text(encoding='utf-8'))
-        except Exception:
-            data = {}
+def _read_params_file():
+    if not PARAMS_PATH.exists():
+        return {}
+    try:
+        data = json.loads(PARAMS_PATH.read_text(encoding='utf-8'))
+        if not isinstance(data, dict):
+            raise ValueError('un objet JSON est attendu')
+        return data
+    except (OSError, ValueError, UnicodeError) as exc:
+        _params_log.warning('Lecture des paramètres impossible : %s', exc)
+        return {}
+
+
+def _normalise_params(data, strict=False):
     out = DEFAULT_PARAMS.copy()
     for k, default in DEFAULT_PARAMS.items():
         try:
             if k in ('max_active_num', 'daily_new_limit', 'daily_review_limit', 'max_hors_serie_num', 'max_kholle_num', 'qcm_daily_new_limit'):
-                out[k] = max(0, int(data.get(k, default)))
+                value = int(data.get(k, default))
+                if not 0 <= value <= SQLITE_INT_MAX:
+                    raise ValueError('entier positif hors plage SQLite')
+                out[k] = value
             elif k in ('fsrs_retention', 'ankimie_retention'):
-                out[k] = min(max(float(data.get(k, default)), 0.80), 0.97)
+                value = float(data.get(k, default))
+                if not math.isfinite(value):
+                    raise ValueError('nombre fini requis')
+                out[k] = min(max(value, 0.80), 0.97)
             elif k == 'reminder_hour':
                 out[k] = min(max(int(data.get(k, default)), 0), 23)
             elif k in ('module_forgecards', 'module_ankimie', 'module_qcm'):
@@ -188,8 +204,13 @@ def read_params():
                 raw = str(data.get(k, default)).strip()
                 out[k] = raw[:60] if raw else default
             else:
-                out[k] = float(data.get(k, default))
-        except (TypeError, ValueError):
+                value = float(data.get(k, default))
+                if not math.isfinite(value):
+                    raise ValueError('nombre fini requis')
+                out[k] = value
+        except (TypeError, ValueError, OverflowError):
+            if strict and k in data:
+                raise ValueError('Valeur invalide pour « ' + k + ' ».') from None
             out[k] = default
     # Marqueur prive : date et ancienne valeur du dernier increment de
     # max_active_num. sr.py s'en sert pour ne rendre les nouvelles fiches
@@ -199,38 +220,131 @@ def read_params():
     inc = data.get('_max_active_increment')
     if isinstance(inc, dict):
         try:
+            first = int(inc.get('from', 0))
+            if not 0 <= first <= SQLITE_INT_MAX:
+                raise ValueError('seuil hors plage SQLite')
             out['_max_active_increment'] = {
-                'date': str(inc.get('date', '')),
-                'from': int(inc.get('from', 0)),
+                'date': datetime.strptime(inc.get('date', ''), '%Y-%m-%d').date().isoformat(),
+                'from': first,
             }
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             pass
-    if not PARAMS_PATH.exists():
-        PARAMS_PATH.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding='utf-8')
+    pauses = []
+    raw_pauses = data.get('_forgecards_pauses', [])
+    for pause in raw_pauses if isinstance(raw_pauses, list) else []:
+        if not isinstance(pause, dict):
+            continue
+        try:
+            start = datetime.strptime(pause['start'], '%Y-%m-%d').date().isoformat()
+            end = pause.get('end')
+            if end is not None:
+                end = datetime.strptime(end, '%Y-%m-%d').date().isoformat()
+                if end < start:
+                    continue
+            pauses.append({'start': start, 'end': end})
+        except (KeyError, TypeError, ValueError):
+            continue
+    if pauses:
+        out['_forgecards_pauses'] = pauses
     return out
 
-def write_params(data):
-    merged = read_params()
-    prev_max = int(merged.get('max_active_num', 0) or 0)
-    for k in DEFAULT_PARAMS:
-        if k in data:
-            merged[k] = data[k]
-    try:
-        new_max = int(merged.get('max_active_num', 0) or 0)
-    except (TypeError, ValueError):
-        new_max = prev_max
-    if new_max > prev_max:
-        # Increment : les fiches au-dela de l'ancien max ne deviennent dues
-        # que demain (consomme par sr.py, annonce drop du bot a 6h07).
-        merged['_max_active_increment'] = {
-            'date': now_paris().date().isoformat(),
-            'from': prev_max,
-        }
-    elif new_max < prev_max:
-        merged.pop('_max_active_increment', None)
-    PARAMS_PATH.write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding='utf-8')
 
-    return read_params()
+@contextmanager
+def _params_lock():
+    PARAMS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with PARAMS_PATH.with_suffix(PARAMS_PATH.suffix + '.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _atomic_params_write(data):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=PARAMS_PATH.parent,
+                                         prefix=PARAMS_PATH.name + '.', suffix='.tmp', delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(data, stream, indent=2, ensure_ascii=False, allow_nan=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(PARAMS_PATH)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _ensure_pause(params):
+    # Un ancien déploiement désactivé commence sa pause à la première lecture ;
+    # aucune date de désactivation passée n'est inventée.
+    pauses = params.setdefault('_forgecards_pauses', [])
+    if not params['module_forgecards'] and not any(p['end'] is None for p in pauses):
+        pauses.append({'start': now_paris().date().isoformat(), 'end': None})
+        return True
+    return False
+
+
+def read_params():
+    out = _normalise_params(_read_params_file())
+    missing_pause = not out['module_forgecards'] and not any(
+        p['end'] is None for p in out.get('_forgecards_pauses', []))
+    if not PARAMS_PATH.exists() or missing_pause:
+        with _params_lock():
+            out = _normalise_params(_read_params_file())
+            changed = _ensure_pause(out)
+            if not PARAMS_PATH.exists() or changed:
+                _atomic_params_write(out)
+    return out
+
+
+def write_params(data):
+    if not isinstance(data, dict):
+        raise ValueError('Un objet JSON est attendu pour les paramètres.')
+    with _params_lock():
+        previous = _normalise_params(_read_params_file())
+        _ensure_pause(previous)
+        candidate = {**previous, **{k: data[k] for k in DEFAULT_PARAMS if k in data}}
+        merged = _normalise_params(candidate, strict=True)
+        today = now_paris().date().isoformat()
+        prev_max = previous['max_active_num']
+        new_max = merged['max_active_num']
+        increment = previous.get('_max_active_increment', {})
+        # Plusieurs hausses le même jour conservent le premier seuil différé.
+        if increment.get('date') == today:
+            floor = min(prev_max, increment['from'])
+            if new_max > floor:
+                merged['_max_active_increment'] = {'date': today, 'from': floor}
+            else:
+                merged.pop('_max_active_increment', None)
+        elif new_max > prev_max:
+            merged['_max_active_increment'] = {'date': today, 'from': prev_max}
+        elif new_max < prev_max:
+            merged.pop('_max_active_increment', None)
+        if previous['module_forgecards'] and not merged['module_forgecards']:
+            _ensure_pause(merged)
+        elif not previous['module_forgecards'] and merged['module_forgecards']:
+            for pause in merged.get('_forgecards_pauses', []):
+                if pause['end'] is None:
+                    pause['end'] = today
+        _atomic_params_write(merged)
+        return merged
+
+
+def forgecards_paused(day, params=None):
+    """Journées sans obligation, fin de pause exclusive (ni jour offert ni joker)."""
+    params = params if params is not None else read_params()
+    day = day.isoformat() if hasattr(day, 'isoformat') else str(day)
+    pauses = params.get('_forgecards_pauses', [])
+    pauses = pauses if isinstance(pauses, list) else []
+    if any(isinstance(p, dict) and isinstance(p.get('start'), str)
+           and p['start'] <= day and (p.get('end') is None
+                                     or isinstance(p['end'], str) and day < p['end'])
+           for p in pauses):
+        return True
+    # Compatibilité avec les paramètres du bot ou d'un ancien déploiement.
+    return not params.get('module_forgecards', 1) and day == now_paris().date().isoformat()
 
 def gen_emoji_password():
     return [secrets.choice(EMOJI_KEYPAD) for _ in range(EMOJI_PW_LENGTH)]

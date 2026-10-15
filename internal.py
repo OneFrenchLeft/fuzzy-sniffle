@@ -47,7 +47,8 @@ def internal_weekly_stats():
             for entry in json.loads(g['podium'] or '[]'):
                 if entry.get('prenom') and entry['prenom'] != 'admin':
                     qcm_points[entry['prenom']] = qcm_points.get(entry['prenom'], 0) + int(entry.get('score', 0))
-        except Exception:
+        except Exception as exc:
+            print(f'[weekly-stats] podium QCM illisible : {exc!r}')
             continue
     podium_qcm = sorted(({'prenom': p, 'score': s} for p, s in qcm_points.items()),
                         key=lambda x: -x['score'])[:5]
@@ -79,9 +80,11 @@ def internal_log_event():
     if not expected or not hmac.compare_digest(supplied, expected):
         return jsonify({'ok': False, 'error': 'unauthorized'}), 401
     ensure_db()
-    data = request.get_json(silent=True) or {}
-    prenom = (data.get('prenom') or '').strip()
-    etype = (data.get('type') or '').strip()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get('prenom'), str) or not isinstance(data.get('type'), str):
+        return jsonify({'ok': False, 'error': 'prenom et type textuels requis'}), 400
+    prenom = data['prenom'].strip()
+    etype = data['type'].strip()
     payload = (data.get('payload') or '')
     if not prenom or not etype:
         return jsonify({'ok': False, 'error': 'prenom et type requis'}), 400
@@ -99,13 +102,15 @@ def create_qcm_invite_internal():
     if not expected or not hmac.compare_digest(supplied, expected):
         return jsonify({'ok': False, 'error': 'unauthorized'}), 401
 
-    data = request.get_json(silent=True) or {}
-    prenom = (data.get('prenom') or '').strip()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get('prenom'), str):
+        return jsonify({'ok': False, 'error': 'prenom textuel requis'}), 400
+    prenom = data['prenom'].strip()
 
     try:
         ttl = int(data.get('ttl_minutes', QCM_INVITE_TTL_MINUTES))
         token, expires = create_qcm_invite(prenom, ttl)
-    except ValueError as e:
+    except (TypeError, ValueError, OverflowError) as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
 
     # MADEC_SITE_URL si definie, sinon l'hote qui sert la requete : le lien

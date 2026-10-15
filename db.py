@@ -339,7 +339,8 @@ def ensure_db():
     try:
         conn = db()
         cutoff = (now_paris() - timedelta(days=400)).isoformat()
-        conn.execute('DELETE FROM events WHERE created_at < ?', (cutoff,))
+        # L'identité stable du compte survit à la rétention du journal d'activité.
+        conn.execute("DELETE FROM events WHERE created_at < ? AND type != 'account_identity'", (cutoff,))
         conn.commit()
         conn.close()
     except Exception as exc:

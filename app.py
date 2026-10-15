@@ -76,8 +76,8 @@ def _streak_guard_loop():
             now = now_paris()
             today = now.date().isoformat()
             if (now.hour, now.minute) >= (23, 55) and last_run['day'] != today:
-                last_run['day'] = today
                 results = close_all_missed_days(read_params(), reason='site_guard')
+                last_run['day'] = today
                 spent = [p for p, r in results.items() if 'joker_spent' in r['events']]
                 print(f'[streak-guard] cloture site {today}: {len(results)} eleves, jokers depenses: {spent}')
         except Exception as exc:

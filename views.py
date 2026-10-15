@@ -147,8 +147,11 @@ def get_params():
 @bp.route('/api/params', methods=['POST'])
 @require_admin
 def post_params():
-    data = request.get_json(silent=True) or {}
-    return jsonify({'ok': True, 'params': write_params(data)})
+    try:
+        params = write_params(request.get_json(silent=True))
+    except ValueError as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 400
+    return jsonify({'ok': True, 'params': params})
 
 @bp.route('/api/chapitres', methods=['GET'])
 def get_chapitres():
