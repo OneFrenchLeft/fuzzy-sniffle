@@ -416,7 +416,7 @@ def users_stats():
             "LEFT JOIN sr_state_user s ON s.prenom=u.prenom AND s.numero=f.numero "
             "WHERE f.hors_serie=0 AND f.numero<=? "
             "AND (s.next_review IS NULL OR s.next_review<=?) "
-            "AND NOT (s.numero IS NULL AND f.numero>? AND ?>=?) "
+            "AND NOT (f.numero>? AND ?>=?) "
             "GROUP BY u.prenom",
             (max_active, today, inc_from, inc_date, today)).fetchall()
         due_by_prenom = {r['prenom']: r for r in due_rows}

@@ -92,6 +92,17 @@ class ApiIntegrity(unittest.TestCase):
         for filename in (code + '.pdf', code + '-c.pdf', code + '-b.pdf'):
             (self.uploads / filename).write_bytes(('%PDF-original:' + filename).encode())
 
+    def test_individual_due_counts_include_new_cards_and_exclude_disabled_bonus(self):
+        config.write_params({'max_active_num': 1})
+        data = self.admin.get('/api/admin/suivi/Élève').get_json()
+        self.assertEqual(data['sr']['due'], 1)
+        self.add_card(9001, hors_serie=True, code='h1')
+        with database.db() as conn:
+            conn.execute("INSERT INTO sr_state_user(prenom,numero,next_review) VALUES('Élève',9001,'2026-01-01')")
+        self.assertEqual(self.admin.get('/api/admin/suivi/Élève').get_json()['sr']['due'], 1)
+        with database.db() as conn: conn.execute("UPDATE users SET sr_hs_enabled=1 WHERE prenom='Élève'")
+        self.assertEqual(self.admin.get('/api/admin/suivi/Élève').get_json()['sr']['due'], 2)
+
     def test_concurrent_admin_grants_keep_the_cap_and_ledger_consistent(self):
         with database.db() as conn:
             conn.execute("INSERT INTO reviews(prenom,numero,result,created_at) VALUES('Élève',1,'good',?)", (config.now_paris().isoformat(),))

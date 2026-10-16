@@ -668,9 +668,17 @@ def admin_suivi_eleve(prenom):
         "SUM(CASE WHEN substr(created_at,1,10)=? THEN 1 ELSE 0 END) AS today, "
         "AVG(duration_seconds) AS avg_dur, SUM(duration_seconds) AS total_dur "
         "FROM reviews WHERE prenom=?", (today_s, prenom)).fetchone()
-    sr_due = conn.execute(
-        "SELECT COUNT(*) AS c FROM sr_state_user WHERE prenom=? AND (next_review IS NULL OR next_review<=?)",
-        (prenom, today_s)).fetchone()['c']
+    params = read_params()
+    increment = params.get('_max_active_increment') or {}
+    sr_due = 0
+    if params.get('module_forgecards', 1):
+        sr_due = conn.execute(
+            "SELECT COUNT(*) AS c FROM forgecards f LEFT JOIN sr_state_user s ON s.numero=f.numero AND s.prenom=? "
+            "JOIN users u ON u.prenom=? WHERE (s.next_review IS NULL OR s.next_review<=?) "
+            "AND ((f.hors_serie=1 AND u.sr_hs_enabled=1) OR (f.hors_serie=0 AND f.numero<=? "
+            "AND NOT(f.numero>? AND ?>=?)))",
+            (prenom, prenom, today_s, params['max_active_num'], increment.get('from', params['max_active_num']),
+             increment.get('date', ''), today_s)).fetchone()['c']
 
     ank = conn.execute(
         "SELECT COUNT(*) AS total, SUM(correct) AS bonnes, "
@@ -681,9 +689,13 @@ def admin_suivi_eleve(prenom):
         "SUM(CASE WHEN result='easy' THEN 1 ELSE 0 END) AS easy, "
         "AVG(duration_seconds) AS avg_dur, SUM(duration_seconds) AS total_dur "
         "FROM qcm_sr_reviews WHERE prenom=?", (today_s, prenom)).fetchone()
-    ank_due = conn.execute(
-        "SELECT COUNT(*) AS c FROM qcm_sr_state WHERE prenom=? AND (next_review IS NULL OR next_review<=?)",
-        (prenom, today_s)).fetchone()['c']
+    ank_due = 0
+    if params.get('module_ankimie', 1):
+        from ankimie import _deck_index
+        active = set(_deck_index())
+        states = {r['qid']: r['next_review'] for r in conn.execute(
+            'SELECT qid,next_review FROM qcm_sr_state WHERE prenom=?', (prenom,))}
+        ank_due = sum(states.get(qid) is None or states[qid] <= today_s for qid in active)
 
     qcm = conn.execute(
         "SELECT COUNT(*) AS total, SUM(ok) AS bonnes, AVG(elapsed) AS avg_el, MIN(elapsed) AS best_el, "

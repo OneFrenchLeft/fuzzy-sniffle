@@ -8,7 +8,7 @@ from db import db, ensure_db, log_event, csv_safe, csv_response
 from helpers import card_label, card_exists, interleave_by_chapitre, parse_duration_seconds, valid_sqlite_id
 from replay import replay_reviews, get_user_weights
 from streak import (compute_streak, activity_days, compute_record,
-                     reconcile_streak, streak_verdict, close_missed_days, card_is_due)
+                     reconcile_streak, streak_verdict, close_missed_days, card_is_due, remember_schedule)
 from auth import require_admin, require_sr_user, assert_sr_account
 import qcm_engine
 import io, csv
@@ -128,7 +128,9 @@ def sr_today():
         # depense si necessaire) — la streak ne depend plus du bot Discord.
         close_missed_days(conn, prenom, params, reason='sr_open_spend')
     except Exception:
-        pass
+        from flask import current_app
+        current_app.logger.exception('Rattrapage SR incomplet pour %s', prenom)
+        conn.rollback()
 
     # Eliot: les reviews de hors-serie ne comptent PAS dans les quotas du jour.
     done_today = conn.execute(
@@ -148,8 +150,9 @@ def sr_today():
         'FROM forgecards f '
         'JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? '
         'WHERE f.numero <= ? AND f.hors_serie = 0 '
+        'AND NOT (f.numero > ? AND ? >= ?) '
         'ORDER BY f.numero ASC',
-        (prenom, max_active)
+        (prenom, max_active, inc_from, inc_date, today)
     ).fetchall()
     # Hors-series actives : section bonus, jamais dans les quotas. Requete
     # executee maintenant : la connexion est fermee juste apres.
@@ -439,6 +442,8 @@ def sr_review(numero):
             return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
         prof_row = conn.execute('SELECT teacher_difficulty FROM forgecards WHERE numero=?', (numero,)).fetchone()
         prof_difficulty = prof_row['teacher_difficulty'] if prof_row else None
+        previous = conn.execute('SELECT * FROM sr_state_user WHERE prenom=? AND numero=?', (prenom, numero)).fetchone()
+        remember_schedule(conn, prenom, numero, previous)
         row = ensure_sr_row(conn, prenom, numero)
         was_new = 1 if (row['repetitions'] or 0) == 0 else 0
         reps = (row['repetitions'] or 0) + 1
@@ -484,6 +489,8 @@ def sr_advance(numero):
         assert_sr_account(conn, prenom)
         if not card_exists(conn, numero):
             return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
+        previous = conn.execute('SELECT * FROM sr_state_user WHERE prenom=? AND numero=?', (prenom, numero)).fetchone()
+        remember_schedule(conn, prenom, numero, previous)
         row = ensure_sr_row(conn, prenom, numero)
         base_date = now_paris().date()
         if card_is_due(conn, prenom, numero, base_date.isoformat(), read_params()):

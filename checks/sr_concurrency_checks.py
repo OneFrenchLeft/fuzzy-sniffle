@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 import asyncio
+import sqlite3
 
 REPO = Path(__file__).resolve().parents[1]
 SOURCES = tempfile.TemporaryDirectory(prefix='forgecards-sr-sources-')
@@ -179,6 +180,97 @@ class SRConsistency(unittest.TestCase):
                 self.assertEqual(first_request.result(timeout=10).status_code, 200)
                 self.assertEqual(second_request.result(timeout=10).status_code, 200)
         self.assertEqual(self.rows('SELECT repetitions FROM ' + table + ' WHERE prenom=?', ('Eleve',))[0]['repetitions'], 2)
+
+    def test_guard_observes_review_committed_just_before_its_lock(self):
+        with database.db() as conn:
+            conn.execute("INSERT INTO user_jokers(prenom,count) VALUES('Eleve',1)")
+        real, inserted = database.db(), []
+        self.addCleanup(real.close)
+        def observe(sql):
+            if sql == 'BEGIN IMMEDIATE' and not inserted:
+                inserted.append(True)
+                self.add_review_day('2026-10-14')
+        outcome = streak.close_day(ConnectionProxy(real, observe), 'Eleve', '2026-10-14', config.read_params())
+        self.assertEqual(outcome, 'review')
+        self.assertEqual(self.rows('SELECT count FROM user_jokers')[0]['count'], 1)
+
+    def test_partial_guard_failure_requires_a_retry(self):
+        self.add_review_day('2026-10-13')
+        with patch.object(streak, 'close_day', side_effect=sqlite3.OperationalError('locked')):
+            with self.assertRaisesRegex(RuntimeError, 'incomplète'):
+                streak.close_all_missed_days()
+        self.assertIn('Eleve', streak.close_all_missed_days())
+
+    def test_pause_still_closes_the_previous_active_day(self):
+        self.now = datetime(2026, 10, 14, 12)
+        self.add_review_day('2026-10-12')
+        with database.db() as conn:
+            conn.execute("INSERT INTO user_jokers(prenom,count) VALUES('Eleve',1)")
+        config.write_params({'module_forgecards': 0})
+        self.now = datetime(2026, 10, 14, 23, 56)
+        result = streak.close_all_missed_days()['Eleve']
+        self.assertEqual(result['closed']['2026-10-13'], 'joker_spent')
+        self.assertEqual(result['jokers'], 0)
+        self.now = datetime(2026, 10, 17, 12)
+        config.write_params({'module_forgecards': 1})
+        with database.db() as conn:
+            self.assertEqual(streak.compute_streak(conn, 'Eleve'), 2)
+
+    def test_legacy_unvalidated_row_can_be_closed_only_once(self):
+        with database.db() as conn:
+            conn.execute("INSERT INTO sr_daily_streak VALUES('Eleve','2026-10-14',0)")
+            conn.execute("INSERT INTO user_jokers(prenom,count) VALUES('Eleve',1)")
+        with database.db() as conn:
+            self.assertEqual(streak.close_day(conn, 'Eleve', '2026-10-14', config.read_params()), 'joker_spent')
+            self.assertEqual(streak.close_day(conn, 'Eleve', '2026-10-14', config.read_params()), 'already')
+        self.assertEqual(self.rows('SELECT delta FROM joker_ledger'), [{'delta': -1}])
+
+    def test_recreated_account_does_not_inherit_old_milestone_payments(self):
+        self.now = datetime(2026, 10, 14, 12)
+        with database.db() as conn:
+            conn.execute("INSERT INTO joker_ledger(prenom,day,delta,reason,balance_after,created_at) VALUES('Eleve','2026-10-14',1,'milestone_award',1,'2026-10-14T08:00:00')")
+        client = self.client()
+        client.delete('/api/users/Eleve')
+        client.post('/api/users', json={'prenom': 'Eleve'})
+        for day in range(14, 18): self.add_review_day('2026-10-' + str(day))
+        self.now = datetime(2026, 10, 17, 12)
+        with database.db() as conn:
+            self.assertEqual(streak.reconcile_streak(conn, 'Eleve'), 4)
+        self.assertEqual(self.rows('SELECT count FROM user_jokers')[0]['count'], 1)
+        self.assertEqual(len(self.rows('SELECT * FROM joker_ledger')), 2)
+
+    def test_review_cannot_rewrite_yesterdays_obligation(self):
+        self.now = datetime(2026, 10, 14, 12)
+        config.write_params({'max_active_num': 1})
+        with database.db() as conn:
+            conn.execute("INSERT INTO events(prenom,type,created_at) VALUES('Eleve','login','2026-10-13T12:00:00')")
+            conn.execute("INSERT INTO sr_state_user(prenom,numero,repetitions,next_review) VALUES('Eleve',1,0,'2026-10-13')")
+        self.assertEqual(self.client().post('/api/sr/1/review', json={'result': 'good'}).status_code, 200)
+        with database.db() as conn:
+            self.assertEqual(streak.close_missed_days(conn, 'Eleve', config.read_params()), {'2026-10-13': 'missed'})
+        self.assertEqual(self.rows('SELECT * FROM sr_daily_streak'), [])
+
+    def test_early_optional_review_keeps_a_genuinely_free_yesterday(self):
+        self.now = datetime(2026, 10, 14, 12)
+        config.write_params({'max_active_num': 1})
+        with database.db() as conn:
+            conn.execute("INSERT INTO events(prenom,type,created_at) VALUES('Eleve','login','2026-10-13T12:00:00')")
+            conn.execute("INSERT INTO sr_state_user(prenom,numero,repetitions,next_review) VALUES('Eleve',1,1,'2026-10-15')")
+        self.assertEqual(self.client().post('/api/sr/1/review', json={'result': 'good'}).status_code, 200)
+        with database.db() as conn:
+            self.assertEqual(streak.close_missed_days(conn, 'Eleve', config.read_params()), {'2026-10-13': 'validated_free'})
+
+    def test_reactivated_existing_card_is_deferred_like_the_bot(self):
+        self.now = datetime(2026, 10, 14, 12)
+        with database.db() as conn:
+            for numero, due in ((1, '2026-10-20'), (3, '2026-10-14')):
+                conn.execute("INSERT INTO sr_state_user(prenom,numero,repetitions,next_review) VALUES('Eleve',?,1,?)", (numero, due))
+        config.write_params({'max_active_num': 1})
+        config.write_params({'max_active_num': 3})
+        self.assertEqual(self.client().get('/api/sr/today').get_json()['cards'], [])
+        self.assertIsNone(self.client().get('/api/sr/extra').get_json()['card'])
+        with database.db() as conn:
+            self.assertEqual(self.bot_namespace()['compute_daily'](conn, 'Eleve', config.read_params())['remaining'], 0)
 
     def test_deleted_or_recreated_account_cannot_finish_a_review(self):
         for module, endpoint, table in ((sr, '/api/sr/1/review', 'reviews'),
@@ -390,7 +482,7 @@ class SRConsistency(unittest.TestCase):
                 finally:
                     conn.close()
                 self.assertEqual(streak.close_all_missed_days()['Eleve']['streak'], 3)
-                self.assertEqual(self.rows('SELECT * FROM sr_daily_streak'), [])
+                self.assertTrue(all(row['day'] < '2026-10-14' for row in self.rows('SELECT * FROM sr_daily_streak')))
                 self.assertEqual(self.rows('SELECT * FROM joker_ledger'), [])
 
     def test_legacy_disabled_today_does_not_pause_the_past(self):
