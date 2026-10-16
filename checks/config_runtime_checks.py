@@ -122,6 +122,14 @@ class Configuration(unittest.TestCase):
         self.assertEqual(config.PARAMS_PATH.read_bytes(), original)
         self.assertEqual(list(self.root.glob('*.tmp')), [])
 
+    def test_failed_read_cannot_overwrite_existing_settings(self):
+        config.write_params({'module_qcm': 0, 'max_active_num': 17})
+        original = config.PARAMS_PATH.read_bytes()
+        with patch.object(Path, 'read_text', side_effect=OSError('lecture indisponible')):
+            with self.assertRaises(ValueError):
+                config.write_params({'site_name': 'Nouveau nom'})
+        self.assertEqual(config.PARAMS_PATH.read_bytes(), original)
+
     def test_parallel_changes_do_not_lose_unrelated_settings(self):
         barrier = threading.Barrier(2)
         def change(data):

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Acces SQLite : connexion, schema, maintenance, journal, CSV."""
-import sqlite3, json, io, csv
+import sqlite3, json, io, csv, shutil
 from datetime import datetime, timedelta
 from flask import make_response
 from config import ADMIN_PASSWORD, DB_PATH, PARAMS_PATH, UPLOADS, DATA, now_paris
@@ -15,6 +15,58 @@ def db():
     conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('PRAGMA busy_timeout=5000')
     return conn
+
+
+def _backfill_codes(conn):
+    """Migre les anciens codes sans écraser un PDF ni inventer de correction."""
+    created, obsolete = [], set()
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        rows = conn.execute('SELECT numero, hors_serie, code, fiche_file, correction_file, bareme_file '
+                            'FROM forgecards ORDER BY numero').fetchall()
+        reserved = {r['code'].lower() for r in rows if r['code']}
+        hs_idx = max((hs_sort_key(r['code']) for r in rows if r['hors_serie'] and r['code']), default=0)
+        for row in rows:
+            if row['code']:
+                continue
+            if row['hors_serie']:
+                while True:
+                    hs_idx += 1
+                    code = f'h{hs_idx}'
+                    if code not in reserved and not any((UPLOADS / name).exists() for name in filenames_for(code)):
+                        break
+            else:
+                code = str(row['numero'])
+            reserved.add(code)
+            old_files = [row['fiche_file'], row['correction_file'], row['bareme_file']]
+            new_files = [name if old else '' for old, name in zip(old_files, filenames_for(code))]
+            for old_name, new_name in zip(old_files, new_files):
+                source = UPLOADS / old_name if old_name else None
+                if source and old_name != new_name and source.exists():
+                    target = UPLOADS / new_name
+                    # Création exclusive : un fichier existant ne peut jamais être remplacé.
+                    with target.open('xb') as output:
+                        created.append(target)
+                        with source.open('rb') as stream:
+                            shutil.copyfileobj(stream, output)
+                    obsolete.add(source)
+            conn.execute('UPDATE forgecards SET code=?, fiche_file=?, correction_file=?, bareme_file=? WHERE numero=?',
+                         (code, *new_files, row['numero']))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        for target in created:
+            target.unlink(missing_ok=True)
+        conn.close()
+        raise
+    # Ne retirer les anciennes copies qu'après l'enregistrement réussi des références.
+    referenced = {UPLOADS / name for row in conn.execute('SELECT fiche_file,correction_file,bareme_file FROM forgecards')
+                  for name in row if name}
+    for source in obsolete - referenced:
+        try:
+            source.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f'[db] ancienne copie PDF conservée : {exc!r}')
 
 def init_db():
     conn = db()
@@ -252,28 +304,7 @@ def init_db():
     # (deck SR, FSRS) n'est pas touchee. 1 = incluse (defaut), 0 = hors simulation.
     if 'kholle_enabled' not in cols:
         conn.execute("ALTER TABLE forgecards ADD COLUMN kholle_enabled INTEGER NOT NULL DEFAULT 1")
-    # backfill du code public : numero pour le pool normal, h1/h2... pour les hors-serie
-    hs_idx = 0
-    for row in conn.execute("SELECT numero, hors_serie, code, fiche_file, correction_file, bareme_file FROM forgecards ORDER BY numero ASC").fetchall():
-        if row['code']:
-            if row['hors_serie']:
-                hs_idx = max(hs_idx, hs_sort_key(row['code']))
-            continue
-        if row['hors_serie']:
-            hs_idx += 1
-            code = f'h{hs_idx}'
-        else:
-            code = str(row['numero'])
-        old_files = [row['fiche_file'], row['correction_file'], row['bareme_file']]
-        new_files = filenames_for(code)
-        for old_name, new_name in zip(old_files, new_files):
-            old_path = UPLOADS / old_name if old_name else None
-            if old_name and old_name != new_name and old_path.exists():
-                old_path.replace(UPLOADS / new_name)
-        conn.execute(
-            'UPDATE forgecards SET code=?, fiche_file=?, correction_file=?, bareme_file=? WHERE numero=?',
-            (code, new_files[0], new_files[1], new_files[2] if row['bareme_file'] else '', row['numero'])
-        )
+    _backfill_codes(conn)
 
     user_cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
     if 'emoji_password' not in user_cols:

@@ -92,6 +92,31 @@ class ApiIntegrity(unittest.TestCase):
         for filename in (code + '.pdf', code + '-c.pdf', code + '-b.pdf'):
             (self.uploads / filename).write_bytes(('%PDF-original:' + filename).encode())
 
+    def test_legacy_migration_reserves_codes_and_preserves_absent_correction(self):
+        with database.db() as conn:
+            conn.execute("INSERT INTO forgecards(numero,hors_serie,code,fiche_file,correction_file) VALUES(9001,1,'','legacy.pdf','')")
+            conn.execute("INSERT INTO forgecards(numero,hors_serie,code,fiche_file,correction_file) VALUES(9002,1,'h1','h1.pdf','')")
+        (self.uploads / 'legacy.pdf').write_bytes(b'%PDF-legacy')
+        (self.uploads / 'h1.pdf').write_bytes(b'%PDF-preserved')
+        database.init_db()
+        with database.db() as conn:
+            migrated = conn.execute('SELECT code,fiche_file,correction_file FROM forgecards WHERE numero=9001').fetchone()
+        self.assertEqual(dict(migrated), {'code': 'h2', 'fiche_file': 'h2.pdf', 'correction_file': ''})
+        self.assertEqual((self.uploads / 'h1.pdf').read_bytes(), b'%PDF-preserved')
+        self.assertEqual((self.uploads / 'h2.pdf').read_bytes(), b'%PDF-legacy')
+
+    def test_legacy_migration_collision_keeps_database_and_original_files(self):
+        with database.db() as conn:
+            conn.execute("INSERT INTO forgecards(numero,code,fiche_file,correction_file) VALUES(7,'','old.pdf','')")
+        (self.uploads / 'old.pdf').write_bytes(b'%PDF-old')
+        (self.uploads / '7.pdf').write_bytes(b'%PDF-other')
+        with self.assertRaises(FileExistsError):
+            database.init_db()
+        self.assertEqual((self.uploads / 'old.pdf').read_bytes(), b'%PDF-old')
+        self.assertEqual((self.uploads / '7.pdf').read_bytes(), b'%PDF-other')
+        with database.db() as conn:
+            self.assertEqual(conn.execute('SELECT code FROM forgecards WHERE numero=7').fetchone()['code'], '')
+
     def login(self, client):
         response = client.post('/api/sr/login', json={'prenom': 'Élève', 'password': ['1', '2', '3', '4']})
         self.assertEqual(response.status_code, 200)
