@@ -23,7 +23,7 @@ def parse_teacher_difficulty(raw):
         return None
     try:
         return min(max(float(raw), 1.0), 5.0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -33,7 +33,7 @@ def parse_duration_seconds(raw):
         return None
     try:
         return min(max(int(raw), 0), MAX_REVIEW_DURATION_SECONDS)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -66,6 +66,10 @@ def remove_pdf_if_exists(filename):
     path = UPLOADS / filename
     if path.exists():
         path.unlink()
+
+
+def valid_sqlite_id(value):
+    return type(value) is int and 0 <= value < 2 ** 63
 
 
 def card_exists(conn, numero):

@@ -180,6 +180,38 @@ class SRConsistency(unittest.TestCase):
                 self.assertEqual(second_request.result(timeout=10).status_code, 200)
         self.assertEqual(self.rows('SELECT repetitions FROM ' + table + ' WHERE prenom=?', ('Eleve',))[0]['repetitions'], 2)
 
+    def test_deleted_or_recreated_account_cannot_finish_a_review(self):
+        for module, endpoint, table in ((sr, '/api/sr/1/review', 'reviews'),
+                                        (ankimie, '/api/ankimie/' + QID + '/review', 'qcm_sr_reviews')):
+            with self.subTest(endpoint=endpoint):
+                client = self.client()
+                original = module.db
+                deleted = []
+                def observe(sql):
+                    if sql == 'BEGIN IMMEDIATE' and not deleted:
+                        deleted.append(True)
+                        self.assertEqual(client.delete('/api/users/Eleve').status_code, 200)
+                        self.assertEqual(client.post('/api/users', json={'prenom': 'Eleve'}).status_code, 200)
+                with patch.object(module, 'db', lambda: ConnectionProxy(original(), observe)):
+                    self.assertEqual(client.post(endpoint, json={'result': 'good'}).status_code, 401)
+                self.assertEqual(self.rows('SELECT * FROM ' + table), [])
+                # La seconde branche part d'une session du compte courant.
+                with self.app.test_request_context('/'):
+                    auth.bind_sr_user('Eleve')
+                    self.identity = session['sr_account_identity']
+
+    def test_malformed_review_payloads_never_raise_server_errors(self):
+        for endpoint in ('/api/sr/1/review', '/api/ankimie/' + QID + '/review'):
+            for payload in (['x'], {'result': ['good']}, {'result': 42}):
+                with self.subTest(endpoint=endpoint, payload=payload):
+                    self.assertEqual(self.client().post(endpoint, json=payload).status_code, 400)
+            response = self.client().post(endpoint, json={'result': 'good', 'duration_seconds': float('inf')})
+            self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client().post('/api/sr/1/review', json={'result': 'good', 'note': 42}).status_code, 400)
+        self.assertEqual(self.client().post('/api/sr/1/advance', json=['x']).status_code, 400)
+        self.assertEqual(self.client().post('/api/sr/1/advance', json={'days': float('inf')}).status_code, 200)
+        self.assertEqual(self.client().get('/api/sr/extra?exclude=%C2%B2').status_code, 200)
+
     def test_sr_reviews_serialize_state_and_history(self):
         def prepare():
             with database.db() as conn:

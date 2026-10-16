@@ -143,6 +143,12 @@ class Configuration(unittest.TestCase):
         self.assertEqual(result['site_name'], 'Classe')
         self.assertEqual(result['reminder_hour'], 18)
 
+    def test_internal_non_ascii_keys_are_unauthorized(self):
+        for endpoint in ('weekly-stats', 'log-event', 'qcm-invites', 'streak-guard'):
+            response = self.client.post('/api/internal/' + endpoint, json={}, headers={'X-Madec-Internal-Key': 'é'})
+            self.assertEqual(response.status_code, 401)
+            self.assertFalse(response.get_json()['ok'])
+
     def test_internal_payload_errors_are_json_400(self):
         headers = {'X-Madec-Internal-Key': 'config-checks-only'}
         for endpoint, body in [('/api/internal/log-event', ['x']),

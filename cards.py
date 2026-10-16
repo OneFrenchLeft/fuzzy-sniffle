@@ -7,7 +7,7 @@ from config import get_chapitres, UPLOADS, now_paris, read_params
 from db import db, ensure_db, log_event
 from helpers import (allowed_file, is_real_pdf, parse_teacher_difficulty, hs_sort_key,
                      card_label, filenames_for, remove_pdf_if_exists, card_exists,
-                     interleave_by_chapitre)
+                     interleave_by_chapitre, valid_sqlite_id)
 
 from auth import require_admin, valid_sr_user
 from db import csv_safe, csv_response
@@ -15,6 +15,12 @@ from replay import replay_reviews
 from streak import activity_days, compute_record, compute_streak
 
 bp = Blueprint('cards', __name__)
+
+
+@bp.before_request
+def validate_route_ids():
+    if any(type(value) is int and not valid_sqlite_id(value) for value in (request.view_args or {}).values()):
+        return jsonify({'ok': False, 'error': 'Identifiant hors limites.'}), 400
 
 
 class _PdfChanges:

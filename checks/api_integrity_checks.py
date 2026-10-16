@@ -92,6 +92,44 @@ class ApiIntegrity(unittest.TestCase):
         for filename in (code + '.pdf', code + '-c.pdf', code + '-b.pdf'):
             (self.uploads / filename).write_bytes(('%PDF-original:' + filename).encode())
 
+    def test_concurrent_admin_grants_keep_the_cap_and_ledger_consistent(self):
+        with database.db() as conn:
+            conn.execute("INSERT INTO reviews(prenom,numero,result,created_at) VALUES('Élève',1,'good',?)", (config.now_paris().isoformat(),))
+            conn.execute("INSERT INTO user_jokers(prenom,count) VALUES('Élève',1)")
+        start, reads = threading.Barrier(2), threading.Barrier(2)
+        original = auth.db
+        class Observed:
+            def __init__(self): self.conn = original()
+            def __getattr__(self, name): return getattr(self.conn, name)
+            def execute(self, sql, *args):
+                result = self.conn.execute(sql, *args)
+                if sql.startswith('SELECT count FROM user_jokers') and not self.conn.in_transaction:
+                    reads.wait(timeout=5)
+                return result
+        def grant():
+            start.wait(timeout=5)
+            return self.client(admin=True).post('/api/users/Élève/joker').status_code
+        with patch.object(auth, 'db', Observed), ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: grant(), range(2)))
+        self.assertEqual(sorted(results), [200, 400])
+        with database.db() as conn:
+            self.assertEqual(conn.execute('SELECT count FROM user_jokers').fetchone()['count'], 2)
+            self.assertEqual([dict(r) for r in conn.execute('SELECT delta,balance_after FROM joker_ledger')], [{'delta': 1, 'balance_after': 2}])
+
+    def test_identifiers_names_and_legacy_export_are_controlled(self):
+        huge = str(2 ** 63)
+        for method, url in (('delete', '/api/forgecards/' + huge),
+                            ('post', '/api/forgecards/' + huge + '/reset-stats'),
+                            ('delete', '/api/reviews/' + huge + '/note')):
+            self.assertEqual(getattr(self.admin, method)(url).status_code, 400)
+        for name in ('Anne/Marie', 'Anne' + chr(92) + 'Marie'):
+            self.assertEqual(self.admin.post('/api/users', json={'prenom': name}).status_code, 400)
+        with database.db() as conn:
+            conn.execute("INSERT INTO sr_state_user(prenom,numero,last_review,next_review) VALUES('Élève',1,'ancienne-date','inconnue')")
+        response = self.admin.get('/api/users/Élève/export')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('ancienne-date', response.get_data(as_text=True))
+
     def test_legacy_migration_reserves_codes_and_preserves_absent_correction(self):
         with database.db() as conn:
             conn.execute("INSERT INTO forgecards(numero,hors_serie,code,fiche_file,correction_file) VALUES(9001,1,'','legacy.pdf','')")
