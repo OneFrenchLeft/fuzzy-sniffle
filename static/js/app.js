@@ -6,6 +6,8 @@ var horsSerieMode = false;
 var kholleMode = false;
 var pendingPrenom = null;
 var currentSrUser = null;
+var compteLoadVersion = 0, qcmErrorsLoadVersion = 0;
+var compteDisplayedUser = null;
 var allPublicCards = [];
 var chapitresList = [];
 var cardStartTimes = {};
@@ -279,8 +281,9 @@ function loadCompteDashboard() {
   loadSrQcmErrors();
   // Ces blocs ne sont rendus que lorsque leurs modules sont activés.
   if (!document.getElementById('compte-dash')) return;
+  var version = ++compteLoadVersion, user = currentSrUser;
   fetchJson('/api/sr/dashboard').then(function (d) {
-    if (!d || !d.ok) return;
+    if (version !== compteLoadVersion || user !== currentSrUser || !d || !d.ok) return;
     var set = function (id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
     set('dash-streak', d.streak + ' j');
     set('dash-record', d.record + ' j');
@@ -292,6 +295,15 @@ function loadCompteDashboard() {
 
 function refreshAuthUI() {
   var user = currentSrUser || null;
+  ++compteLoadVersion; ++qcmErrorsLoadVersion;
+  if (!user || compteDisplayedUser !== user) {
+    ['dash-streak', 'dash-record', 'dash-jokers', 'dash-semaine', 'dash-total'].forEach(function (id) {
+      var el = document.getElementById(id); if (el) el.textContent = '—';
+    });
+    var errors = document.getElementById('compte-qcm-errors');
+    if (errors) errors.innerHTML = '';
+    compteDisplayedUser = user;
+  }
   if (PAGE === 'liste') loadPublicList();
   if (user) loadCompteDashboard();
   if (user && PAGE === 'compte') loadSrHsPreference();
@@ -1650,8 +1662,9 @@ function openEditModal(c) {
   var hsEdit = document.getElementById('edit-hors-serie');
   if (hsEdit) hsEdit.checked = !!c.hors_serie;
   var sel = document.getElementById('edit-chapitre');
+  var selectedChapter = chapitresList.indexOf(c.chapitre) !== -1 ? c.chapitre : 'Autre';
   sel.innerHTML = chapitresList.map(function (ch) {
-    return '<option value="' + esc(ch) + '"' + (ch === c.chapitre ? ' selected' : '') + '>' + esc(ch) + '</option>';
+    return '<option value="' + esc(ch) + '"' + (ch === selectedChapter ? ' selected' : '') + '>' + esc(ch) + '</option>';
   }).join('');
   document.getElementById('edit-fiche').value = '';
   document.getElementById('edit-correction').value = '';
@@ -2233,7 +2246,7 @@ function filterPublicCards(query) {
   var q = (query || '').trim().toLowerCase();
   if (!q) return allPublicCards;
   return allPublicCards.filter(function (c) {
-    return (c.titre || '').toLowerCase().indexOf(q) !== -1 || String(c.numero).indexOf(q) !== -1 || (c.chapitre || '').toLowerCase().indexOf(q) !== -1;
+    return (c.titre || '').toLowerCase().indexOf(q) !== -1 || String(c.numero).indexOf(q) !== -1 || String(c.code || '').toLowerCase().indexOf(q) !== -1 || String(c.label || '').toLowerCase().indexOf(q) !== -1 || (c.chapitre || '').toLowerCase().indexOf(q) !== -1;
   });
 }
 
@@ -2268,15 +2281,16 @@ function renderPublicList(cards) {
   var list = document.getElementById('public-list');
   list.innerHTML = '';
   renderHorsSerie(cards);
+  var resultCount = (cards || []).length;
   cards = (cards || []).filter(function (c) { return !c.hors_serie; });
   var status = document.getElementById('liste-search-status');
   var search = document.getElementById('liste-search');
   var q = search ? search.value.trim() : '';
   if (status) {
-    status.textContent = cards.length + ' fiche' + (cards.length > 1 ? 's' : '') + ' trouvée' + (cards.length > 1 ? 's' : '');
+    status.textContent = resultCount + ' fiche' + (resultCount > 1 ? 's' : '') + ' trouvée' + (resultCount > 1 ? 's' : '');
   }
   if (!cards.length) {
-    list.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">' + (q ? ('Aucune fiche ne correspond a « ' + esc(q) + ' ».') : 'Aucune fiche trouvée.') + '</p>';
+    if (!resultCount) list.innerHTML = '<p style="font-size:.85rem;color:var(--muted)">' + (q ? ('Aucune fiche ne correspond a « ' + esc(q) + ' ».') : 'Aucune fiche trouvée.') + '</p>';
     return;
   }
   cards.forEach(function (c) {
@@ -2834,7 +2848,7 @@ document.addEventListener('keydown', function (e) {
   }
   // Ankimie, style Anki : Espace/Entree revele la reponse, 1-4 note la carte.
   if (PAGE === 'ankimie' && !document.querySelector('.modal-overlay.open') && !e.ctrlKey && !e.metaKey && !e.altKey &&
-      !(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) {
+      !(e.target && (e.target.isContentEditable || e.target.closest('input,textarea,select,button,a,[role="button"],summary')))) {
     var card = document.querySelector('#ank-list .ank-card');
     if (!card) return;
     var grades = card.querySelector('.ank-grade');
@@ -3008,7 +3022,7 @@ function buildAnkCard(c) {
     if (revealed || ankMutationPending) return;
     revealed = true;
     showBtn.disabled = true;
-    fetchJson('/api/ankimie/' + encodeURIComponent(c.qid) + '/answer').then(function (a) {
+    fetchJson('/api/ankimie/' + encodeURIComponent(c.qid) + '/answer' + (c.revision ? '?revision=' + encodeURIComponent(c.revision) : '')).then(function (a) {
       if (!a || !a.ok) { showToast('Impossible de révéler la réponse.'); showBtn.disabled = false; revealed = false; return; }
       var goodChoice = c.choices[a.answer];
       var goodLabel = goodChoice && goodChoice.text ? '<div class="ank-answer-text">' + esc(goodChoice.text) + '</div>' : '';
@@ -3035,7 +3049,7 @@ function buildAnkCard(c) {
       typesetMathKatex(div);
       div.querySelector('.sr-actions').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }).catch(function (err) {
-      if (err && err.status === 404) { showToast('Cette carte n’est plus active. Le deck est actualisé.'); loadAnkimieToday(); return; }
+      if (err && (err.status === 404 || err.status === 409)) { showToast(err.status === 409 ? 'Cette carte a changé. Le deck est actualisé.' : 'Cette carte n’est plus active. Le deck est actualisé.'); loadAnkimieToday(); return; }
       showToast('Impossible de révéler la réponse.'); showBtn.disabled = false; revealed = false;
     });
   };
@@ -3047,7 +3061,7 @@ function buildAnkCard(c) {
       var controls = beginAnkMutation(), saved = false;
       return fetchJson('/api/ankimie/' + encodeURIComponent(c.qid) + '/review', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ result: result, duration_seconds: dur })
+        body: JSON.stringify({ result: result, duration_seconds: dur, revision: c.revision })
       }).then(function (res) {
         if (res && res.ok) {
           saved = true;
@@ -3057,7 +3071,7 @@ function buildAnkCard(c) {
         }
       }).catch(function (err) {
         if (err && err.status === 401) { openNameGate(); return; }
-        if (err && err.status === 404) { showToast('Cette carte n’est plus active. Le deck est actualisé.'); loadAnkimieToday(); return; }
+        if (err && (err.status === 404 || err.status === 409)) { showToast(err.status === 409 ? 'Cette carte a changé. Le deck est actualisé.' : 'Cette carte n’est plus active. Le deck est actualisé.'); loadAnkimieToday(); return; }
         showToast('Erreur reseau, la carte n\'a pas ete enregistree.');
       }).finally(function () { endAnkMutation(controls, !saved); });
     };
@@ -3078,7 +3092,7 @@ function finishAnkCard(c, result, dur, reviewId) {
   }
   if (ankSession) {
     ankSession[result] = (ankSession[result] || 0) + 1;
-    if (c.was_new) ankSession.nouvelles++; else ankSession.revisions++;
+    if (counted) { if (c.was_new) ankSession.nouvelles++; else ankSession.revisions++; }
     if (dur) ankSession.totalSec += dur;
   }
   ankLastReview = Number.isInteger(reviewId) && reviewId > 0
@@ -3134,8 +3148,10 @@ function undoAnkReview() {
     }
     if (ankSession) {
       ankSession[last.result] = Math.max(0, (ankSession[last.result] || 0) - 1);
-      if (last.wasNew) ankSession.nouvelles = Math.max(0, ankSession.nouvelles - 1);
-      else ankSession.revisions = Math.max(0, ankSession.revisions - 1);
+      if (last.counted) {
+        if (last.wasNew) ankSession.nouvelles = Math.max(0, ankSession.nouvelles - 1);
+        else ankSession.revisions = Math.max(0, ankSession.revisions - 1);
+      }
       ankSession.totalSec = Math.max(0, ankSession.totalSec - (last.dur || 0));
     }
     ankLastReview = null;
@@ -3167,7 +3183,7 @@ function updateAnkProgress() {
   var remaining = ankQueue.length;
   var active = ankTotal > 0 && remaining > 0;
   if (el) {
-    el.textContent = active ? ((ankDone + 1) + ' / ' + ankTotal) : '';
+    el.textContent = active ? (Math.min(ankDone + 1, ankTotal) + ' / ' + ankTotal) : '';
   }
   if (bar) bar.style.display = active ? 'block' : 'none';
   if (fill) fill.style.width = (ankTotal > 0 ? Math.round(100 * ankDone / ankTotal) : 0) + '%';
@@ -3422,8 +3438,10 @@ function retentionChartSvg(points) {
 /* --- SR : dernieres erreurs QCM avec explication --- */
 function loadSrQcmErrors() {
   var box = document.getElementById('compte-qcm-errors');
-  if (!box) return;
+  if (!box || !currentSrUser) return;
+  var version = ++qcmErrorsLoadVersion, user = currentSrUser;
   fetchJson('/api/sr/qcm/errors', { cache: 'no-store' }).then(function (d) {
+    if (version !== qcmErrorsLoadVersion || user !== currentSrUser) return;
     if (!d || d.ok === false || !d.rows || !d.rows.length) {
       box.innerHTML = '<p class="hint">Aucune erreur QCM enregistree pour l\'instant.</p>';
       return;
@@ -3442,6 +3460,7 @@ function loadSrQcmErrors() {
     box.innerHTML = html;
     typesetMath(box);
   }).catch(function () {
+    if (version !== qcmErrorsLoadVersion || user !== currentSrUser) return;
     box.innerHTML = '<p class="hint">Impossible de charger les erreurs QCM.</p>';
   });
 }

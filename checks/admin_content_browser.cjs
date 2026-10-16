@@ -179,8 +179,22 @@ async function run() {
     await page.waitForFunction(() => qcmLoadedSubject === document.querySelector('#qcm-subject-select').value);
     assert.equal(await page.locator('[data-pane="bank"]').isVisible(), true);
 
+    // Les références locales ne doivent être normalisées qu'une seule fois.
+    await page.route('**/qcm-images/*', route => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/c+UAAAAASUVORK5CYII=', 'base64') }));
+    const imageBank = await bank('maths'), imageQuestion = JSON.parse(imageBank.raw)[0];
+    imageQuestion.image = 'diagram.png';
+    imageQuestion.choix[0] = { texte: 'Réponse illustrée', image: 'choice.png' };
+    assert.ok((await context.request.put(base + '/api/admin/qcm/maths/questions/' + imageQuestion.qid, { data: { question: imageQuestion, revision: imageBank.revision } })).ok());
+    await page.evaluate(() => loadQcmEditor());
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('#qcm-question-list img')).some(img => img.getAttribute('src') === '/qcm-images/diagram.png'));
+    assert.ok((await page.locator('#qcm-question-list img').evaluateAll(images => images.map(img => img.getAttribute('src')))).includes('/qcm-images/choice.png'));
+
     // Un échec de sauvegarde garde le formulaire et le brouillon pour réessayer.
     await page.locator('#qcm-question-list').getByRole('button', { name: 'Modifier', exact: true }).first().click();
+    await page.route('**/api/admin/qcm/maths/questions/*', route => route.fulfill({ status: 400, json: { ok: false, error: 'temps invalide', fields: { temps: 'temps invalide' } } }), { times: 1 });
+    await page.locator('#content-question-save').click();
+    await page.waitForFunction(() => document.activeElement === document.querySelector('#content-question-time') && !document.activeElement.disabled);
+    assert.equal(await page.locator('#content-error-temps').isVisible(), true);
     await page.locator('#content-question-text').fill('Brouillon conservé après panne');
     await page.route('**/api/admin/qcm/maths/questions/*', route => {
       if (route.request().method() === 'PUT') return route.fulfill({ status: 503, contentType: 'text/html', body: '<html>Service indisponible</html>' });

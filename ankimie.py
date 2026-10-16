@@ -8,8 +8,9 @@ toutes les questions des chapitres actifs en QCM, sans gestion de collections.
 Tout est clefe sur le qid stable des questions.
 """
 from datetime import timedelta
+import hashlib, hmac, json
 
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, request, session, current_app
 
 from config import QCM_FILES, GRADE_MAP_FR, now_paris, read_params
 from db import db, ensure_db, log_event
@@ -18,6 +19,15 @@ from auth import require_sr_user, require_admin, require_module, assert_sr_accou
 import qcm_engine
 
 bp = Blueprint('ankimie', __name__)
+
+
+def _content_revision(question):
+    # Signature opaque : le recto ne doit pas permettre de déduire la bonne réponse.
+    secret = current_app.secret_key
+    if isinstance(secret, str):
+        secret = secret.encode('utf-8')
+    raw = json.dumps(question, sort_keys=True, ensure_ascii=False).encode('utf-8')
+    return hmac.new(secret, raw, hashlib.sha256).hexdigest()
 
 
 def _deck_label():
@@ -111,6 +121,7 @@ def ankimie_today():
         q = index[c['qid']]
         cards.append({
             'qid': c['qid'],
+            'revision': _content_revision(q),
             'question': q['question'],
             'choices': q['choices'],
             'chapitre': q['chapitre'],
@@ -140,6 +151,8 @@ def ankimie_answer(qid):
     q = _deck_index().get(qid)
     if not q:
         return jsonify({'ok': False, 'error': 'question introuvable'}), 404
+    if request.args.get('revision') is not None and request.args['revision'] != _content_revision(q):
+        return jsonify({'ok': False, 'error': 'La question a changé. Actualise le deck.'}), 409
     ensure_db()
     prenom = session['sr_user']
     params = read_params()
@@ -184,6 +197,8 @@ def ankimie_review(qid):
     q = index.get(qid)
     if not q:
         return jsonify({'ok': False, 'error': 'question introuvable'}), 404
+    if data.get('revision') is not None and data['revision'] != _content_revision(q):
+        return jsonify({'ok': False, 'error': 'La question a changé. Actualise le deck.'}), 409
     try:
         chosen = data.get('chosen')
         chosen = int(chosen) if chosen is not None else None

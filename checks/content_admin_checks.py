@@ -284,6 +284,26 @@ class ContentAdministration(unittest.TestCase):
         self.assertEqual(config.QCM_FILES['physique'].read_bytes(), current)
         self.assertEqual(len(self.questions()), 3)
 
+    def test_ankimie_rejects_an_answer_or_review_for_edited_content(self):
+        config.write_params({'ankimie_subjects': ['chimie']})
+        self.assertEqual(self.client.post('/api/sr/login', json={'prenom': 'Élève', 'password': ['1', '2', '3', '4']}).status_code, 200)
+        card = self.client.get('/api/ankimie/today').get_json()['cards'][0]
+        self.assertNotIn('answer', card)
+        question = next(q for q in self.questions('chimie') if q['qid'] == card['qid'])
+        question['choix'].reverse()
+        question['reponse'] = len(question['choix']) + 1 - question['reponse']
+        self.assertEqual(self.client.put('/api/admin/qcm/chimie/questions/' + card['qid'],
+                         json={'question': question, 'revision': self.bank('chimie')['revision']}).status_code, 200)
+        url = '/api/ankimie/' + card['qid']
+        self.assertEqual(self.client.get(url + '/answer?revision=' + card['revision']).status_code, 409)
+        self.assertEqual(self.client.post(url + '/review', json={'result': 'good', 'revision': card['revision']}).status_code, 409)
+        with database.db() as conn: self.assertEqual(conn.execute('SELECT COUNT(*) FROM qcm_sr_reviews').fetchone()[0], 0)
+        refreshed = next(c for c in self.client.get('/api/ankimie/today').get_json()['cards'] if c['qid'] == card['qid'])
+        self.assertNotEqual(refreshed['revision'], card['revision'])
+        answer = self.client.get(url + '/answer?revision=' + refreshed['revision']).get_json()['answer']
+        self.assertEqual(refreshed['choices'][answer]['text'], 'Réponse A')
+        self.assertEqual(self.client.get(url + '/answer').status_code, 200)
+
     def test_purge_preserves_moved_questions_and_aborts_on_unreadable_banks(self):
         question = self.questions()[0]
         qid = question['qid']

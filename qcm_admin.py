@@ -69,8 +69,9 @@ def validate_qcm_questions(raw, theme=None):
         if not isinstance(item, dict):
             raise ValueError(f'question {position} : objet JSON attendu')
 
-        question = _text(item.get('question'), required=True)
-        if not question:
+        try:
+            question = _text(item.get('question'), required=True)
+        except ValueError:
             raise ValueError(f'question {position} : champ question requis')
 
         choix_raw = item.get('choix')

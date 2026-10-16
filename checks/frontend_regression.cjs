@@ -149,6 +149,58 @@ test('un échec du suivi des élèves affiche une relance qui permet le rétabli
   assert.doesNotMatch(elements['stats-list'].innerHTML, /Réessayer/);
 });
 
+test('les réponses personnelles anciennes ne remplacent pas le compte courant', async () => {
+  const elements = { 'compte-dash': {}, 'compte-qcm-errors': { innerHTML: '' }, 'dash-total': {} };
+  const { context } = sandbox(elements, 'compte');
+  const requests = [];
+  context.typesetMath = () => {};
+  context.fetchJson = url => { const request = deferred(); requests.push({ url, ...request }); return request.promise; };
+  context.currentSrUser = 'Alice'; context.loadCompteDashboard();
+  context.currentSrUser = 'Bob'; context.loadCompteDashboard();
+  requests[2].resolve({ ok: true, rows: [{ question: 'Erreur de Bob' }] });
+  requests[3].resolve({ ok: true, total: 2 });
+  await flush();
+  requests[0].resolve({ ok: true, rows: [{ question: 'Erreur privée Alice' }] });
+  requests[1].resolve({ ok: true, total: 100 });
+  await flush();
+  assert.equal(elements['dash-total'].textContent, 2);
+  assert.match(elements['compte-qcm-errors'].innerHTML, /Bob/);
+  assert.doesNotMatch(elements['compte-qcm-errors'].innerHTML, /Alice/);
+  context.document.querySelector = () => null;
+  context.currentSrUser = null;
+  context.refreshAuthUI();
+  assert.equal(elements['compte-qcm-errors'].innerHTML, '');
+  assert.equal(elements['dash-total'].textContent, '—');
+});
+
+test('la recherche retrouve le code public des hors-séries', () => {
+  const { context } = sandbox();
+  context.allPublicCards = [{ numero: 9001, code: 'h1', label: 'H1', titre: 'Diffusion', hors_serie: true }];
+  assert.equal(context.filterPublicCards('H1').length, 1);
+});
+
+test('les reprises Ankimie comptent les cartes uniques et restent annulables', async () => {
+  const elements = { 'ank-list': { innerHTML: '', querySelector() { return null; } },
+    'ank-progress': {}, 'ank-progressbar': { style: {} }, 'ank-progress-fill': { style: {} } };
+  const { context } = sandbox(elements, 'ankimie');
+  const renderEnd = context.renderNextAnkCard;
+  context.renderNextAnkCard = () => context.updateAnkProgress();
+  context.fireConfetti = () => {};
+  const card = { qid: 'q', was_new: true };
+  context.ankQueue = [card]; context.ankTotal = 1; context.ankSessionReset();
+  await context.finishAnkCard(card, 'again', 10, 1);
+  assert.equal(elements['ank-progress'].textContent, '1 / 1');
+  await context.finishAnkCard(card, 'good', 10, 2);
+  renderEnd();
+  assert.match(elements['ank-list'].innerHTML, /dont 1 nouvelle/);
+  assert.equal(context.ankSession.nouvelles, 1);
+  context.fetchJson = async () => ({ ok: true, qid: 'q', review_id: 2 });
+  await context.undoAnkReview();
+  assert.equal(context.ankSession.nouvelles, 1);
+  assert.equal(context.ankDone, 1);
+  assert.equal(context.ankQueue[0].qid, 'q');
+});
+
 let browser;
 before(async () => {
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
@@ -232,6 +284,11 @@ test('la liste affiche les quatre dernières évaluations et préserve recherche
       await f.page.evaluate(theme => applyTheme(theme), theme);
       assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     }
+    await f.page.locator('#liste-search').fill('H1');
+    await f.page.waitForFunction(() => document.querySelector('#liste-search-status').textContent === '1 fiche trouvée');
+    assert.equal(await f.page.locator('#hors-serie-list .public-card').count(), 1);
+    assert.equal(await f.page.locator('#liste-search-status').textContent(), '1 fiche trouvée');
+    assert.doesNotMatch(await f.page.locator('#public-list').innerText(), /Aucune fiche/);
     await f.page.locator('#liste-search').fill('mécanique');
     await f.page.waitForFunction(() => document.querySelectorAll('#public-list .public-card').length === 1);
     await f.page.evaluate(() => loadPublicList());
@@ -364,3 +421,50 @@ for (const mode of ['réponse incohérente', 'révision périmée']) {
     } finally { await f.context.close(); }
   });
 }
+
+test('Entrée active le bouton Aide Ankimie sans révéler la réponse', async () => {
+  const f = await fixture('ankimie');
+  try {
+    await f.page.locator('.ank-card').waitFor();
+    await f.page.locator('.info-btn').focus();
+    await f.page.keyboard.press('Enter');
+    await f.page.locator('#ank-info-overlay.open').waitFor();
+    assert.equal(await f.page.locator('.ank-reveal').evaluate(el => el.style.display), 'none');
+    assert.deepEqual(f.errors, []);
+  } finally { await f.context.close(); }
+});
+
+test('une fiche sans chapitre connu se replie explicitement sur Autre', async () => {
+  const page = await browser.newPage();
+  try {
+    const template = fs.readFileSync(path.join(root, 'templates/admin.html'), 'utf8');
+    await page.setContent('<body data-page="admin">' + template + '</body>');
+    await page.addScriptTag({ content: source });
+    const chapter = await page.evaluate(() => {
+      chapitresList = ['Diffusion thermique', 'Autre'];
+      openEditModal({ numero: 1, chapitre: 'Ancien chapitre', titre: 'Existant' });
+      return document.getElementById('edit-chapitre').value;
+    });
+    assert.equal(chapter, 'Autre');
+  } finally { await page.close(); }
+});
+
+
+test('une correction devenue obsolète actualise la carte avant toute notation', async () => {
+  let loads = 0;
+  const f = await fixture('ankimie', {
+    '/api/ankimie/today': route => route.fulfill({ json: { ok: true, cards: [++loads === 1 ? { ...cardA, revision: 'ancienne' } : { ...cardB, revision: 'actuelle' }] } }),
+    '/api/ankimie/a/answer': route => {
+      assert.equal(new URL(route.request().url()).searchParams.get('revision'), 'ancienne');
+      return route.fulfill({ status: 409, json: { ok: false, error: 'La question a changé.' } });
+    },
+  });
+  try {
+    await f.page.locator('.ank-show-answer').click();
+    await f.page.waitForFunction(() => document.querySelector('.ank-card')?.dataset.qid === 'b');
+    assert.equal(loads, 2);
+    assert.equal(f.requests.filter(r => r.pathname.endsWith('/review')).length, 0);
+    assert.equal(await f.page.locator('.ank-reveal').evaluate(el => el.style.display), 'none');
+    assert.deepEqual(f.errors, []);
+  } finally { await f.context.close(); }
+});
