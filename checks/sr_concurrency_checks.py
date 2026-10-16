@@ -332,6 +332,18 @@ class SRConsistency(unittest.TestCase):
             self.assertEqual(streak.close_missed_days(conn, 'Eleve', config.read_params()), {'2026-10-13': 'missed'})
         self.assertEqual(self.rows('SELECT * FROM sr_daily_streak'), [])
 
+    def test_exact_schedule_snapshots_take_priority_over_legacy_replay(self):
+        self.now = datetime(2026, 10, 14, 12)
+        config.write_params({'max_active_num': 2})
+        with database.db() as conn:
+            for number in (1, 2):
+                conn.execute("INSERT INTO sr_state_user(prenom,numero,next_review,last_review) VALUES('Eleve',?,'2026-10-20','2026-10-14T10:00:00')", (number,))
+                conn.execute("INSERT INTO reviews(prenom,numero,result,created_at) VALUES('Eleve',?,'good','2026-10-12T12:00:00')", (number,))
+            streak.remember_schedule(conn, 'Eleve', 1, {'next_review': '2026-10-13'})
+        with patch('replay.replay_reviews', return_value=[{'next_review': '2026-10-20'}, {'next_review': '2026-10-20'}]):
+            with database.db() as conn:
+                self.assertEqual(streak._due_count(conn, 'Eleve', '2026-10-13', config.read_params()), 1)
+
     def test_early_optional_review_keeps_a_genuinely_free_yesterday(self):
         self.now = datetime(2026, 10, 14, 12)
         config.write_params({'max_active_num': 1})

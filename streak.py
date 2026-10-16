@@ -140,10 +140,12 @@ def _historical_due_count(conn, prenom, day, params, numero=None):
     legacy = [row for row in rows if row['numero'] not in before and (row['last_review'] or '')[:10] > day]
     if legacy:
         from replay import replay_reviews
+        legacy_ids = {row['numero'] for row in legacy}
         history = conn.execute('SELECT numero,result,created_at FROM reviews WHERE prenom=? '
                                'AND substr(created_at,1,10)<=? ORDER BY created_at,id', (prenom, day)).fetchall()
         for review, state in zip(history, replay_reviews(conn, prenom, history)):
-            before[review['numero']] = state['next_review']
+            if review['numero'] in legacy_ids:
+                before[review['numero']] = state['next_review']
         for row in legacy:
             before.setdefault(row['numero'], None)
     return sum(before.get(row['numero'], row['next_review']) is None or
