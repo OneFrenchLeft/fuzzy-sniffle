@@ -4,6 +4,7 @@ import json
 import random
 import re
 import time
+import logging
 from pathlib import Path
 
 from flask import request
@@ -57,10 +58,13 @@ _record_game = None
 _review_query = None
 
 
-def _current_player():
+def _current_player(allow_takeover=False):
     # Les evenements SocketIO ne passent pas par les hooks des routes HTTP.
     from auth import valid_sr_user
-    return valid_sr_user()
+    prenom = valid_sr_user()
+    if not allow_takeover and PRESENT.get(prenom, {}).get('sid') != request.sid:
+        return None
+    return prenom
 
 
 def question_image(question):
@@ -96,7 +100,8 @@ def normalize_choice(choice):
 def read_qcm_questions(path, theme=None):
     try:
         mtime = path.stat().st_mtime
-    except OSError:
+    except OSError as exc:
+        logging.getLogger(__name__).warning('Banque QCM inaccessible %s : %s', path, exc)
         return []
     cache_key = str(path) + '#' + (theme or '')
     cached = _QUESTIONS_CACHE.get(cache_key)
@@ -104,7 +109,8 @@ def read_qcm_questions(path, theme=None):
         return cached[1]
     try:
         data = json.loads(path.read_text(encoding='utf-8-sig'))
-    except Exception:
+    except (OSError, ValueError, UnicodeError) as exc:
+        logging.getLogger(__name__).warning('Banque QCM illisible %s : %s', path, exc)
         return []
     if not isinstance(data, list):
         return []
@@ -704,7 +710,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
     @io.on('qcm_join_page')
     def on_join_page():
         from config import module_enabled
-        prenom = _current_player()
+        prenom = _current_player(allow_takeover=True)
         gid = GAME_BY_PLAYER.get(prenom or '')
         # Une partie deja engagee reste jouable si le professeur ferme le
         # module entre-temps, y compris apres une reconnexion reseau.
@@ -716,10 +722,12 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
         cancel_offline_timer(prenom)
         old = PRESENT.get(prenom)
         if old and old.get('sid') and old['sid'] != request.sid:
-            try:
-                leave_room('qcm_lobby', sid=old['sid'])
-            except Exception:
-                pass
+            for room in io.server.rooms(old['sid'], namespace='/'):
+                if room != old['sid']:
+                    try:
+                        leave_room(room, sid=old['sid'])
+                    except Exception as exc:
+                        print(f'[qcm-web] ancienne connexion non retirée de {room!r}: {exc!r}')
         PRESENT[prenom] = {'sid': request.sid, 'connected': True}
         join_room('qcm_lobby')
 
@@ -733,7 +741,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
             join_room(gid)
             game = GAMES[gid]
             io.emit('qcm_debut', {
-                'gid': game.gid, 'joueurs': game.joueurs, 'scores': game.scores,
+                'gid': game.gid, 'joueurs': game.joueurs, 'scores': ({p: 0 for p in game.joueurs} if game.delayed and not game.review else game.scores),
                 'total': len(game.questions), 'theme': game.theme,
                 'media': questions_media(game.questions), 'resync': True,
                 'review': game.review, 'history': game.history_payload(prenom),
@@ -867,7 +875,8 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
     @io.on('qcm_lobby_review')
     def on_lobby_review(data):
         prenom = _current_player()
-        data = data or {}
+        if not isinstance(data, dict):
+            return {'ok': False, 'message': 'Objet JSON attendu.'}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
         lobby = LOBBIES.get(lid) if lid else None
         if lobby is None or lobby.etat != 'attente':
@@ -890,7 +899,8 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
     @io.on('qcm_lobby_feedback')
     def on_lobby_feedback(data):
         prenom = _current_player()
-        data = data or {}
+        if not isinstance(data, dict):
+            return {'ok': False, 'message': 'Objet JSON attendu.'}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
         lobby = LOBBIES.get(lid) if lid else None
         if lobby is None or lobby.etat != 'attente':
@@ -904,7 +914,8 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
     @io.on('qcm_lobby_theme')
     def on_lobby_theme(data):
         prenom = _current_player()
-        data = data or {}
+        if not isinstance(data, dict):
+            return {'ok': False, 'message': 'Objet JSON attendu.'}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
         lobby = LOBBIES.get(lid) if lid else None
         if lobby is None or lobby.etat != 'attente':
@@ -931,7 +942,8 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
     @io.on('qcm_lobby_chapitre')
     def on_lobby_chapitre(data):
         prenom = _current_player()
-        data = data or {}
+        if not isinstance(data, dict):
+            return {'ok': False, 'message': 'Objet JSON attendu.'}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
         lobby = LOBBIES.get(lid) if lid else None
         if lobby is None or lobby.etat != 'attente':
@@ -967,7 +979,8 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
     @io.on('qcm_lobby_length')
     def on_lobby_length(data):
         prenom = _current_player()
-        data = data or {}
+        if not isinstance(data, dict):
+            return {'ok': False, 'message': 'Objet JSON attendu.'}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
         lobby = LOBBIES.get(lid) if lid else None
         if lobby is None or lobby.etat != 'attente':
@@ -975,7 +988,7 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
         if prenom != lobby.leader:
             return {'ok': False, 'message': 'Seul le leader choisit la longueur.'}
         try:
-            nb = int(data.get('nb'))
+            nb = qcm_integer(data.get('nb'))
         except (TypeError, ValueError):
             return {'ok': False, 'message': 'Nombre de questions invalide.'}
         lobby.nb_questions = max(QCM_MIN_QUESTIONS, min(QCM_MAX_QUESTIONS, nb))
@@ -986,7 +999,8 @@ def register(socketio, data_dir, on_answer=None, on_game_end=None, review_query=
     @io.on('qcm_lobby_kick')
     def on_lobby_kick(data):
         prenom = _current_player()
-        data = data or {}
+        if not isinstance(data, dict):
+            return {'ok': False, 'message': 'Objet JSON attendu.'}
         lid = LOBBY_BY_PLAYER.get(prenom or '')
         lobby = LOBBIES.get(lid) if lid else None
         if lobby is None or lobby.etat != 'attente':

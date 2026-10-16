@@ -163,3 +163,15 @@ test('la lecture conserve sa durée et les corrections différées restent cach�
   assert.equal(state.state().questions[0].correct, null);
   assert.equal(state.get('choices').children.every(button => button.disabled), true);
 });
+
+test('la première synchronisation corrige immédiatement une horloge décalée', () => {
+  const state = browser();
+  state.context.setTimeout = callback => { callback(); return 1; };
+  state.handlers.connect();
+  const pings = state.emissions.filter(event => event.name === 'qcm_ping');
+  assert.equal(pings.length, 3);
+  pings.forEach(event => event.callback({ now: 700 }));
+  begin(state);
+  question(state, { ends_at: 730, now: 700 });
+  assert.equal(state.get('qtimer').textContent, '30 s');
+});

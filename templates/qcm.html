@@ -464,11 +464,11 @@ var clockOffset=0,bestRtt=Infinity;
 function syncClock(){
   var t0=Date.now()/1000;
   soc.emit('qcm_ping',{},function(d){
-    if(!d||typeof d.now!=='number')return;
+    if(!d||typeof d.now!=='number'||!Number.isFinite(d.now))return;
     var t1=Date.now()/1000;
     var sample=d.now-(t0+t1)/2;
     var rtt=t1-t0;
-    if(rtt<=bestRtt+0.05){bestRtt=Math.min(bestRtt,rtt);clockOffset=clockOffset*0.5+sample*0.5;}
+    if(rtt<=bestRtt+0.05){clockOffset=bestRtt===Infinity?sample:clockOffset*0.5+sample*0.5;bestRtt=Math.min(bestRtt,rtt);}
     if(rtt<bestRtt)bestRtt=rtt;
   });
 }

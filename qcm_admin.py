@@ -1,8 +1,8 @@
 # Xiao: Admin-side QCM editing and statistics. Keep validation strict here.
-from flask import Blueprint, request, jsonify, abort
+from flask import Blueprint, request, jsonify, abort, current_app
 from pathlib import Path
 import json, hashlib, re, os, tempfile, fcntl
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from config import (QCM_FILES, QCM_MIN_TIME_S, QCM_MAX_TIME_S, QCM_DEFAULT_TIME_S,
                     QCM_THEME_PREFIX, DATA, QID_RE, now_paris)
 from db import db, ensure_db, log_event
@@ -18,6 +18,17 @@ def qid_for(theme, chapitre, question):
     qh = hashlib.sha1(question.strip().encode('utf-8')).hexdigest()[:8]
     return f'{prefix}-{ch}-{qh}'
 
+def _text(value, required=False):
+    if value is None and not required:
+        return ''
+    if not isinstance(value, str):
+        raise ValueError('un texte est attendu')
+    value = value.strip()
+    if required and not value:
+        raise ValueError('un texte non vide est attendu')
+    return value
+
+
 def normalize_qcm_choice(value):
     # Ethan: Normalize both simple and rich choices into one format.
     if isinstance(value, str):
@@ -30,9 +41,9 @@ def normalize_qcm_choice(value):
         raise ValueError('un choix doit être une chaîne ou un objet')
 
     out = {}
-    text = str(value.get('texte', value.get('text', ''))).strip()
-    image = str(value.get('image', '')).strip()
-    latex = str(value.get('latex', '')).strip()
+    text = _text(value.get('texte', value.get('text', '')))
+    image = _text(value.get('image', ''))
+    latex = _text(value.get('latex', ''))
 
     if text:
         out['texte'] = text
@@ -58,7 +69,7 @@ def validate_qcm_questions(raw, theme=None):
         if not isinstance(item, dict):
             raise ValueError(f'question {position} : objet JSON attendu')
 
-        question = str(item.get('question', '')).strip()
+        question = _text(item.get('question'), required=True)
         if not question:
             raise ValueError(f'question {position} : champ question requis')
 
@@ -110,17 +121,17 @@ def validate_qcm_questions(raw, theme=None):
             'temps': temps,
         }
 
-        image = qcm_engine.question_image(item)
-        latex = str(item.get('latex', '')).strip()
+        image = _text(item.get('image', item.get('image_complete', '')))
+        latex = _text(item.get('latex', ''))
 
         if image:
             normalized['image'] = image
         if latex:
             normalized['latex'] = latex
-        chapitre = str(item.get('chapitre', '')).strip()
+        chapitre = _text(item.get('chapitre', ''))
         if chapitre:
             normalized['chapitre'] = chapitre
-        explication = str(item.get('explication', '')).strip()
+        explication = _text(item.get('explication', ''))
         if explication:
             normalized['explication'] = explication
 
@@ -269,39 +280,39 @@ def admin_get_qcm(theme):
 
 def _purge_retired_qids(theme=None, chapitre=''):
     """Remove qcm_answers rows for questions no longer present in the files."""
-    # Ethan: Build the active ID set from the current QCM files.
     ensure_db()
     themes = [theme] if theme in QCM_FILES else list(QCM_FILES)
-    active_qids = set()
-    for t in themes:
-        path = QCM_FILES[t]
-        if not path.exists():
-            continue
-        for q in qcm_engine.read_qcm_questions(path, theme=t):
-            if chapitre and (q.get('chapitre') or 'Autre') != chapitre:
-                continue
-            if q.get('qid'):
-                active_qids.add(q['qid'])
-    clauses, args = [], []
-    if theme in QCM_FILES:
-        clauses.append('theme = ?')
-        args.append(theme)
-    if chapitre:
-        clauses.append('chapitre = ?')
-        args.append(chapitre)
-    where = (' AND '.join(clauses)) if clauses else '1=1'
-    conn = db()
-    rows = conn.execute(f'SELECT DISTINCT qid FROM qcm_answers WHERE {where}', args).fetchall()
-    qids = [r['qid'] for r in rows if r['qid'] not in active_qids]
-    deleted = 0
-    if qids:
-        # Steph: Parameterize every ID; don't be that person.
-        marks = ','.join('?' * len(qids))
-        cur = conn.execute(f'DELETE FROM qcm_answers WHERE qid IN ({marks}) AND {where}', qids + args)
-        deleted = cur.rowcount
-        conn.commit()
-    conn.close()
-    return deleted, len(qids)
+    with ExitStack() as locks:
+        for t in sorted(themes):
+            locks.enter_context(bank_lock(t))
+        active_qids = set()
+        for t in themes:
+            path = get_qcm_path(t)
+            if not path.is_file() or not path.read_bytes().strip():
+                raise ValueError('Banque absente ou vide : ' + t)
+            questions, _ = read_bank(t)
+            active_qids.update(q['qid'] for q in questions if q.get('qid'))
+        clauses, args = [], []
+        if theme in QCM_FILES:
+            clauses.append('theme = ?')
+            args.append(theme)
+        if chapitre:
+            clauses.append('chapitre = ?')
+            args.append(chapitre)
+        where = (' AND '.join(clauses)) if clauses else '1=1'
+        conn = db()
+        rows = conn.execute(f'SELECT DISTINCT qid FROM qcm_answers WHERE {where}', args).fetchall()
+        qids = [r['qid'] for r in rows if r['qid'] not in active_qids]
+        deleted = 0
+        if qids:
+            # Steph: Parameterize every ID; don't be that person.
+            marks = ','.join('?' * len(qids))
+            cur = conn.execute(f'DELETE FROM qcm_answers WHERE qid IN ({marks}) AND {where}', qids + args)
+            deleted = cur.rowcount
+            conn.commit()
+        conn.close()
+        return deleted, len(qids)
+
 
 @bp.route('/api/admin/qcm/<theme>', methods=['PUT'])
 @require_admin
@@ -340,42 +351,12 @@ def admin_save_qcm(theme):
 @bp.route('/api/admin/qcm/purge-retired', methods=['POST'])
 @require_admin
 def admin_qcm_purge_retired():
-    # Small: Same purge rules as the automatic cleanup above. Yes, duplicated on purpose.
-    ensure_db()
-    theme = request.args.get('theme', '')
-    chapitre = request.args.get('chapitre', '')
-    themes = [theme] if theme in QCM_FILES else list(QCM_FILES)
-    active_qids = set()
-    for t in themes:
-        path = QCM_FILES[t]
-        if not path.exists():
-            continue
-        for q in qcm_engine.read_qcm_questions(path, theme=t):
-            if chapitre and (q.get('chapitre') or 'Autre') != chapitre:
-                continue
-            if q.get('qid'):
-                active_qids.add(q['qid'])
-    clauses, args = [], []
-    if theme in QCM_FILES:
-        clauses.append('theme = ?')
-        args.append(theme)
-    if chapitre:
-        clauses.append('chapitre = ?')
-        args.append(chapitre)
-    where = (' AND '.join(clauses)) if clauses else '1=1'
-    conn = db()
-    rows = conn.execute(f'SELECT DISTINCT qid FROM qcm_answers WHERE {where}', args).fetchall()
-    qids = [r['qid'] for r in rows if r['qid'] not in active_qids]
-    deleted = 0
-    if qids:
-        marks = ','.join('?' * len(qids))
-        cur = conn.execute(
-            f'DELETE FROM qcm_answers WHERE qid IN ({marks}) AND {where}',
-            qids + args)
-        deleted = cur.rowcount
-        conn.commit()
-    conn.close()
-    return jsonify({'ok': True, 'deleted': deleted, 'questions': len(qids)})
+    try:
+        deleted, count = _purge_retired_qids(request.args.get('theme', ''), request.args.get('chapitre', ''))
+    except (OSError, ValueError, UnicodeError) as exc:
+        current_app.logger.warning('Purge QCM annulée : %s', exc)
+        return jsonify({'ok': False, 'error': 'Purge annulée : une banque est absente ou illisible.'}), 409
+    return jsonify({'ok': True, 'deleted': deleted, 'questions': count})
 
 @bp.route('/api/admin/qcm/games', methods=['GET'])
 @require_admin
@@ -390,8 +371,13 @@ def admin_qcm_games():
     for r in rows:
         try:
             podium = json.loads(r['podium'] or '[]')
-        except Exception:
-            # Ethan: Bad historical podium data shouldn't break the admin page.
+            if not isinstance(podium, list):
+                raise ValueError('le podium doit être une liste')
+            if any(not isinstance(entry, dict) or not isinstance(entry.get('prenom'), str)
+                   or type(entry.get('score')) is not int for entry in podium):
+                raise ValueError('entrée de podium invalide')
+        except (TypeError, ValueError) as exc:
+            current_app.logger.warning('Podium QCM invalide (%s) : %s', r['gid'], exc)
             podium = []
         out.append({'gid': r['gid'], 'themes': r['themes'], 'nb_questions': r['nb_questions'],
                     'nb_players': r['nb_players'], 'podium': podium[:3], 'created_at': r['created_at']})
@@ -491,7 +477,9 @@ def admin_qcm_reset_question_stats():
     est ciblee par sa cle unique (qid, theme) — pas par son texte.
     """
     ensure_db()
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'ok': False, 'error': 'objet JSON attendu'}), 400
     questions = data.get('questions')
     if not isinstance(questions, list) or not questions:
         return jsonify({'ok': False, 'error': 'liste questions requise'}), 400

@@ -284,6 +284,48 @@ class ContentAdministration(unittest.TestCase):
         self.assertEqual(config.QCM_FILES['physique'].read_bytes(), current)
         self.assertEqual(len(self.questions()), 3)
 
+    def test_purge_preserves_moved_questions_and_aborts_on_unreadable_banks(self):
+        question = self.questions()[0]
+        qid = question['qid']
+        chapter = question['chapitre']
+        qcm_admin.record_qcm_answer(qid, 'physique', chapter, question['question'], 'Élève', False, 1, 0)
+        question['chapitre'] = 'Déplacé'
+        self.assertEqual(self.client.put('/api/admin/qcm/physique/questions/' + qid,
+                         json={'question': question, 'revision': self.bank()['revision']}).status_code, 200)
+        url = '/api/admin/qcm/purge-retired?theme=physique&chapitre=' + chapter
+        self.assertEqual(self.client.post(url).get_json()['deleted'], 0)
+        valid = config.QCM_FILES['physique'].read_bytes()
+        for raw in (b'{invalid', b'null', b''):
+            config.QCM_FILES['physique'].write_bytes(raw)
+            self.assertEqual(self.client.post(url).status_code, 409)
+        config.QCM_FILES['physique'].write_bytes(valid)
+        with database.db() as conn: self.assertEqual(conn.execute('SELECT COUNT(*) FROM qcm_answers').fetchone()[0], 1)
+        self.assertEqual(self.client.delete('/api/admin/qcm/physique/questions/' + qid,
+                         json={'revision': self.bank()['revision']}).status_code, 200)
+        self.assertEqual(self.client.post(url).get_json()['deleted'], 1)
+
+    def test_null_texts_and_bad_admin_structures_are_rejected(self):
+        original = config.QCM_FILES['physique'].read_bytes()
+        for candidate in ({**self.question(), 'question': None},
+                          {**self.question(), 'choix': [{'texte': None}, 'B']},
+                          {**self.question(), 'question': {'text': 'x'}}):
+            self.assertEqual(self.client.post('/api/admin/qcm/physique/questions', json={'question': candidate}).status_code, 400)
+        candidate = {**self.question(), 'latex': None, 'explication': None}
+        response = self.client.post('/api/admin/qcm/physique/validate', json={'questions': [candidate]})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('None', str(response.get_json()['questions']))
+        self.assertEqual(config.QCM_FILES['physique'].read_bytes(), original)
+        self.assertEqual(self.client.post('/api/admin/qcm/questions/reset-stats', json=['invalid']).status_code, 400)
+        self.assertEqual(self.client.post('/api/admin/content/physique/chapters', json={'chapitre': 'Nouveau', 'qcm_active': []}).status_code, 400)
+
+    def test_invalid_historical_podium_does_not_break_game_history(self):
+        with database.db() as conn:
+            for gid, raw in (('null', 'null'), ('object', '{}'), ('entry', '[42]')):
+                conn.execute('INSERT INTO qcm_games(gid,podium) VALUES(?,?)', (gid, raw))
+        response = self.client.get('/api/admin/qcm/games')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(all(row['podium'] == [] for row in response.get_json()['rows']))
+
     def test_invalid_questions_and_json_never_replace_bank(self):
         original = config.QCM_FILES['physique'].read_bytes()
         candidates = [self.question(), self.question(), self.question(), self.question()]

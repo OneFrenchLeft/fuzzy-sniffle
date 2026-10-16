@@ -1,5 +1,6 @@
 """Lancer : venv/bin/python checks/qcm_runtime_checks.py (donnees temporaires)."""
 import os
+import ast
 import sys
 import tempfile
 import time
@@ -238,6 +239,38 @@ class QcmRuntime(unittest.TestCase):
         self.assertEqual([row[5] for row in self.recorded], [False, True])
         self.assertEqual(len([m for m in self.client.get_received() if m['name'] == 'qcm_reveal']), 2)
 
+    def test_engineio_rejects_foreign_origins_with_application_policy(self):
+        tree = ast.parse((REPO / 'app.py').read_text())
+        constructor = next(n.value for n in tree.body if isinstance(n, ast.Assign)
+                           and any(isinstance(t, ast.Name) and t.id == 'socketio' for t in n.targets))
+        policy = ast.literal_eval(next(k.value for k in constructor.keywords if k.arg == 'cors_allowed_origins'))
+        app = Flask('origin-check')
+        SocketIO(app, async_mode='gevent', cors_allowed_origins=policy)
+        client = app.test_client()
+        url = '/socket.io/?EIO=4&transport=polling'
+        self.assertEqual(client.get(url, headers={'Origin': 'http://localhost'}).status_code, 200)
+        self.assertEqual(client.get(url, headers={'Origin': 'https://other.class.example'}).status_code, 400)
+
+    def test_old_tab_cannot_mutate_the_replacement_connection(self):
+        lobby = self.lobby()
+        other = self.io.test_client(self.app, flask_test_client=self.http)
+        self.addCleanup(lambda: other.disconnect() if other.is_connected() else None)
+        other.emit('qcm_join_page')
+        sid = engine.PRESENT['Élève']['sid']
+        self.client.emit('qcm_lobby_leave', {})
+        self.client.emit('qcm_leave_page')
+        self.assertIn(lobby.lid, engine.LOBBIES)
+        self.assertEqual(engine.PRESENT['Élève']['sid'], sid)
+        other.emit('qcm_lobby_leave', {})
+        self.assertNotIn(lobby.lid, engine.LOBBIES)
+
+    def test_malformed_lobby_settings_return_structured_errors(self):
+        self.lobby()
+        for event in ('qcm_lobby_review', 'qcm_lobby_feedback', 'qcm_lobby_theme',
+                      'qcm_lobby_chapitre', 'qcm_lobby_length', 'qcm_lobby_kick'):
+            with self.subTest(event=event): self.assertFalse(self.emit(event, ['invalid'])['ok'])
+        self.assertFalse(self.emit('qcm_lobby_length', {'nb': float('inf')})['ok'])
+
     def test_delayed_resync_preserves_private_history_without_revealing_answer(self):
         game = self.game()
         game.delayed = True
@@ -245,8 +278,10 @@ class QcmRuntime(unittest.TestCase):
         game.answers = {'Élève': (1, 3), 'Autre': (0, 4)}
         game.completed = [{'index': 0, 'answers': dict(game.answers)}]
         game.reveal = {'detail': [], 'cloturee_tot': True}
+        game.scores['Élève'] = 1000
         self.client.emit('qcm_join_page')
         messages = {m['name']: m['args'][0] for m in self.client.get_received()}
+        self.assertEqual(messages['qcm_debut']['scores']['Élève'], 0)
         history = messages['qcm_debut']['history']
         self.assertEqual(history[0]['ma'], 0)
         self.assertIsNone(history[0]['correct'])
