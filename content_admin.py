@@ -92,7 +92,7 @@ def chapters(theme):
             if request.method == 'PUT' and ch not in known:
                 raise ValueError('Ce chapitre n’existe pas dans cette matière.')
             flags = {k: data[k] for k in ('qcm_active', 'ankimie_active') if k in data}
-            if request.method == 'PUT' and (not flags or any(type(v) is not bool for v in flags.values())):
+            if (request.method == 'PUT' and not flags) or any(type(v) is not bool for v in flags.values()):
                 raise ValueError('Choisis si le chapitre est actif ou inactif.')
             ensure_db()
             conn = db()

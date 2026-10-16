@@ -14,7 +14,7 @@ bp = Blueprint('internal', __name__)
 def internal_weekly_stats():
     expected = os.environ.get('MADEC_INTERNAL_API_KEY')
     supplied = request.headers.get('X-Madec-Internal-Key', '')
-    if not expected or not hmac.compare_digest(supplied, expected):
+    if not expected or not hmac.compare_digest(supplied.encode('utf-8'), expected.encode('utf-8')):
         return jsonify({'ok': False, 'error': 'unauthorized'}), 401
     ensure_db()
     week_ago = (now_paris().date() - timedelta(days=7)).isoformat()
@@ -77,7 +77,7 @@ def internal_weekly_stats():
 def internal_log_event():
     expected = os.environ.get('MADEC_INTERNAL_API_KEY')
     supplied = request.headers.get('X-Madec-Internal-Key', '')
-    if not expected or not hmac.compare_digest(supplied, expected):
+    if not expected or not hmac.compare_digest(supplied.encode('utf-8'), expected.encode('utf-8')):
         return jsonify({'ok': False, 'error': 'unauthorized'}), 401
     ensure_db()
     data = request.get_json(silent=True)
@@ -99,7 +99,7 @@ def create_qcm_invite_internal():
     expected = os.environ.get('MADEC_INTERNAL_API_KEY')
     supplied = request.headers.get('X-Madec-Internal-Key', '')
 
-    if not expected or not hmac.compare_digest(supplied, expected):
+    if not expected or not hmac.compare_digest(supplied.encode('utf-8'), expected.encode('utf-8')):
         return jsonify({'ok': False, 'error': 'unauthorized'}), 401
 
     data = request.get_json(silent=True)
@@ -127,7 +127,7 @@ def create_qcm_invite_internal():
 def internal_streak_guard():
     expected = os.environ.get('MADEC_INTERNAL_API_KEY')
     supplied = request.headers.get('X-Madec-Internal-Key', '')
-    if not expected or not hmac.compare_digest(supplied, expected):
+    if not expected or not hmac.compare_digest(supplied.encode('utf-8'), expected.encode('utf-8')):
         return jsonify({'ok': False, 'error': 'unauthorized'}), 401
     ensure_db()
     # Une seule implementation de la cloture (streak.close_all_missed_days) :

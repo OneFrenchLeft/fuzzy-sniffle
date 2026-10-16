@@ -35,9 +35,8 @@ app.after_request(add_security_headers)
 for module in (views, auth, cards, sr_routes, qcm_admin, qcm_invites, internal_routes, draw, ankimie, content_admin):
     app.register_blueprint(module.bp)
 
-# Small: Same-origin only. The default ('*') lets any random site open a
-# socket riding on the user's session cookies. No thanks.
-socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins=[])
+# Le défaut Engine.IO vérifie la même origine ; [] désactiverait ce contrôle.
+socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins=None)
 
 
 def _qcm_review_query(prenom):

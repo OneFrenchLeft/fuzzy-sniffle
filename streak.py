@@ -13,6 +13,7 @@ Regles metier :
   - chaque mouvement de stock est trace dans joker_ledger (append-only).
 """
 from datetime import datetime, timedelta
+import json
 from config import JOKER_CAP, JOKER_EVERY, now_paris, read_params, forgecards_paused
 from db import db, log_event, apply_joker_change
 
@@ -91,6 +92,8 @@ def _due_count(conn, prenom, day, params, numero=None):
     """
     if forgecards_paused(day, params):
         return 0
+    if day < now_paris().date().isoformat():
+        return _historical_due_count(conn, prenom, day, params, numero)
     max_active = int(params.get('max_active_num', 36))
     increment = params.get('_max_active_increment') or {}
     inc_date = str(increment.get('date', ''))
@@ -106,6 +109,47 @@ def _due_count(conn, prenom, day, params, numero=None):
         'AND NOT (f.numero > ? AND ? >= ?) '
         'AND (? IS NULL OR f.numero=?)',
         (prenom, max_active, day, inc_from, inc_date, day, numero, numero)).fetchone()['c']
+
+
+def remember_schedule(conn, prenom, numero, row):
+    """Conserve l'échéance avant mutation pour les clôtures historiques."""
+    payload = {'numero': numero, 'next_review': row['next_review'] if row else None}
+    conn.execute("INSERT INTO events(prenom,type,payload,created_at) VALUES(?,'sr_schedule_before',?,?)",
+                 (prenom, json.dumps(payload), now_paris().isoformat()))
+
+
+def _historical_due_count(conn, prenom, day, params, numero=None):
+    increment = params.get('_max_active_increment') or {}
+    rows = conn.execute(
+        'SELECT f.numero, s.next_review, s.last_review FROM forgecards f '
+        'LEFT JOIN sr_state_user s ON s.numero=f.numero AND s.prenom=? '
+        'WHERE f.hors_serie=0 AND f.numero<=? AND (? IS NULL OR f.numero=?) '
+        'AND NOT (f.numero>? AND ?>=?)',
+        (prenom, params.get('max_active_num', 36), numero, numero,
+         increment.get('from', params.get('max_active_num', 36)), increment.get('date', ''), day)).fetchall()
+    before = {}
+    for event in conn.execute(
+            "SELECT payload FROM events WHERE prenom=? AND type='sr_schedule_before' "
+            "AND substr(created_at,1,10)>? ORDER BY created_at,id", (prenom, day)):
+        try:
+            payload = json.loads(event['payload'])
+            before.setdefault(payload['numero'], payload['next_review'])
+        except (TypeError, ValueError, KeyError):
+            continue
+    # Compatibilité avec les révisions antérieures à la conservation des échéances.
+    legacy = [row for row in rows if row['numero'] not in before and (row['last_review'] or '')[:10] > day]
+    if legacy:
+        from replay import replay_reviews
+        legacy_ids = {row['numero'] for row in legacy}
+        history = conn.execute('SELECT numero,result,created_at FROM reviews WHERE prenom=? '
+                               'AND substr(created_at,1,10)<=? ORDER BY created_at,id', (prenom, day)).fetchall()
+        for review, state in zip(history, replay_reviews(conn, prenom, history)):
+            if review['numero'] in legacy_ids:
+                before[review['numero']] = state['next_review']
+        for row in legacy:
+            before.setdefault(row['numero'], None)
+    return sum(before.get(row['numero'], row['next_review']) is None or
+               before.get(row['numero'], row['next_review']) <= day for row in rows)
 
 
 def card_is_due(conn, prenom, numero, day, params):
@@ -129,53 +173,38 @@ def _deck_count(conn, params):
 def close_day(conn, prenom, day, params, reason='guard_spend', allow_joker=True):
     if forgecards_paused(day, params):
         return 'paused'
-    if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=? AND validated>=1',
-                    (prenom, day)).fetchone():
-        return 'already'
-    if conn.execute('SELECT 1 FROM reviews r JOIN forgecards f ON f.numero=r.numero '
-                    'WHERE r.prenom=? AND substr(r.created_at,1,10)=? AND f.hors_serie=0 LIMIT 1',
-                    (prenom, day)).fetchone():
-        conn.execute('INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) VALUES(?,?,1)',
-                     (prenom, day))
-        conn.commit()
-        return 'review'
-    deck = _deck_count(conn, params)
-    due = _due_count(conn, prenom, day, params) if deck else 0
-    has_activity = conn.execute(
-        "SELECT 1 FROM events WHERE prenom=? AND substr(created_at,1,10)=? "
-        "AND type IN ('sr_open','login','review') LIMIT 1", (prenom, day)).fetchone()
-    if not _postponed_due(conn, prenom, day) and (deck == 0 or (due == 0 and has_activity)):
-        conn.execute('INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) VALUES(?,?,1)',
-                     (prenom, day))
-        conn.commit()
-        return 'validated_free'
-    # Jour manque : le joker sauve la serie, qu'il y ait des cartes dues ou
-    # non (un eleve a jour qui ne se connecte pas ne doit pas perdre sa
-    # streak alors qu'il a un joker — c'est precisement son role). Mais un
-    # joker ne sauve JAMAIS un jour ancien (allow_joker=False) : les trous
-    # d'il y a plus d'un jour restent manques definitivement, sinon un joker
-    # fraichement gagne part reparer une cassure passee au lieu de proteger
-    # la journee en cours.
-    if not allow_joker:
-        return 'missed'
-    conn.execute('BEGIN IMMEDIATE')
-    try:
+    with conn:
+        # Révisions, existence du compte et dépense sont observées sous le même verrou.
+        conn.execute('BEGIN IMMEDIATE')
+        if not conn.execute('SELECT 1 FROM users WHERE prenom=?', (prenom,)).fetchone():
+            return 'missing'
+        if conn.execute('SELECT 1 FROM sr_daily_streak WHERE prenom=? AND day=? AND validated>=1',
+                        (prenom, day)).fetchone():
+            return 'already'
+        reviewed = conn.execute('SELECT 1 FROM reviews r JOIN forgecards f ON f.numero=r.numero '
+                                'WHERE r.prenom=? AND substr(r.created_at,1,10)=? AND f.hors_serie=0 LIMIT 1',
+                                (prenom, day)).fetchone()
+        deck = _deck_count(conn, params)
+        due = _due_count(conn, prenom, day, params) if deck and not reviewed else 0
+        activity = conn.execute("SELECT 1 FROM events WHERE prenom=? AND substr(created_at,1,10)=? "
+                                "AND type IN ('sr_open','login','review') LIMIT 1", (prenom, day)).fetchone()
+        free = not _postponed_due(conn, prenom, day) and (deck == 0 or (due == 0 and activity))
+        if reviewed or free:
+            conn.execute('INSERT INTO sr_daily_streak(prenom,day,validated) VALUES(?,?,1) '
+                         'ON CONFLICT(prenom,day) DO UPDATE SET validated=1 WHERE validated<1', (prenom, day))
+            return 'review' if reviewed else 'validated_free'
+        if not allow_joker:
+            return 'missed'
         jk = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
         if not jk or jk['count'] <= 0:
-            conn.commit()
             return 'missed'
-        cur = conn.execute('INSERT OR IGNORE INTO sr_daily_streak(prenom, day, validated) VALUES(?,?,1)',
-                           (prenom, day))
-        if cur.rowcount == 1:
-            apply_joker_change(conn, prenom, -1, reason, day)
-            log_event(conn, prenom, 'joker_spent', f'{reason}:{day}')
-            conn.commit()
-            return 'joker_spent'
-        conn.commit()
-        return 'already'
-    except Exception:
-        conn.rollback()
-        raise
+        cur = conn.execute('INSERT INTO sr_daily_streak(prenom,day,validated) VALUES(?,?,1) '
+                           'ON CONFLICT(prenom,day) DO UPDATE SET validated=1 WHERE validated<1', (prenom, day))
+        if cur.rowcount != 1:
+            return 'already'
+        apply_joker_change(conn, prenom, -1, reason, day)
+        log_event(conn, prenom, 'joker_spent', f'{reason}:{day}')
+        return 'joker_spent'
 
 
 def streak_verdict(conn, prenom, params, when=None, prediction=False):
@@ -277,16 +306,9 @@ def close_all_missed_days(params=None, reason='site_guard'):
     conn = db()
     users = [r['prenom'] for r in conn.execute(
         "SELECT prenom FROM users WHERE prenom != 'admin'").fetchall()]
-    results = {}
+    results, failed = {}, []
     for prenom in users:
         try:
-            if forgecards_paused(now.date().isoformat(), params):
-                jk = conn.execute('SELECT count FROM user_jokers WHERE prenom=?',
-                                  (prenom,)).fetchone()
-                results[prenom] = {'streak': compute_streak(conn, prenom, params),
-                                   'events': [], 'jokers': jk['count'] if jk else 0,
-                                   'closed': {}}
-                continue
             events = []
             outcomes = close_missed_days(conn, prenom, params, reason=reason,
                                          include_today=include_today)
@@ -309,10 +331,13 @@ def close_all_missed_days(params=None, reason='site_guard'):
                                'closed': outcomes}
         except Exception as exc:
             print(f'[streak-guard] {prenom}: {exc!r}')
+            failed.append(prenom)
             conn.rollback()
             continue
     conn.commit()
     conn.close()
+    if failed:
+        raise RuntimeError("Clôture incomplète, nouvelle tentative requise : " + ", ".join(failed))
     return results
 
 
@@ -352,10 +377,15 @@ def _reconcile_streak_locked(conn, prenom, params):
         first_ledger = conn.execute(
             "SELECT MIN(substr(created_at,1,10)) AS d FROM joker_ledger").fetchone()['d']
         if first_ledger and chain_start >= first_ledger:
+            identity = conn.execute(
+                "SELECT created_at FROM events WHERE prenom=? AND type='account_identity' "
+                "AND EXISTS(SELECT 1 FROM events WHERE prenom=? AND type='account_deleted') "
+                "ORDER BY id DESC LIMIT 1", (prenom, prenom)).fetchone()
+            account_start = identity['created_at'] if identity else ''
             paid = conn.execute(
                 "SELECT COALESCE(SUM(delta), 0) AS c FROM joker_ledger "
                 "WHERE prenom=? AND reason='milestone_award' AND delta>0 "
-                "AND substr(created_at,1,10) >= ?", (prenom, chain_start)).fetchone()['c']
+                "AND substr(created_at,1,10) >= ? AND created_at>=?", (prenom, chain_start, account_start)).fetchone()['c']
             if paid:
                 paid = max(paid, last_ms)
         else:

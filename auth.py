@@ -3,7 +3,7 @@
 from datetime import datetime
 from functools import wraps
 import hmac, io, time, secrets
-from flask import Blueprint, jsonify, request, session, current_app
+from flask import Blueprint, jsonify, request, session, current_app, abort, make_response
 from werkzeug.utils import secure_filename
 import config
 from config import (EMOJI_KEYPAD, EMOJI_PW_LENGTH, EMOJI_SEP,
@@ -74,6 +74,18 @@ def _account_identity(conn, prenom):
         "INSERT INTO events(prenom,type,payload,created_at) VALUES(?,'account_identity',?,?)",
         (prenom, identity, now_paris().isoformat()))
     return identity
+
+
+def assert_sr_account(conn, prenom):
+    """Revérifie l'identité après acquisition du verrou de mutation."""
+    row = conn.execute(
+        "SELECT e.payload FROM users u JOIN events e ON e.prenom=u.prenom "
+        "WHERE u.prenom=? AND e.type='account_identity' ORDER BY e.id DESC LIMIT 1",
+        (prenom,)).fetchone()
+    supplied = session.get('sr_account_identity')
+    if not row or not isinstance(supplied, str) or not hmac.compare_digest(
+            supplied.encode('utf-8'), row['payload'].encode('utf-8')):
+        abort(make_response(jsonify({'ok': False, 'error': 'Session expirée, reconnecte-toi.'}), 401))
 
 
 def _set_sr_session(prenom, identity):
@@ -264,6 +276,8 @@ def users_add():
     prenom = (data.get('prenom') or '').strip()
     if not prenom:
         return jsonify({'ok': False, 'error': 'prenom requis'}), 400
+    if '/' in prenom or '\\' in prenom:
+        return jsonify({'ok': False, 'error': 'Le prénom ne doit pas contenir / ou \\.'}), 400
     conn = db()
     try:
         conn.execute('BEGIN IMMEDIATE')
@@ -342,24 +356,24 @@ def user_add_joker(prenom):
 
     ensure_db()
     conn = db()
-    exists = conn.execute('SELECT 1 FROM users WHERE prenom=?', (prenom,)).fetchone()
-    if not exists:
-        conn.close()
-        return jsonify({'ok': False, 'error': 'utilisateur introuvable'}), 404
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        exists = conn.execute('SELECT 1 FROM users WHERE prenom=?', (prenom,)).fetchone()
+        if not exists:
+            return jsonify({'ok': False, 'error': 'utilisateur introuvable'}), 404
 
-    if compute_streak(conn, prenom) <= 0:
+        if compute_streak(conn, prenom) <= 0:
+            return jsonify({'ok': False, 'error': prenom + " n'a pas de serie en cours : le joker attendra."}), 400
+        row = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
+        if row and row['count'] >= JOKER_CAP:
+            return jsonify({'ok': False, 'full': True, 'error': prenom + ' a deja ' + str(JOKER_CAP) + ' jokers, plafond atteint.', 'jokers': row['count']}), 400
+        # Flying: Every joker movement goes through the ledger. If it's not
+        # auditable, it didn't happen.
+        apply_joker_change(conn, prenom, 1, 'admin_grant')
+        row = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
+        conn.commit()
+    finally:
         conn.close()
-        return jsonify({'ok': False, 'error': prenom + " n'a pas de serie en cours : le joker attendra."}), 400
-    row = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
-    if row and row['count'] >= JOKER_CAP:
-        conn.close()
-        return jsonify({'ok': False, 'full': True, 'error': prenom + ' a deja ' + str(JOKER_CAP) + ' jokers, plafond atteint.', 'jokers': row['count']}), 400
-    # Flying: Every joker movement goes through the ledger. If it's not
-    # auditable, it didn't happen.
-    apply_joker_change(conn, prenom, 1, 'admin_grant')
-    row = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
-    conn.commit()
-    conn.close()
     return jsonify({'ok': True, 'prenom': prenom, 'jokers': row['count']})
 
 @bp.route('/api/users/stats', methods=['GET'])
@@ -402,7 +416,7 @@ def users_stats():
             "LEFT JOIN sr_state_user s ON s.prenom=u.prenom AND s.numero=f.numero "
             "WHERE f.hors_serie=0 AND f.numero<=? "
             "AND (s.next_review IS NULL OR s.next_review<=?) "
-            "AND NOT (s.numero IS NULL AND f.numero>? AND ?>=?) "
+            "AND NOT (f.numero>? AND ?>=?) "
             "GROUP BY u.prenom",
             (max_active, today, inc_from, inc_date, today)).fetchall()
         due_by_prenom = {r['prenom']: r for r in due_rows}
@@ -527,14 +541,22 @@ def user_export(prenom):
     writer.writerow([])
     writer.writerow([f'--- Etat actuel du deck de {csv_safe(prenom)} ---'])
     writer.writerow(['Numero de la fiche', 'titre', 'chapitre', 'Difficulté actuelle', 'Stabilité de la fiche actuelle', 'Etat', 'Repetitions', 'Echecs', 'Derniere revision', 'Prochaine revision'])
+    def export_date(value, date_only=False):
+        if not value:
+            return ''
+        try:
+            return datetime.fromisoformat(value).strftime('%d/%m/%Y' if date_only else '%d/%m/%Y %H:%M')
+        except (TypeError, ValueError):
+            return value
+
     for r in deck_rows:
         writer.writerow([
             card_label(r['code'], 0), csv_safe(r['titre'] or ''), csv_safe(r['chapitre'] or ''),
             round(r['difficulty'], 2) if r['difficulty'] is not None else 'jamais revisee',
             round(r['stability'], 2) if r['stability'] is not None else '',
             r['state'] or 'new', r['repetitions'] or 0, r['lapses'] or 0,
-            (lambda iso: datetime.fromisoformat(iso).strftime('%d/%m/%Y %H:%M') if iso else '')(r['last_review']),
-            (lambda iso: datetime.strptime(iso, '%Y-%m-%d').strftime('%d/%m/%Y') if iso else '')(r['next_review'])
+            export_date(r['last_review']),
+            export_date(r['next_review'], date_only=True)
         ])
 
     return csv_response(output, f'revisions_{secure_filename(prenom)}.csv')

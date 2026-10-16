@@ -8,16 +8,26 @@ toutes les questions des chapitres actifs en QCM, sans gestion de collections.
 Tout est clefe sur le qid stable des questions.
 """
 from datetime import timedelta
+import hashlib, hmac, json
 
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, request, session, current_app
 
 from config import QCM_FILES, GRADE_MAP_FR, now_paris, read_params
 from db import db, ensure_db, log_event
 from fsrs import apply_review, preview_all_grades, humanize_interval
-from auth import require_sr_user, require_admin, require_module
+from auth import require_sr_user, require_admin, require_module, assert_sr_account
 import qcm_engine
 
 bp = Blueprint('ankimie', __name__)
+
+
+def _content_revision(question):
+    # Signature opaque : le recto ne doit pas permettre de déduire la bonne réponse.
+    secret = current_app.secret_key
+    if isinstance(secret, str):
+        secret = secret.encode('utf-8')
+    raw = json.dumps(question, sort_keys=True, ensure_ascii=False).encode('utf-8')
+    return hmac.new(secret, raw, hashlib.sha256).hexdigest()
 
 
 def _deck_label():
@@ -82,7 +92,14 @@ def ankimie_today():
     today = now_paris().date().isoformat()
     index = _deck_index()
     conn = db()
-    _ensure_states(conn, prenom, today)
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        assert_sr_account(conn, prenom)
+        _ensure_states(conn, prenom, today)
+        conn.commit()
+    except Exception:
+        conn.close()
+        raise
     done = conn.execute(
         'SELECT was_new, COUNT(*) FROM qcm_sr_reviews '
         'WHERE prenom=? AND substr(created_at,1,10)=? GROUP BY was_new',
@@ -104,6 +121,7 @@ def ankimie_today():
         q = index[c['qid']]
         cards.append({
             'qid': c['qid'],
+            'revision': _content_revision(q),
             'question': q['question'],
             'choices': q['choices'],
             'chapitre': q['chapitre'],
@@ -133,6 +151,8 @@ def ankimie_answer(qid):
     q = _deck_index().get(qid)
     if not q:
         return jsonify({'ok': False, 'error': 'question introuvable'}), 404
+    if request.args.get('revision') is not None and request.args['revision'] != _content_revision(q):
+        return jsonify({'ok': False, 'error': 'La question a changé. Actualise le deck.'}), 409
     ensure_db()
     prenom = session['sr_user']
     params = read_params()
@@ -166,7 +186,9 @@ def ankimie_review(qid):
     """Auto-evaluation 4 boutons -> FSRS. `chosen` = index du choix de l'eleve."""
     ensure_db()
     prenom = session['sr_user']
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get('result'), str):
+        return jsonify({'ok': False, 'error': 'Objet JSON et résultat textuel attendus.'}), 400
     result = data.get('result')
     grade = GRADE_MAP_FR.get(result)
     if grade is None:
@@ -175,17 +197,19 @@ def ankimie_review(qid):
     q = index.get(qid)
     if not q:
         return jsonify({'ok': False, 'error': 'question introuvable'}), 404
+    if data.get('revision') is not None and data['revision'] != _content_revision(q):
+        return jsonify({'ok': False, 'error': 'La question a changé. Actualise le deck.'}), 409
     try:
         chosen = data.get('chosen')
         chosen = int(chosen) if chosen is not None else None
-    except (TypeError, ValueError):
-        chosen = None
+    except (TypeError, ValueError, OverflowError):
+        return jsonify({'ok': False, 'error': 'choix invalide'}), 400
     if chosen is not None and not (0 <= chosen < len(q['choices'])):
         return jsonify({'ok': False, 'error': 'choix invalide'}), 400
     try:
         duration = int(data.get('duration_seconds'))
         duration = max(0, min(duration, 3600))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         duration = None
     # Mode flashcard (pas de choix clique) : la reussite se deduit de
     # l'auto-evaluation — 'again' = rate, hard/good/easy = su.
@@ -198,6 +222,7 @@ def ankimie_review(qid):
     conn = db()
     try:
         conn.execute('BEGIN IMMEDIATE')
+        assert_sr_account(conn, prenom)
         now = now_paris()
         row = conn.execute(
             'SELECT * FROM qcm_sr_state WHERE prenom=? AND qid=?', (prenom, qid)).fetchone()
@@ -254,6 +279,7 @@ def ankimie_undo():
     conn = db()
     try:
         conn.execute('BEGIN IMMEDIATE')
+        assert_sr_account(conn, prenom)
         undo = conn.execute('SELECT * FROM ankimie_undo WHERE prenom=?', (prenom,)).fetchone()
         if not undo:
             return jsonify({'ok': False, 'error': 'Rien à annuler.'}), 404

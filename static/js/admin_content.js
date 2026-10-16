@@ -56,12 +56,12 @@
     var meta = document.createElement('p'); meta.className = 'hint';
     var rich = [q].concat((q.choix || []).filter(function (c) { return c && typeof c === 'object'; }));
     meta.textContent = chapter(q) + ' · ' + (q.temps || 30) + ' s' + (rich.some(function (c) { return c.image; }) ? ' · Illustration' : '') + (rich.some(function (c) { return c.latex; }) || /\$|\\\(/.test(q.question) ? ' · Formule' : ''); el.appendChild(meta);
-    if (qcmQuestionImage(q)) appendPreviewImg(el, qcmPreviewImageUrl(qcmQuestionImage(q)), 'Illustration de la question');
+    if (qcmQuestionImage(q)) appendPreviewImg(el, qcmQuestionImage(q), 'Illustration de la question');
     var list = document.createElement('ol'); list.className = 'content-choices'; list.type = 'A';
     (q.choix || []).forEach(function (choice, i) {
       var c = normalizeQcmPreviewChoice(choice), li = document.createElement('li'); li.textContent = c.text;
       if (i + 1 === Number(q.reponse)) { li.className = 'content-correct'; li.appendChild(document.createTextNode(' — Bonne réponse')); }
-      if (c.image) appendPreviewImg(li, qcmPreviewImageUrl(c.image), 'Illustration de la réponse'); list.appendChild(li);
+      if (c.image) appendPreviewImg(li, c.image, 'Illustration de la réponse'); list.appendChild(li);
     }); el.appendChild(list);
     if (q.explication) { var explanation = document.createElement('p'); explanation.className = 'hint'; explanation.textContent = q.explication; el.appendChild(explanation); }
     return el;
@@ -249,6 +249,7 @@
         if (!c.image.trim() && !c.latex.trim()) return c.text.trim();
         return { texte: c.text.trim(), image: c.image.trim(), latex: c.latex.trim() };
       }) };
+    var firstInvalid = null;
     var controls = Array.from($('content-question-form').querySelectorAll('input,textarea,select,button')).map(function (el) { return { el: el, disabled: el.disabled }; });
     snapshot.saving = true; qcmSaving = true; controls.forEach(function (c) { c.el.disabled = true; });
     try {
@@ -264,9 +265,14 @@
       Object.keys(error.fields || {}).forEach(function (key) {
         var field = $('content-error-' + key); if (field) field.textContent = friendly(error.fields[key]);
         var control = key === 'question' ? $('content-question-text') : (key === 'temps' ? $('content-question-time') : $('content-question-form').querySelector('.content-answer-group'));
-        if (control) control.setAttribute('aria-invalid', 'true');
+        if (control) {
+          control.setAttribute('aria-invalid', 'true');
+          if (!firstInvalid) firstInvalid = control.matches('input,textarea,select') ? control : control.querySelector('input,textarea,select');
+        }
       });
-    } finally { snapshot.saving = false; qcmSaving = false; controls.forEach(function (c) { c.el.disabled = c.disabled; }); setQcmControls(); }
+    } finally { snapshot.saving = false; qcmSaving = false; controls.forEach(function (c) { c.el.disabled = c.disabled; }); setQcmControls();
+      if (firstInvalid) { firstInvalid.focus(); firstInvalid.scrollIntoView({ block: 'nearest' }); }
+    }
   }
   async function deleteQuestion(q, snapshot) {
     if (!q || !q.qid || !ready() || qcmSaving || dirty() || (snapshot && snapshot.saving)) return;

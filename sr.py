@@ -5,11 +5,11 @@ from fsrs import apply_review, preview_all_grades, humanize_interval
 from config import (GRADE_MAP_FR, MAX_NOTE_LENGTH, QCM_FILES, QCM_WEAK_LIMIT,
                     now_paris, read_params, module_enabled)
 from db import db, ensure_db, log_event, csv_safe, csv_response
-from helpers import card_label, card_exists, interleave_by_chapitre, parse_duration_seconds
+from helpers import card_label, card_exists, interleave_by_chapitre, parse_duration_seconds, valid_sqlite_id
 from replay import replay_reviews, get_user_weights
 from streak import (compute_streak, activity_days, compute_record,
-                     reconcile_streak, streak_verdict, close_missed_days, card_is_due)
-from auth import require_admin, require_sr_user
+                     reconcile_streak, streak_verdict, close_missed_days, card_is_due, remember_schedule)
+from auth import require_admin, require_sr_user, assert_sr_account
 import qcm_engine
 import io, csv
 
@@ -19,6 +19,8 @@ bp = Blueprint('sr', __name__)
 def _module_guard():
     """Interrupteurs admin : les routes SR relevant des forgecards, les
     sous-routes /qcm/ relevant du module QCM."""
+    if any(type(value) is int and not valid_sqlite_id(value) for value in (request.view_args or {}).values()):
+        return jsonify({'ok': False, 'error': 'Identifiant hors limites.'}), 400
     mod = 'qcm' if (request.path.startswith('/api/sr/qcm/') or request.path == '/api/qcm/last-states') else 'forgecards'
     if not module_enabled(mod):
         return jsonify({'ok': False, 'error': 'module désactivé'}), 404
@@ -54,10 +56,14 @@ def sr_preferences():
         return jsonify({'ok': False, 'error': 'hors_serie_enabled doit être un booléen'}), 400
     enabled = data['hors_serie_enabled']
     conn = db()
-    with conn:
-        result = conn.execute('UPDATE users SET sr_hs_enabled=? WHERE prenom=?',
-                              (int(enabled), session['sr_user']))
-    conn.close()
+    try:
+        with conn:
+            conn.execute('BEGIN IMMEDIATE')
+            assert_sr_account(conn, session['sr_user'])
+            result = conn.execute('UPDATE users SET sr_hs_enabled=? WHERE prenom=?',
+                                  (int(enabled), session['sr_user']))
+    finally:
+        conn.close()
     if result.rowcount != 1:
         return jsonify({'ok': False, 'error': 'élève introuvable'}), 404
     return jsonify({'ok': True, 'hors_serie_enabled': enabled})
@@ -68,14 +74,6 @@ def sr_preferences():
 def sr_today():
     ensure_db()
     prenom = session['sr_user']
-    try:
-        # Ethan: Logging the open is useful for streak validation. Please don't remove it.
-        conn0 = db()
-        log_event(conn0, prenom, 'sr_open')
-        conn0.commit()
-        conn0.close()
-    except Exception:
-        pass
     today = now_paris().date().isoformat()
     params = read_params()
     max_active = int(params.get('max_active_num', 36))
@@ -83,38 +81,46 @@ def sr_today():
     review_limit = int(params.get('daily_review_limit', 3))
 
     conn = db()
-    all_cards = conn.execute('SELECT numero FROM forgecards WHERE numero <= ? AND hors_serie = 0', (max_active,)).fetchall()
-    # Flying: One INSERT...SELECT instead of one SELECT per card on every page
-    # load. OR IGNORE keeps existing states untouched; new cards get today's
-    # date so they're due immediately, exactly like ensure_sr_row did.
-    # Eliot: sauf les fiches rendues tirable par un increment de max_active
-    # aujourd'hui — elles ne deviennent dues que DEMAIN. Sinon un increment
-    # a 23h surprend les eleves connectes et le garde de streak de 23h55
-    # compte ces cartes dans les dues, faisant cramer des jokers.
-    increment = params.get('_max_active_increment') or {}
-    inc_date = str(increment.get('date', ''))
     try:
-        inc_from = int(increment.get('from', max_active))
-    except (TypeError, ValueError):
-        inc_from = max_active
-    tomorrow = (now_paris().date() + timedelta(days=1)).isoformat()
-    conn.execute(
-        "INSERT OR IGNORE INTO sr_state_user (prenom, numero, stability, difficulty, state, last_review, next_review, repetitions, lapses) "
-        "SELECT ?, f.numero, NULL, NULL, 'new', NULL, "
-        "CASE WHEN f.numero > ? AND ? >= ? THEN ? ELSE ? END, 0, 0 FROM forgecards f "
-        "WHERE f.numero <= ? AND f.hors_serie = 0",
-        (prenom, inc_from, inc_date, today, tomorrow, today, max_active)
-    )
-    preference = conn.execute('SELECT sr_hs_enabled FROM users WHERE prenom=?', (prenom,)).fetchone()
-    hs_enabled = bool(preference and preference['sr_hs_enabled'])
-    # Each student opts into all bonus cards; retained states survive opting out.
-    conn.execute(
-        "INSERT OR IGNORE INTO sr_state_user (prenom, numero, stability, difficulty, state, last_review, next_review, repetitions, lapses) "
-        "SELECT ?, f.numero, NULL, NULL, 'new', NULL, ?, 0, 0 FROM forgecards f "
-        "WHERE f.hors_serie = 1 AND ?",
-        (prenom, today, hs_enabled)
-    )
-    conn.commit()
+        conn.execute('BEGIN IMMEDIATE')
+        assert_sr_account(conn, prenom)
+        log_event(conn, prenom, 'sr_open')
+        all_cards = conn.execute('SELECT numero FROM forgecards WHERE numero <= ? AND hors_serie = 0', (max_active,)).fetchall()
+        # Flying: One INSERT...SELECT instead of one SELECT per card on every page
+        # load. OR IGNORE keeps existing states untouched; new cards get today's
+        # date so they're due immediately, exactly like ensure_sr_row did.
+        # Eliot: sauf les fiches rendues tirable par un increment de max_active
+        # aujourd'hui — elles ne deviennent dues que DEMAIN. Sinon un increment
+        # a 23h surprend les eleves connectes et le garde de streak de 23h55
+        # compte ces cartes dans les dues, faisant cramer des jokers.
+        increment = params.get('_max_active_increment') or {}
+        inc_date = str(increment.get('date', ''))
+        try:
+            inc_from = int(increment.get('from', max_active))
+        except (TypeError, ValueError):
+            inc_from = max_active
+        tomorrow = (now_paris().date() + timedelta(days=1)).isoformat()
+        conn.execute(
+            "INSERT OR IGNORE INTO sr_state_user (prenom, numero, stability, difficulty, state, last_review, next_review, repetitions, lapses) "
+            "SELECT ?, f.numero, NULL, NULL, 'new', NULL, "
+            "CASE WHEN f.numero > ? AND ? >= ? THEN ? ELSE ? END, 0, 0 FROM forgecards f "
+            "WHERE f.numero <= ? AND f.hors_serie = 0",
+            (prenom, inc_from, inc_date, today, tomorrow, today, max_active)
+        )
+        preference = conn.execute('SELECT sr_hs_enabled FROM users WHERE prenom=?', (prenom,)).fetchone()
+        hs_enabled = bool(preference and preference['sr_hs_enabled'])
+        # Each student opts into all bonus cards; retained states survive opting out.
+        conn.execute(
+            "INSERT OR IGNORE INTO sr_state_user (prenom, numero, stability, difficulty, state, last_review, next_review, repetitions, lapses) "
+            "SELECT ?, f.numero, NULL, NULL, 'new', NULL, ?, 0, 0 FROM forgecards f "
+            "WHERE f.hors_serie = 1 AND ?",
+            (prenom, today, hs_enabled)
+        )
+        conn.commit()
+    except Exception:
+        conn.close()
+        raise
+
 
     try:
         # Rattrapage complet : pas seulement hier. Si l'eleve n'a pas ouvert le
@@ -122,7 +128,9 @@ def sr_today():
         # depense si necessaire) — la streak ne depend plus du bot Discord.
         close_missed_days(conn, prenom, params, reason='sr_open_spend')
     except Exception:
-        pass
+        from flask import current_app
+        current_app.logger.exception('Rattrapage SR incomplet pour %s', prenom)
+        conn.rollback()
 
     # Eliot: les reviews de hors-serie ne comptent PAS dans les quotas du jour.
     done_today = conn.execute(
@@ -142,8 +150,9 @@ def sr_today():
         'FROM forgecards f '
         'JOIN sr_state_user s ON s.numero = f.numero AND s.prenom = ? '
         'WHERE f.numero <= ? AND f.hors_serie = 0 '
+        'AND NOT (f.numero > ? AND ? >= ?) '
         'ORDER BY f.numero ASC',
-        (prenom, max_active)
+        (prenom, max_active, inc_from, inc_date, today)
     ).fetchall()
     # Hors-series actives : section bonus, jamais dans les quotas. Requete
     # executee maintenant : la connexion est fermee juste apres.
@@ -266,8 +275,12 @@ def sr_extra():
     exclude = set()
     for chunk in (request.args.get('exclude') or '').split(','):
         chunk = chunk.strip()
-        if chunk.isdigit():
-            exclude.add(int(chunk))
+        try:
+            number = int(chunk)
+        except ValueError:
+            continue
+        if valid_sqlite_id(number):
+            exclude.add(number)
     conn = db()
     due = [c for c in _due_cards(conn, prenom, params) if c['numero'] not in exclude]
     conn.close()
@@ -400,8 +413,12 @@ def sr_preview(numero):
 def sr_review(numero):
     ensure_db()
     prenom = session['sr_user']
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'ok': False, 'error': 'objet JSON attendu'}), 400
     result = data.get('result')
+    if not isinstance(result, str) or not isinstance(data.get('note', ''), (str, type(None))):
+        return jsonify({'ok': False, 'error': 'Note et résultat textuels attendus.'}), 400
     note = (data.get('note') or '').strip()[:MAX_NOTE_LENGTH]
     duration = parse_duration_seconds(data.get('duration_seconds'))
 
@@ -419,11 +436,14 @@ def sr_review(numero):
     conn = db()
     try:
         conn.execute('BEGIN IMMEDIATE')
+        assert_sr_account(conn, prenom)
         now = now_paris()
         if not card_exists(conn, numero):
             return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
         prof_row = conn.execute('SELECT teacher_difficulty FROM forgecards WHERE numero=?', (numero,)).fetchone()
         prof_difficulty = prof_row['teacher_difficulty'] if prof_row else None
+        previous = conn.execute('SELECT * FROM sr_state_user WHERE prenom=? AND numero=?', (prenom, numero)).fetchone()
+        remember_schedule(conn, prenom, numero, previous)
         row = ensure_sr_row(conn, prenom, numero)
         was_new = 1 if (row['repetitions'] or 0) == 0 else 0
         reps = (row['repetitions'] or 0) + 1
@@ -455,17 +475,22 @@ def sr_review(numero):
 def sr_advance(numero):
     ensure_db()
     prenom = session['sr_user']
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'ok': False, 'error': 'objet JSON attendu'}), 400
     try:
         days = max(1, min(30, int(data.get('days', 1))))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         # Eliot: Invalid input gets a safe default. Better than making the route complain.
         days = 1
     conn = db()
     try:
         conn.execute('BEGIN IMMEDIATE')
+        assert_sr_account(conn, prenom)
         if not card_exists(conn, numero):
             return jsonify({'ok': False, 'error': 'fiche introuvable'}), 404
+        previous = conn.execute('SELECT * FROM sr_state_user WHERE prenom=? AND numero=?', (prenom, numero)).fetchone()
+        remember_schedule(conn, prenom, numero, previous)
         row = ensure_sr_row(conn, prenom, numero)
         base_date = now_paris().date()
         if card_is_due(conn, prenom, numero, base_date.isoformat(), read_params()):

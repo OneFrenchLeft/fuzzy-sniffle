@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sqlite3
+import secrets
 import time
 from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
@@ -55,25 +56,75 @@ QCM_INVITE_API_URL = os.environ.get(
 
 
 # ---------- Acces donnees ----------
-def prenom_for_discord(discord_id):
+def _site_account(prenom):
+    """Lit le mot de passe et l'identité du même compte dans un seul instantané."""
+    conn = fc_db()
+    query = ("SELECT u.emoji_password, "
+             "(SELECT payload FROM events WHERE prenom=u.prenom AND type='account_identity' ORDER BY id DESC LIMIT 1), "
+             "EXISTS(SELECT 1 FROM events WHERE prenom=u.prenom AND type='account_deleted') "
+             "FROM users u WHERE u.prenom=?")
+    try:
+        row = conn.execute(query, (prenom,)).fetchone()
+        if row and not row[1]:
+            conn.execute('BEGIN IMMEDIATE')
+            row = conn.execute(query, (prenom,)).fetchone()
+            if row and not row[1]:
+                identity = secrets.token_hex(24)
+                conn.execute("INSERT INTO events(prenom,type,payload,created_at) VALUES(?,'account_identity',?,?)",
+                             (prenom, identity, datetime.now(TZ_PARIS).replace(tzinfo=None).isoformat()))
+                conn.commit()
+                row = (row[0], identity, row[2])
+        return {'prenom': prenom, 'password': row[0], 'identity': row[1], 'recreated': bool(row[2])} if row else None
+    finally:
+        conn.close()
+
+
+def _linked_account(discord_id):
+    """Les anciennes liaisons ne peuvent pas adopter un compte recréé."""
     conn = bot_db()
-    row = conn.execute('SELECT prenom FROM links WHERE discord_id=?', (int(discord_id),)).fetchone()
-    conn.close()
-    return row[0] if row else None
+    try:
+        row = conn.execute('SELECT prenom FROM links WHERE discord_id=?', (int(discord_id),)).fetchone()
+        if not row:
+            return None
+        account = _site_account(row[0])
+        if not account:
+            return None
+        key = 'link_identity:' + str(discord_id)
+        with conn:
+            conn.execute('BEGIN IMMEDIATE')
+            current = conn.execute('SELECT prenom FROM links WHERE discord_id=?', (int(discord_id),)).fetchone()
+            if not current or current[0] != row[0]:
+                return None
+            binding = conn.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
+            if not binding and not account['recreated']:
+                # Migration des liaisons historiques dont le compte n'a pas été supprimé.
+                conn.execute('INSERT INTO settings(key,value) VALUES(?,?)', (key, account['identity']))
+                binding = (account['identity'],)
+            if not binding or binding[0] != account['identity']:
+                return None
+        return account
+    finally:
+        conn.close()
+
+
+def prenom_for_discord(discord_id):
+    account = _linked_account(discord_id)
+    return account['prenom'] if account else None
 
 
 def discord_for_prenom(prenom):
     conn = bot_db()
     row = conn.execute('SELECT discord_id FROM links WHERE prenom=?', (prenom,)).fetchone()
     conn.close()
-    return row[0] if row else None
+    return row[0] if row and prenom_for_discord(row[0]) == prenom else None
 
 
-def emoji_password_for(prenom):
-    conn = fc_db()
-    row = conn.execute('SELECT emoji_password FROM users WHERE prenom=?', (prenom,)).fetchone()
-    conn.close()
-    return row[0] if row and row[0] else None
+def emoji_password_for(prenom, discord_id=None):
+    if discord_id is not None:
+        account = _linked_account(discord_id)
+        return account['password'] if account and account['prenom'] == prenom else None
+    account = _site_account(prenom)
+    return account['password'] if account else None
 
 
 def fc_db():
@@ -375,15 +426,16 @@ async def setchannel(interaction: discord.Interaction):
 @app_commands.describe(prenom='Prenom exact sur le site', membre='Compte Discord a relier')
 async def link(interaction: discord.Interaction, prenom: str, membre: discord.Member):
     prenom = prenom.strip()
-    conn = fc_db()
-    exists = conn.execute('SELECT 1 FROM users WHERE prenom=?', (prenom,)).fetchone()
-    conn.close()
-    if not exists:
+    account = _site_account(prenom)
+    if not account:
         await interaction.response.send_message(
             f"❌ `{prenom}` inconnu sur le site.", ephemeral=True)
         return
     conn = bot_db()
     conn.execute('DELETE FROM links WHERE discord_id=?', (membre.id,))
+    conn.execute(
+        'INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+        ('link_identity:' + str(membre.id), account['identity']))
     conn.execute(
         'INSERT INTO links(prenom, discord_id, notifications) VALUES(?,?,1) '
         'ON CONFLICT(prenom) DO UPDATE SET discord_id=excluded.discord_id',
@@ -418,7 +470,7 @@ async def password(interaction: discord.Interaction):
     if not prenom:
         await interaction.response.send_message("Tu n'es pas relié à un prenom.", ephemeral=True)
         return
-    pw = emoji_password_for(prenom)
+    pw = emoji_password_for(prenom, interaction.user.id)
     if not pw:
         await interaction.response.send_message(
             "Aucun mot de passe enregistre pour toi. Demande a un admin d'en regenerer un.",
@@ -814,7 +866,8 @@ class Duel:
             t.cancel()
         DUELS.pop(self.id, None)
         for p in self.players():
-            DUEL_BY_USER.pop(p.id, None)
+            if DUEL_BY_USER.get(p.id) == self.id:
+                DUEL_BY_USER.pop(p.id, None)
 
 
 class InviteView(discord.ui.View):
@@ -928,15 +981,19 @@ async def duel(interaction: discord.Interaction, adversaire: discord.Member):
         await interaction.response.send_message(f"❌ {adversaire.display_name} n'est pas link.", ephemeral=True)
         return
     d = Duel(challenger, adversaire, interaction.channel_id)
-    try:
-        await d.send_invite()
-    except discord.Forbidden:
-        await interaction.response.send_message(
-            f"❌ Impossible de DM {adversaire.display_name} (DM fermes).", ephemeral=True)
-        return
     DUELS[d.id] = d
     DUEL_BY_USER[challenger.id] = d.id
     DUEL_BY_USER[adversaire.id] = d.id
+    try:
+        await d.send_invite()
+    except discord.Forbidden:
+        d._cleanup()
+        await interaction.response.send_message(
+            f"❌ Impossible de DM {adversaire.display_name} (DM fermes).", ephemeral=True)
+        return
+    except BaseException:
+        d._cleanup()
+        raise
     await interaction.response.send_message(
         f"⚔️ Defi envoyé à {adversaire.mention} ! Il a 2 min pour accepter.", ephemeral=True)
 
@@ -1055,6 +1112,10 @@ async def qcm(interaction: discord.Interaction):
         )
         return
 
+    if prenom_for_discord(interaction.user.id) != prenom:
+        await interaction.followup.send("La liaison a changé. Demande à un admin de la rétablir.", ephemeral=True)
+        return
+
     message = (
         "⚡ Ton lien personnel pour rejoindre le QCM :\n"
         f"{payload['url']}\n\n"
@@ -1111,6 +1172,8 @@ async def daily_reminder():
     ).fetchall()
     print(f'[reminder] {len(links)} eleve(s) avec notifications actives')
     for prenom, discord_id in links:
+        if prenom_for_discord(discord_id) != prenom:
+            continue
         try:
             remaining = compute_remaining(conn, prenom, params)
         except Exception as e:
@@ -1199,9 +1262,9 @@ async def watch_new_cards():
     if action == 'hold':
         set_setting('pending_drop_nums', new_pending)
         return
-    set_setting('pending_drop_nums', '')
-    set_setting('last_announced_num', new_last)
     if not announce:
+        set_setting('pending_drop_nums', '')
+        set_setting('last_announced_num', new_last)
         return
 
     channel = client.get_channel(int(ch_id))
@@ -1212,15 +1275,21 @@ async def watch_new_cards():
             return
     role = discord.utils.get(channel.guild.roles, name=NOTIF_ROLE_NAME)
     mention = f'{role.mention} ' if role else ''
-    if len(announce) <= 5:
-        detail = ', '.join(f'n°{n}' for n in announce)
-        await channel.send(
-            f"📦 {mention}**Drop de forgecards** : {plural(len(announce), 'nouvelle forgecard')} "
-            f"maintenant tirables ({detail}) !")
-    else:
-        await channel.send(
-            f"📦 {mention}**Gros drop** : {plural(len(announce), 'nouvelle forgecard')} "
-            f"maintenant tirables (jusqu'à la n°{max(announce)}) !")
+    try:
+        if len(announce) <= 5:
+            detail = ', '.join(f'n°{n}' for n in announce)
+            await channel.send(
+                f"📦 {mention}**Drop de forgecards** : {plural(len(announce), 'nouvelle forgecard')} "
+                f"maintenant tirables ({detail}) !")
+        else:
+            await channel.send(
+                f"📦 {mention}**Gros drop** : {plural(len(announce), 'nouvelle forgecard')} "
+                f"maintenant tirables (jusqu'à la n°{max(announce)}) !")
+    except Exception as exc:
+        print(f'[drop] annonce conservée pour un nouvel essai : {exc!r}')
+        return
+    set_setting('last_announced_num', new_last)
+    set_setting('pending_drop_nums', '')
 
 
 @tasks.loop(seconds=15)
@@ -1243,7 +1312,9 @@ async def rotate_status():
         bots = bot_db()
         params = read_params()
         n = 0
-        for prenom, _ in bots.execute("SELECT prenom, discord_id FROM links WHERE prenom != 'admin'").fetchall():
+        for prenom, discord_id in bots.execute("SELECT prenom, discord_id FROM links WHERE prenom != 'admin'").fetchall():
+            if prenom_for_discord(discord_id) != prenom:
+                continue
             try:
                 if compute_remaining(conn, prenom, params) > 0:
                     n += 1
@@ -1277,6 +1348,8 @@ async def nightly_streak_guard():
     links = {p: d for p, d in bots.execute("SELECT prenom, discord_id FROM links WHERE prenom != 'admin'").fetchall()}
     bots.close()
     for prenom, info in resp.get('results', {}).items():
+        if not links.get(prenom) or prenom_for_discord(links[prenom]) != prenom:
+            continue
         for ev in info['events']:
             if ev == 'joker_spent':
                 await dm_user(links.get(prenom),

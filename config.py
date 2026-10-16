@@ -148,7 +148,7 @@ SQLITE_INT_MAX = 2 ** 63 - 1
 _params_log = logging.getLogger(__name__)
 
 
-def _read_params_file():
+def _read_params_file(strict=False):
     if not PARAMS_PATH.exists():
         return {}
     try:
@@ -158,6 +158,8 @@ def _read_params_file():
         return data
     except (OSError, ValueError, UnicodeError) as exc:
         _params_log.warning('Lecture des paramètres impossible : %s', exc)
+        if strict:
+            raise ValueError('Les paramètres existants sont illisibles ; aucune modification enregistrée.') from exc
         return {}
 
 
@@ -303,7 +305,7 @@ def write_params(data):
     if not isinstance(data, dict):
         raise ValueError('Un objet JSON est attendu pour les paramètres.')
     with _params_lock():
-        previous = _normalise_params(_read_params_file())
+        previous = _normalise_params(_read_params_file(strict=True))
         _ensure_pause(previous)
         candidate = {**previous, **{k: data[k] for k in DEFAULT_PARAMS if k in data}}
         merged = _normalise_params(candidate, strict=True)
