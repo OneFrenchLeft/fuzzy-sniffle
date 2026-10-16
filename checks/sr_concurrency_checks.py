@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import asyncio
 import sqlite3
+import secrets
 
 REPO = Path(__file__).resolve().parents[1]
 SOURCES = tempfile.TemporaryDirectory(prefix='forgecards-sr-sources-')
@@ -127,18 +128,24 @@ class SRConsistency(unittest.TestCase):
             conn.execute('INSERT INTO reviews(prenom,numero,result,created_at) VALUES(?,1,?,?)',
                          (user, 'good', day + 'T12:00:00'))
 
-    def bot_namespace(self):
+    def bot_namespace(self, extra=()):
         # Extraire les parties pures evite d'initialiser le client Discord.
         parsed = ast.parse((REPO / 'bot.py').read_text(encoding='utf-8'))
         selected = [node for node in parsed.body
-                    if ((isinstance(node, ast.FunctionDef) and node.name in ('compute_daily', 'compute_streak'))
+                    if ((isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in ('compute_daily', 'compute_streak') + tuple(extra))
                         or (isinstance(node, ast.ClassDef) and node.name == 'Duel'))]
+        for node in selected:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                node.decorator_list = []
+                node.returns = None
+                for arg in node.args.args: arg.annotation = None
+        current = self
         current = self
         class FixedDateTime(datetime):
             @classmethod
             def now(cls, tz=None):
                 return current.now
-        namespace = {'datetime': FixedDateTime, 'timedelta': timedelta,
+        namespace = {'datetime': FixedDateTime, 'timedelta': timedelta, 'json': json, 'sqlite3': sqlite3, 'secrets': secrets,
                      'TZ_PARIS': config.TZ_PARIS,
                      'today_paris': lambda: self.now.date().isoformat(),
                      'forgecards_paused': config.forgecards_paused,
@@ -180,6 +187,81 @@ class SRConsistency(unittest.TestCase):
                 self.assertEqual(first_request.result(timeout=10).status_code, 200)
                 self.assertEqual(second_request.result(timeout=10).status_code, 200)
         self.assertEqual(self.rows('SELECT repetitions FROM ' + table + ' WHERE prenom=?', ('Eleve',))[0]['repetitions'], 2)
+
+    def test_discord_binding_cannot_adopt_a_recreated_account(self):
+        names = ('_site_account', '_linked_account', 'prenom_for_discord', 'emoji_password_for', 'bot_db', 'link')
+        env = self.bot_namespace(names)
+        temporary = tempfile.TemporaryDirectory(prefix='forgecards-bot-identity-')
+        self.addCleanup(temporary.cleanup)
+        env.update({'fc_db': database.db, 'BOT_DB': Path(temporary.name) / 'bot.db'})
+        with env['bot_db']() as conn:
+            conn.execute("INSERT INTO links VALUES('Eleve',123,1)")
+        self.assertEqual(env['prenom_for_discord'](123), 'Eleve')
+        client = self.client()
+        client.delete('/api/users/Eleve')
+        created = client.post('/api/users', json={'prenom': 'Eleve'}).get_json()
+        self.assertIsNone(env['prenom_for_discord'](123))
+        self.assertIsNone(env['emoji_password_for']('Eleve', 123))
+        # Une ancienne liaison jamais migrée refuse aussi un compte déjà recréé.
+        with env['bot_db']() as conn:
+            conn.execute("UPDATE links SET discord_id=456 WHERE prenom='Eleve'")
+        self.assertIsNone(env['prenom_for_discord'](456))
+        class Response:
+            async def send_message(self, *args, **kwargs): pass
+        asyncio.run(env['link'](SimpleNamespace(response=Response()), 'Eleve', SimpleNamespace(id=456, mention='élève')))
+        self.assertEqual(env['prenom_for_discord'](456), 'Eleve')
+        self.assertEqual(env['emoji_password_for']('Eleve', 456), '|'.join(created['password']))
+        client.post('/api/users/Eleve/regen-password')
+        self.assertEqual(env['prenom_for_discord'](456), 'Eleve')
+
+    def test_concurrent_duels_reserve_players_before_sending(self):
+        env = self.bot_namespace(('duel',))
+        env.update({'_next_duel_id': [1], 'DUELS': {}, 'DUEL_BY_USER': {},
+                    'discord': SimpleNamespace(Forbidden=PermissionError), 'prenom_for_discord': lambda _: 'Eleve'})
+        class Player:
+            bot = False
+            def __init__(self, id): self.id, self.mention, self.display_name = id, str(id), str(id)
+        class Response:
+            async def send_message(self, *args, **kwargs): pass
+        async def run():
+            entered, release = asyncio.Event(), asyncio.Event()
+            async def invite(duel):
+                entered.set()
+                await release.wait()
+            env['Duel'].send_invite = invite
+            a, b, c = Player(1), Player(2), Player(3)
+            first = asyncio.create_task(env['duel'](SimpleNamespace(user=a, channel_id=1, response=Response()), b))
+            await entered.wait()
+            await env['duel'](SimpleNamespace(user=a, channel_id=1, response=Response()), c)
+            self.assertEqual(len(env['DUELS']), 1)
+            release.set()
+            await first
+        asyncio.run(run())
+        duel = next(iter(env['DUELS'].values()))
+        env['DUEL_BY_USER'][1] = 999
+        duel._cleanup()
+        self.assertEqual(env['DUEL_BY_USER'], {1: 999})
+
+    def test_failed_drop_announcement_is_retried_without_losing_the_batch(self):
+        self.now = datetime(2026, 10, 14, 12)
+        env = self.bot_namespace(('plan_drop_announcement', 'watch_new_cards'))
+        settings = {'channel_id': '1', 'last_announced_num': '1'}
+        attempts = []
+        class Channel:
+            guild = SimpleNamespace(roles=[])
+            async def send(self, *args, **kwargs):
+                attempts.append(1)
+                if len(attempts) == 1: raise RuntimeError('Discord indisponible')
+        env.update({'get_setting': settings.get, 'set_setting': lambda k, v: settings.__setitem__(k, str(v)),
+                    'fc_db': database.db, 'client': SimpleNamespace(get_channel=lambda _: Channel()),
+                    'discord': SimpleNamespace(utils=SimpleNamespace(get=lambda *a, **kw: None)),
+                    'NOTIF_ROLE_NAME': 'Notifications', 'plural': lambda n, text: str(n) + ' ' + text,
+                    'DROP_ANNOUNCE_HOUR': 6, 'DROP_ANNOUNCE_MINUTE': 7, 'DROP_HOLD_FROM_HOUR': 21})
+        asyncio.run(env['watch_new_cards']())
+        self.assertEqual(settings['last_announced_num'], '1')
+        asyncio.run(env['watch_new_cards']())
+        self.assertEqual(settings['last_announced_num'], '3')
+        self.assertEqual(len(attempts), 2)
 
     def test_guard_observes_review_committed_just_before_its_lock(self):
         with database.db() as conn:
