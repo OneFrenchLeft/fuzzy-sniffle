@@ -420,30 +420,35 @@ _db_ready = False
 
 
 
-def apply_joker_change(conn, prenom, delta, reason, day=None):
+def apply_joker_change(conn, prenom, delta, reason, day=None, *, respect_cap=True):
     """Toute modification du stock de jokers passe par ici (append-only).
 
-    Met a jour user_jokers.count (borne [0, JOKER_CAP]) et ecrit la ligne
+    Plafonne les gains habituels à JOKER_CAP ; un bonus explicite peut le dépasser.
+    Une dépense retire uniquement le nombre demandé, même au-dessus du plafond.
+    Met a jour user_jokers.count et ecrit la ligne
     correspondante dans joker_ledger avec le solde apres operation — ce qui
     rend le stock entierement auditable et reconstructible.
     Doit etre appelee dans une transaction (BEGIN IMMEDIATE pour les depenses).
     Retourne le solde apres operation.
     """
-    from config import JOKER_CAP
+    from config import JOKER_CAP, SQLITE_INT_MAX
+    before = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()
+    previous = before['count'] if before else 0
+    ceiling = JOKER_CAP if respect_cap else SQLITE_INT_MAX
     # UPDATE puis INSERT si absent : schema-agnostique. La base du serveur de
     # test a ete migree par feat/multi-matieres, ou la PK est (prenom, subject)
     # — ON CONFLICT(prenom) y leve "does not match any PRIMARY KEY".
     cur = conn.execute(
-        "UPDATE user_jokers SET count = max(0, min(count + ?, ?)) WHERE prenom=?",
-        (delta, JOKER_CAP, prenom))
+        "UPDATE user_jokers SET count = max(0, min(count + ?, max(count, ?))) WHERE prenom=?",
+        (delta, ceiling, prenom))
     if cur.rowcount == 0:
         conn.execute(
             "INSERT INTO user_jokers (prenom, count) VALUES (?, max(0, min(?, ?)))",
-            (prenom, delta, JOKER_CAP))
+            (prenom, delta, ceiling))
     bal = conn.execute('SELECT count FROM user_jokers WHERE prenom=?', (prenom,)).fetchone()['count']
     conn.execute(
         "INSERT INTO joker_ledger(prenom, day, delta, reason, balance_after, created_at) "
         "VALUES(?,?,?,?,?,?)",
-        (prenom, day or now_paris().date().isoformat(), delta, reason, bal,
+        (prenom, day or now_paris().date().isoformat(), bal - previous, reason, bal,
          now_paris().isoformat()))
     return bal
